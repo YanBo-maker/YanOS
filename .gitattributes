@@ -1,0 +1,12 @@
+# Store text as LF to keep Windows/Linux diffs consistent.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Guest binaries and disk fixtures must never receive newline conversion.
+*.bin binary
+*.elf binary
+*.img binary
+*.png binary
+*.jpg binary
+*.pdf binary

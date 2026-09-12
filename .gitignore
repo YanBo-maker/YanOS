@@ -1,0 +1,28 @@
+# Local build output
+/build/
+/out/
+*.o
+*.obj
+*.exe
+*.pdb
+*.ilk
+
+# Local emulator state; deliberate small fixtures belong in tests/fixtures/
+/runtime/
+*.log
+
+# Credentials and machine-local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editor and operating-system files
+.vs/
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
