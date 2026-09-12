@@ -28,7 +28,7 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 
 ## 开发
 
-参阅 [开发准则](CONTRIBUTING.md) 和 [初始化规格](docs/specs/0001-project-foundation.md)。
+参阅 [开发准则](CONTRIBUTING.md)、[初始化规格](docs/specs/0001-project-foundation.md) 和 [CPU 设计提案](docs/specs/0002-cpu-design.md)。CPU 提案正在审查。
 
 ## 许可证
 
