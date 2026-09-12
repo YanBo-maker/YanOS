@@ -1,0 +1,15 @@
+#ifndef YAN_STATUS_H
+#define YAN_STATUS_H
+
+typedef enum {
+    YAN_OK = 0,
+    YAN_INVALID_ARGUMENT,
+    YAN_INVALID_STATE,
+    YAN_OUT_OF_MEMORY,
+    YAN_INVALID_WIDTH,
+    YAN_OUT_OF_BOUNDS,
+    YAN_UNALIGNED,
+    YAN_UNMAPPED
+} YanStatus;
+
+#endif

@@ -1,0 +1,35 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / ${{ matrix.config }} / sanitizers=${{ matrix.sanitizers }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            config: Debug
+            sanitizers: "ON"
+          - os: ubuntu-22.04
+            config: Release
+            sanitizers: "OFF"
+          - os: windows-2022
+            config: Debug
+            sanitizers: "OFF"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DYAN_ENABLE_SANITIZERS=${{ matrix.sanitizers }}
+      - name: Build
+        run: cmake --build build --config ${{ matrix.config }} --parallel
+      - name: Test
+        run: ctest --test-dir build --build-config ${{ matrix.config }} --output-on-failure
