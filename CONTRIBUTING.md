@@ -99,8 +99,6 @@ feat(cpu): 实现 ADDI 并覆盖负立即数和回绕
 
 达到有明确验收结果的里程碑后才打版本标签。初始化不宣称 CPU v0.1 已完成，也不提前引入复杂发布流程。
 
-Git 身份只在当前仓库设置。上传前确认目标账号、仓库、可见性和提交内容；不自动选择许可证。
-
 ## 参考
 
 - [GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow)
