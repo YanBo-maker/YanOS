@@ -1,51 +1,35 @@
 # YanOS
 
-从可理解的计算平台出发，逐步构建 YanCPU、YanOS、YanFS 和 Yan Knowledge System。
+YanOS 是一个用于学习计算机系统的项目，计划实现 RISC-V 模拟器、操作系统、文件系统和终端知识工具。
 
-这是一个学习驱动、需求驱动的长期项目。每次增加一个能够解释、运行和验证的能力；代码进度应与项目所有者的理解进度相匹配。
+开发从 YanCPU 开始。通过小程序和测试观察指令执行，再逐步引入设备、异常、中断和持久化存储。每项能力都应有具体需求、明确规格和可复现的验证结果。
 
-## 技术方向
+## 状态
 
-- YanCPU：C17 编写的 RISC-V 功能模拟器，先在本机命令行运行。
-- 初始 CPU 目标：RV32IM_Zicsr、32 位、小端、单核、仅 M-mode。
-- YanOS 与 Guest 程序：C + 必要的 RISC-V 汇编。
-- 浏览器：未来按需求将 Host 核心编译为 WebAssembly，并增加界面与设备适配。
-- RTL、电路时序、流水线、MMU、多核和自定义指令不属于当前阶段。
+项目处于 Phase 0，已建立开发准则和仓库结构。CPU、构建系统及测试尚未实现。
 
-这些是分阶段实现的目标，不代表当前已经支持。C 功能模拟器描述指令行为，并不模拟 CPU 内部电路。
+下一步是确定 C 工具链，以及 CPU 状态、RAM、Bus 和取指的最小规格。详细进度见 [STATUS](docs/STATUS.md)。
 
-## 架构边界
+## 设计
 
-```text
-Yan Knowledge System
-        ↓
-YanFS
-        ↓
-YanOS / Drivers
-        ↓
-Yan Machine Platform（Bus、RAM、设备）
-        ↓
-YanCPU 执行 Guest 指令并经 Bus 访问平台
+YanCPU 使用 C17 编写，在本机命令行运行。初始目标为 RV32IM_Zicsr，采用 32 位、小端、单核和 M-mode 配置。模拟器关注指令执行后的状态变化，电路时序和微架构留待后续探索。
 
-Host Runtime 承载模拟器及设备的外部适配。
-```
+Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟设备，设备由 Host 提供终端和存储适配。Host 与 Guest 分别编译，通过虚拟硬件接口交互。
 
-上图表示职责层次，CPU 与平台通过明确接口协作。CPU 不理解文件和知识对象；Guest 对外通信通过虚拟硬件接口。Host C 与 Guest C 分别编译、分别运行，不共享指针或直接函数调用。
+| 组件 | 职责 |
+| --- | --- |
+| YanCPU | 指令执行、寄存器、CSR、异常和中断 |
+| Yan Machine Platform | Bus、RAM、终端、计时器与块设备 |
+| YanOS | 启动、驱动、内存管理和系统接口 |
+| YanFS | 持久化存储，具体语义待定 |
+| Yan Knowledge System | 笔记、问题、关系和探索路径的终端交互 |
 
-## 当前进度
+以上组件将分阶段实现。浏览器支持计划通过 WebAssembly 和界面适配接入；新增能力的时机由实际使用决定。
 
-处于 Phase 0：建立项目准则与 Git 工作流。尚无 CPU 实现、构建系统或自动化测试。
+## 开发
 
-下一项候选任务是明确最小 CPUState、RAM、Bus 和取指的规格，再分步实现。最终 YanFS 是否理解知识对象的业务语义仍待讨论。
+参阅 [开发准则](CONTRIBUTING.md) 和 [初始化规格](docs/specs/0001-project-foundation.md)。
 
-## 阅读顺序
+## 许可证
 
-1. [开发与 Git 准则](CONTRIBUTING.md)
-2. [当前状态](docs/STATUS.md)
-3. [项目初始化规格](docs/specs/0001-project-foundation.md)
-
-Agent 开始工作前还应读取 [AGENTS.md](AGENTS.md)。
-
-## 许可
-
-尚未选择开源许可证。仓库公开可见与授予开源许可是两件不同的事；选定许可证后再添加 LICENSE。
+待选定。
