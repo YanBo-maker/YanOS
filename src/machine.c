@@ -1,0 +1,73 @@
+#include "yan/machine.h"
+
+#include <string.h>
+
+static YanStatus check_machine(const YanMachine *machine)
+{
+    if (machine == NULL) {
+        return YAN_INVALID_ARGUMENT;
+    }
+    if (machine->ram.data == NULL || machine->ram.size != YAN_RAM_SIZE ||
+        machine->bus.ram != &machine->ram || machine->bus.ram_base != YAN_RAM_BASE) {
+        return YAN_INVALID_STATE;
+    }
+    return YAN_OK;
+}
+
+YanStatus yan_machine_init(YanMachine *machine)
+{
+    if (machine == NULL) {
+        return YAN_INVALID_ARGUMENT;
+    }
+    if (machine->ram.data != NULL || machine->ram.size != 0 ||
+        machine->bus.ram != NULL || machine->bus.ram_base != 0) {
+        return YAN_INVALID_STATE;
+    }
+    YanStatus status = yan_ram_init(&machine->ram, YAN_RAM_SIZE);
+    if (status != YAN_OK) {
+        return status;
+    }
+    status = yan_bus_init(&machine->bus, &machine->ram, YAN_RAM_BASE);
+    if (status != YAN_OK) {
+        yan_ram_destroy(&machine->ram);
+    }
+    return status;
+}
+
+void yan_machine_destroy(YanMachine *machine)
+{
+    if (machine != NULL) {
+        machine->bus.ram = NULL;
+        machine->bus.ram_base = 0;
+        yan_ram_destroy(&machine->ram);
+    }
+}
+
+YanStatus yan_machine_reset(YanMachine *machine)
+{
+    YanStatus status = check_machine(machine);
+    if (status != YAN_OK) {
+        return status;
+    }
+    return yan_ram_clear(&machine->ram);
+}
+
+YanStatus yan_machine_load_image(YanMachine *machine, const uint8_t *image,
+                                 size_t size)
+{
+    YanStatus status = check_machine(machine);
+    if (status != YAN_OK) {
+        return status;
+    }
+    if (image == NULL && size != 0) {
+        return YAN_INVALID_ARGUMENT;
+    }
+    if (size > machine->ram.size) {
+        return YAN_OUT_OF_BOUNDS;
+    }
+    /* Avoid passing NULL even for a zero-byte operation; allow overlapping images. */
+    if (size != 0) {
+        memmove(machine->ram.data, image, size);
+    }
+    return YAN_OK;
+}
