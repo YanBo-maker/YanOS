@@ -9,7 +9,8 @@ typedef enum {
     YAN_INVALID_WIDTH,
     YAN_OUT_OF_BOUNDS,
     YAN_UNALIGNED,
-    YAN_UNMAPPED
+    YAN_UNMAPPED,
+    YAN_UNSUPPORTED_INSTRUCTION
 } YanStatus;
 
 #endif

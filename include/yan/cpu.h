@@ -19,5 +19,7 @@ YanStatus yan_cpu_write_reg(YanCpu *cpu, uint32_t index, uint32_t value);
 /* Reads the word at PC; preserves CPU state, RAM, and outputs on failure. */
 YanBusResult yan_cpu_fetch(const YanCpu *cpu, const YanBus *bus,
                            uint32_t *instruction);
+/* Executes one supported instruction; failures preserve CPU state and RAM. */
+YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus);
 
 #endif
