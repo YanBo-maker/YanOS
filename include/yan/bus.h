@@ -11,7 +11,8 @@ typedef struct {
 
 typedef enum {
     YAN_ACCESS_READ,
-    YAN_ACCESS_WRITE
+    YAN_ACCESS_WRITE,
+    YAN_ACCESS_FETCH
 } YanAccess;
 
 typedef struct {
@@ -26,5 +27,8 @@ YanBusResult yan_bus_read(const YanBus *bus, uint32_t address, size_t width,
                           uint32_t *value);
 YanBusResult yan_bus_write(YanBus *bus, uint32_t address, size_t width,
                            uint32_t value);
+/* Stage 1 maps executable RAM only. Fetch always reads four bytes. */
+YanBusResult yan_bus_fetch32(const YanBus *bus, uint32_t address,
+                             uint32_t *instruction);
 
 #endif

@@ -69,3 +69,12 @@ YanBusResult yan_bus_write(YanBus *bus, uint32_t address, size_t width,
     YanBusResult result = {status, address, width, YAN_ACCESS_WRITE};
     return result;
 }
+
+YanBusResult yan_bus_fetch32(const YanBus *bus, uint32_t address,
+                             uint32_t *instruction)
+{
+    /* The sole RAM mapping shares data-read checks and little-endian decoding. */
+    YanBusResult result = yan_bus_read(bus, address, 4, instruction);
+    result.access = YAN_ACCESS_FETCH;
+    return result;
+}

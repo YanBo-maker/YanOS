@@ -42,3 +42,14 @@ YanStatus yan_cpu_write_reg(YanCpu *cpu, uint32_t index, uint32_t value)
     }
     return YAN_OK;
 }
+
+YanBusResult yan_cpu_fetch(const YanCpu *cpu, const YanBus *bus,
+                           uint32_t *instruction)
+{
+    if (cpu == NULL) {
+        YanBusResult result = {YAN_INVALID_ARGUMENT, 0, 4, YAN_ACCESS_FETCH};
+        return result;
+    }
+    /* Fetch observes PC. Instruction execution will decide the next PC. */
+    return yan_bus_fetch32(bus, cpu->pc, instruction);
+}
