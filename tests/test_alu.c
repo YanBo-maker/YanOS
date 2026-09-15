@@ -156,6 +156,104 @@ static void invalid_immediate_shift_encodings(void)
     }
 }
 
+static void register_fixed_vectors(void)
+{
+    const struct { uint32_t word, left, right, result; } cases[] = {
+        {0x007302b3, 0xffffffff, 1, 0},
+        {0x007302b3, 0x7fffffff, 1, 0x80000000},
+        {0x407302b3, 0, 1, 0xffffffff},
+        {0x407302b3, 0x80000000, 1, 0x7fffffff},
+        {0x007322b3, 0x80000000, 0x7fffffff, 1},
+        {0x007322b3, 0xffffffff, 0xffffffff, 0},
+        {0x007332b3, 0x80000000, 0x7fffffff, 0},
+        {0x007342b3, 0xaaaaaaaa, 0x55555555, 0xffffffff},
+        {0x007362b3, 0x12345678, 0xffff0000, 0xffff5678},
+        {0x007372b3, 0x12345678, 0xffff0000, 0x12340000},
+        {0x007312b3, 1, 0xffffffff, 0x80000000},
+        {0x007352b3, 0x80000000, 0xffffffff, 1},
+        {0x407352b3, 0x80000000, 0xffffffff, 0xffffffff},
+        {0x407352b3, 0x80000001, 32, 0x80000001}
+    };
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; ++i) {
+        TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, cases[i].left));
+        TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 7, cases[i].right));
+        check_result(cases[i].word, 5, cases[i].result);
+    }
+}
+
+static void register_boundary_matrix(void)
+{
+    const uint32_t operands[] = {0, 1, 31, 32, 33, 0x7fffffff, 0x80000000,
+                                 0x80000001, 0xffffffff, 0xaaaaaaaa, 0x55555555};
+    for (size_t i = 0; i < sizeof operands / sizeof operands[0]; ++i) {
+        for (size_t j = 0; j < sizeof operands / sizeof operands[0]; ++j) {
+            const uint32_t left = operands[i], right = operands[j];
+            TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, left));
+            TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 7, right));
+            check_result(0x007302b3, 5, (uint32_t)((uint64_t)left + right));
+            check_result(0x407302b3, 5, (uint32_t)((int64_t)left - right));
+            check_result(0x007322b3, 5, signed_value(left) < signed_value(right));
+            check_result(0x007332b3, 5, left < right);
+            check_result(0x007342b3, 5, left ^ right);
+            check_result(0x007362b3, 5, left | right);
+            check_result(0x007372b3, 5, left & right);
+        }
+    }
+}
+
+static void register_shift_masking(void)
+{
+    const uint32_t sources[] = {0, 1, 0x7fffffff, 0x80000000, 0x80000001, 0xffffffff};
+    const uint32_t upper[] = {0, 32, 0x80000000, 0xffffffe0};
+    for (uint32_t amount = 0; amount < 32; ++amount) {
+        for (size_t hi = 0; hi < sizeof upper / sizeof upper[0]; ++hi) {
+            for (size_t i = 0; i < sizeof sources / sizeof sources[0]; ++i) {
+                const uint32_t source = sources[i];
+                TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, source));
+                TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 7, upper[hi] + amount));
+                check_result(0x007312b3, 5, (uint32_t)((uint64_t)source * (UINT64_C(1) << amount)));
+                check_result(0x007352b3, 5, (uint32_t)((uint64_t)source / (UINT64_C(1) << amount)));
+                check_result(0x407352b3, 5, arithmetic_shift_oracle(source, amount));
+            }
+        }
+    }
+}
+
+static void register_aliases_and_x0(void)
+{
+    const uint32_t operations[] = {0x33, 0x40000033, 0x1033, 0x2033, 0x3033,
+                                  0x4033, 0x5033, 0x40005033, 0x6033, 0x7033};
+    /* All three encoded register fields, including every overlap and x0. */
+    for (uint32_t rs1 = 0; rs1 < 32; ++rs1) {
+        for (uint32_t rs2 = 0; rs2 < 32; ++rs2) {
+            for (uint32_t rd = 0; rd < 32; ++rd) {
+                for (size_t op = 0; op < sizeof operations / sizeof operations[0]; ++op) {
+                    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, rs1, rs1));
+                    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, rs2, rs2));
+                    const uint32_t expected[] = {rs1 + rs2, (uint32_t)((int64_t)rs1 - rs2),
+                        (uint32_t)((uint64_t)rs1 * (UINT64_C(1) << rs2)), rs1 < rs2, rs1 < rs2,
+                        rs1 ^ rs2, rs1 >> rs2, rs1 >> rs2, rs1 | rs2, rs1 & rs2};
+                    check_result(operations[op] | (rs1 << 15) | (rs2 << 20) | (rd << 7), rd, expected[op]);
+                }
+            }
+        }
+    }
+}
+
+static void invalid_register_encodings(void)
+{
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, UINT32_MAX));
+    for (uint32_t funct7 = 0; funct7 < 128; ++funct7) {
+        for (uint32_t funct3 = 0; funct3 < 8; ++funct3) {
+            if (funct7 == 0 || (funct7 == 0x20 && (funct3 == 0 || funct3 == 5))) {
+                continue;
+            }
+            check_rejected((funct7 << 25) | (funct3 << 12) | UINT32_C(0x007302b3));
+            check_rejected((funct7 << 25) | (funct3 << 12) | UINT32_C(0x00730033));
+        }
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -164,5 +262,10 @@ int main(void)
     RUN_TEST(immediate_shift_amounts);
     RUN_TEST(immediate_register_aliases);
     RUN_TEST(invalid_immediate_shift_encodings);
+    RUN_TEST(register_fixed_vectors);
+    RUN_TEST(register_boundary_matrix);
+    RUN_TEST(register_shift_masking);
+    RUN_TEST(register_aliases_and_x0);
+    RUN_TEST(invalid_register_encodings);
     return UNITY_END();
 }
