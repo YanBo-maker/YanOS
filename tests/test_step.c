@@ -124,9 +124,7 @@ static void unsupported_encodings_preserve_state(void)
             assert_rejected_word(UINT32_C(0x00128280) | opcode);
         }
     }
-    for (uint32_t funct3 = 1; funct3 < 8; ++funct3) {
-        assert_rejected_word(UINT32_C(0x00128293) | (funct3 << 12));
-    }
+    assert_rejected_word(UINT32_C(0x02029293)); /* Reserved SLLI upper bits. */
     assert_rejected_word(0);
     assert_rejected_word(UINT32_MAX);
 }

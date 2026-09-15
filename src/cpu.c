@@ -54,6 +54,36 @@ YanBusResult yan_cpu_fetch(const YanCpu *cpu, const YanBus *bus,
     return yan_bus_fetch32(bus, cpu->pc, instruction);
 }
 
+static uint32_t arithmetic_shift_right(uint32_t value, uint32_t amount)
+{
+    if (amount == 0) {
+        return value;
+    }
+    uint32_t result = value >> amount;
+    if ((value & UINT32_C(0x80000000)) != 0) {
+        result |= UINT32_MAX << (32 - amount);
+    }
+    return result;
+}
+
+/* funct3 is a validated three-bit field; all eight operations are defined. */
+static uint32_t integer_operation(uint32_t funct3, uint32_t left,
+                                  uint32_t right, int arithmetic)
+{
+    const uint32_t amount = right & UINT32_C(31);
+    switch (funct3) {
+    case 0: return left + right;
+    case 1: return left << amount;
+    /* Flipping the sign bit orders two's-complement values as unsigned. */
+    case 2: return (left ^ UINT32_C(0x80000000)) < (right ^ UINT32_C(0x80000000));
+    case 3: return left < right;
+    case 4: return left ^ right;
+    case 5: return arithmetic ? arithmetic_shift_right(left, amount) : left >> amount;
+    case 6: return left | right;
+    default: return left & right;
+    }
+}
+
 YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
 {
     uint32_t instruction = 0;
@@ -63,7 +93,12 @@ YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
     }
     const uint32_t opcode = instruction & UINT32_C(0x7f);
     const uint32_t funct3 = (instruction >> 12) & UINT32_C(7);
-    if (opcode != UINT32_C(0x13) || funct3 != 0) {
+    if (opcode != UINT32_C(0x13)) {
+        return YAN_UNSUPPORTED_INSTRUCTION;
+    }
+    const uint32_t upper = instruction >> 25;
+    if ((funct3 == 1 && upper != 0) ||
+        (funct3 == 5 && upper != 0 && upper != UINT32_C(0x20))) {
         return YAN_UNSUPPORTED_INSTRUCTION;
     }
 
@@ -77,7 +112,7 @@ YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
     uint32_t source = 0;
     /* Decoded register indices are in range; fetch validated the CPU pointer. */
     (void)yan_cpu_read_reg(cpu, rs1, &source);
-    const uint32_t value = source + immediate;
+    const uint32_t value = integer_operation(funct3, source, immediate, upper == UINT32_C(0x20));
     const uint32_t next_pc = cpu->pc + UINT32_C(4);
     /* Unsigned arithmetic keeps the low 32 bits, including negative immediates. */
     (void)yan_cpu_write_reg(cpu, rd, value);
