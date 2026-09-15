@@ -2,11 +2,11 @@
 
 YanOS 是一个用于学习计算机系统的项目，计划实现 RISC-V 模拟器、操作系统、文件系统和终端知识工具。
 
-开发从 YanCPU 开始。通过小程序和测试观察指令执行，再逐步引入设备、异常、中断和持久化存储。每项能力都应有具体需求、明确规格和可复现的验证结果。
+开发从 YanCPU 开始。逐步实现指令执行、设备、异常、中断和持久化存储。每项能力都应有具体需求、明确规格和可复现的验证结果。
 
 ## 状态
 
-阶段 0 已实现 Machine、Bus 和 RAM，提供 32 MiB 内存、小端读写、地址检查、内存镜像装载及测试。CPU 与设备尚未实现。详细进度见 [STATUS](docs/STATUS.md)。
+已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位和取指。取指返回机器码，尚未实现指令解码与执行。详细进度见 [STATUS](docs/STATUS.md)。
 
 ## 构建与测试
 
@@ -20,21 +20,7 @@ cmake --build build --config Debug --parallel
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-运行内存示例：
-
-```sh
-./build/memory_demo
-```
-
-Visual Studio 构建的示例位于 `build/Debug/memory_demo.exe`。示例装入四个字节，经 Bus 读回一个 32 位值，并检查非法访问：
-
-```text
-RAM: 0x80000000 (33554432 bytes)
-Word: 0x00700293
-Bytes: 93 02 70 00
-Unaligned write: rejected; RAM unchanged.
-Unmapped read: rejected; output unchanged.
-```
+测试采用 Unity 2.6.1，由 CTest 运行。首次配置会下载固定版本并校验 SHA-256；仅构建核心库可添加 `-DBUILD_TESTING=OFF`。
 
 GCC / Clang 的 Unix 构建可在配置时添加 `-DYAN_ENABLE_SANITIZERS=ON`，启用地址与未定义行为检测。
 
@@ -56,7 +42,7 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 
 ## 开发
 
-参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md) 和 [代码导读](docs/stage0-walkthrough.md)。
+参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md) 和 [CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)。
 
 ## 许可证
 
