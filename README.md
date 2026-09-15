@@ -6,7 +6,7 @@ YanOS 是一个用于学习计算机系统的项目，计划实现 RISC-V 模拟
 
 ## 状态
 
-已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位和取指。取指返回机器码，尚未实现指令解码与执行。详细进度见 [STATUS](docs/STATUS.md)。
+已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位、取指和 ADDI 单步执行。当前指令支持限于 ADDI；完整 RV32I 与特权机制仍待实现。详细进度见 [STATUS](docs/STATUS.md)。
 
 ## 构建与测试
 
@@ -42,7 +42,7 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 
 ## 开发
 
-参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md) 和 [CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)。
+参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md) 、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md) 和 [ADDI 单步执行规格](docs/specs/0005-addi-step.md)。
 
 ## 许可证
 
