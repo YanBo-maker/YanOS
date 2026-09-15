@@ -84,14 +84,15 @@ static uint32_t integer_operation(uint32_t funct3, uint32_t left,
     }
 }
 
-YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
+static YanStatus compute_integer_result(const YanCpu *cpu, uint32_t instruction,
+                                        uint32_t *value)
 {
-    uint32_t instruction = 0;
-    YanBusResult fetch = yan_cpu_fetch(cpu, bus, &instruction);
-    if (fetch.status != YAN_OK) {
-        return fetch.status;
-    }
     const uint32_t opcode = instruction & UINT32_C(0x7f);
+    if (opcode == UINT32_C(0x37) || opcode == UINT32_C(0x17)) {
+        const uint32_t immediate = instruction & UINT32_C(0xfffff000);
+        *value = opcode == UINT32_C(0x37) ? immediate : cpu->pc + immediate;
+        return YAN_OK;
+    }
     const uint32_t funct3 = (instruction >> 12) & UINT32_C(7);
     if (opcode != UINT32_C(0x13) && opcode != UINT32_C(0x33)) {
         return YAN_UNSUPPORTED_INSTRUCTION;
@@ -107,7 +108,6 @@ YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
         return YAN_UNSUPPORTED_INSTRUCTION;
     }
 
-    const uint32_t rd = (instruction >> 7) & UINT32_C(31);
     const uint32_t rs1 = (instruction >> 15) & UINT32_C(31);
     uint32_t immediate = instruction >> 20;
     if ((immediate & UINT32_C(0x800)) != 0) {
@@ -123,9 +123,25 @@ YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
         (void)yan_cpu_read_reg(cpu, rs2, &operand);
     }
     const int alternate = upper == UINT32_C(0x20) && (register_op || funct3 == 5);
-    const uint32_t value = integer_operation(funct3, source, operand, alternate);
+    *value = integer_operation(funct3, source, operand, alternate);
+    return YAN_OK;
+}
+
+YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
+{
+    uint32_t instruction = 0;
+    YanBusResult fetch = yan_cpu_fetch(cpu, bus, &instruction);
+    if (fetch.status != YAN_OK) {
+        return fetch.status;
+    }
+    uint32_t value = 0;
+    YanStatus status = compute_integer_result(cpu, instruction, &value);
+    if (status != YAN_OK) {
+        return status;
+    }
+    const uint32_t rd = (instruction >> 7) & UINT32_C(31);
     const uint32_t next_pc = cpu->pc + UINT32_C(4);
-    /* Unsigned arithmetic keeps the low 32 bits, including negative immediates. */
+    /* Commit only after decoding and reading every source operand. */
     (void)yan_cpu_write_reg(cpu, rd, value);
     cpu->pc = next_pc;
     return YAN_OK;

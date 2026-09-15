@@ -254,6 +254,47 @@ static void invalid_register_encodings(void)
     }
 }
 
+static void upper_immediate_fixed_vectors(void)
+{
+    check_result(0x000002b7, 5, 0);
+    check_result(0x123452b7, 5, 0x12345000);
+    check_result(0x800002b7, 5, 0x80000000);
+    check_result(0xfffff2b7, 5, 0xfffff000);
+    check_result(0x00000297, 5, 0x80000000);
+    check_result(0x12345297, 5, 0x92345000);
+    check_result(0x80000297, 5, 0);
+    check_result(0xfffff297, 5, 0x7ffff000);
+}
+
+static void upper_immediate_fields_and_destinations(void)
+{
+    const uint32_t fields[] = {0, 1, 0x7ffff, 0x80000, 0xfffff, 0x12345, 0xaaaaa};
+    for (size_t i = 0; i < sizeof fields / sizeof fields[0]; ++i) {
+        for (uint32_t rd = 0; rd < 32; ++rd) {
+            const uint32_t value = (uint32_t)((uint64_t)fields[i] * 4096);
+            check_result(value | (rd << 7) | UINT32_C(0x37), rd, value);
+            check_result(value | (rd << 7) | UINT32_C(0x17), rd,
+                         (uint32_t)((uint64_t)bus.ram_base + value));
+        }
+    }
+}
+
+static void auipc_uses_current_pc_and_wraps(void)
+{
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_ram_write(&ram, 4, 4, UINT32_C(0x00001297)));
+    cpu.pc = bus.ram_base + 4;
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(UINT32_C(0x80001004), cpu.regs[5]);
+    TEST_ASSERT_EQUAL_HEX32(UINT32_C(0x80000008), cpu.pc);
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_bus_init(&bus, &ram, UINT32_C(0xfffffff8)));
+    check_result(0x00001297, 5, 0x00000ff8);
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_ram_write(&ram, 4, 4, UINT32_C(0x00000297)));
+    cpu.pc = UINT32_C(0xfffffffc);
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(UINT32_C(0xfffffffc), cpu.regs[5]);
+    TEST_ASSERT_EQUAL_HEX32(0, cpu.pc);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -267,5 +308,8 @@ int main(void)
     RUN_TEST(register_shift_masking);
     RUN_TEST(register_aliases_and_x0);
     RUN_TEST(invalid_register_encodings);
+    RUN_TEST(upper_immediate_fixed_vectors);
+    RUN_TEST(upper_immediate_fields_and_destinations);
+    RUN_TEST(auipc_uses_current_pc_and_wraps);
     return UNITY_END();
 }
