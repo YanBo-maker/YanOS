@@ -28,8 +28,11 @@ YanStatus yan_machine_init(YanMachine *machine)
         return status;
     }
     status = yan_bus_init(&machine->bus, &machine->ram, YAN_RAM_BASE);
+    if (status == YAN_OK) {
+        status = yan_cpu_reset(&machine->cpu, YAN_RAM_BASE);
+    }
     if (status != YAN_OK) {
-        yan_ram_destroy(&machine->ram);
+        yan_machine_destroy(machine);
     }
     return status;
 }
@@ -40,6 +43,7 @@ void yan_machine_destroy(YanMachine *machine)
         machine->bus.ram = NULL;
         machine->bus.ram_base = 0;
         yan_ram_destroy(&machine->ram);
+        machine->cpu = (YanCpu){0};
     }
 }
 
@@ -49,7 +53,11 @@ YanStatus yan_machine_reset(YanMachine *machine)
     if (status != YAN_OK) {
         return status;
     }
-    return yan_ram_clear(&machine->ram);
+    status = yan_ram_clear(&machine->ram);
+    if (status != YAN_OK) {
+        return status;
+    }
+    return yan_cpu_reset(&machine->cpu, YAN_RAM_BASE);
 }
 
 YanStatus yan_machine_load_image(YanMachine *machine, const uint8_t *image,
