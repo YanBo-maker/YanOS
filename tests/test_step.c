@@ -120,7 +120,7 @@ static void unsupported_encodings_preserve_state(void)
 {
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 5, 73));
     for (uint32_t opcode = 0; opcode < 128; ++opcode) {
-        if (opcode != 0x13 && opcode != 0x33 && opcode != 0x37 && opcode != 0x17) {
+        if (opcode != 0x13 && opcode != 0x33 && opcode != 0x37 && opcode != 0x17 && opcode != 0x63) {
             assert_rejected_word(UINT32_C(0x00128280) | opcode);
         }
     }
