@@ -182,6 +182,15 @@ YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
             (((instruction >> 21) & UINT32_C(0x3ff)) << 1);
         value = next_pc;
         next_pc = cpu->pc + sign_extend(offset, 21);
+    } else if (opcode == UINT32_C(0x67)) {
+        if (((instruction >> 12) & UINT32_C(7)) != 0) {
+            return YAN_UNSUPPORTED_INSTRUCTION;
+        }
+        uint32_t source = 0;
+        (void)yan_cpu_read_reg(cpu, (instruction >> 15) & UINT32_C(31), &source);
+        value = next_pc;
+        /* Read rs1 before writing rd, then clear bit zero before alignment. */
+        next_pc = (source + sign_extend(instruction >> 20, 12)) & UINT32_C(0xfffffffe);
     } else {
         status = compute_integer_result(cpu, instruction, &value);
     }

@@ -205,6 +205,81 @@ static void jal_address_and_link_wrap(void)
     TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
 }
 
+static uint32_t jalr_word(int32_t immediate, uint32_t rs1, uint32_t rd)
+{
+    return (((uint32_t)immediate & UINT32_C(0xfff)) << 20) | (rs1 << 15) |
+           (rd << 7) | UINT32_C(0x67);
+}
+
+static void jalr_fixed_vectors(void)
+{
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, UINT32_C(0x80000100)));
+    check_control(0x004302e7, YAN_OK, UINT32_C(0x80000104), 5);
+    check_control(0xffc302e7, YAN_OK, UINT32_C(0x800000fc), 5);
+    check_control(0x001302e7, YAN_OK, UINT32_C(0x80000100), 5);
+    check_control(0x003302e7, YAN_UNALIGNED, 0, 5);
+    check_control(0x800302e7, YAN_OK, UINT32_C(0x7ffff900), 5);
+    check_control(0x00000067, YAN_OK, 0, 0);
+    check_control(0x00200067, YAN_UNALIGNED, 0, 0);
+    check_control(0x000310e7, YAN_UNSUPPORTED_INSTRUCTION, 0, 1);
+}
+
+static void jalr_all_immediates_and_low_bits(void)
+{
+    for (int32_t immediate = -2048; immediate <= 2047; ++immediate) {
+        for (uint32_t low = 0; low < 4; ++low) {
+            const uint32_t source = UINT32_C(0x80000100) + low;
+            const uint32_t sum = (uint32_t)((int64_t)source + immediate);
+            const uint32_t target = sum - sum % 2;
+            TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, source));
+            check_control(jalr_word(immediate, 6, 5), target % 4 == 0 ? YAN_OK : YAN_UNALIGNED,
+                          target, 5);
+        }
+    }
+}
+
+static void jalr_register_aliases(void)
+{
+    for (uint32_t rs1 = 0; rs1 < 32; ++rs1) {
+        for (uint32_t rd = 0; rd < 32; ++rd) {
+            const uint32_t source = rs1 == 0 ? 0 : UINT32_C(0x80000101);
+            TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, rs1, source));
+            check_control(jalr_word(0, rs1, rd), YAN_OK, source - source % 2, rd);
+            TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, rs1, source));
+            check_control(jalr_word(2, rs1, rd), YAN_UNALIGNED, 0, rd);
+        }
+    }
+}
+
+static void jalr_wrap_and_deferred_fetch(void)
+{
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, UINT32_MAX));
+    check_control(jalr_word(1, 6, 5), YAN_OK, 0, 5);
+    YanCpu before = cpu;
+    TEST_ASSERT_EQUAL_INT(YAN_UNMAPPED, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(before.pc, cpu.pc);
+    TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, 0));
+    check_control(jalr_word(-3, 6, 5), YAN_OK, UINT32_C(0xfffffffc), 5);
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_bus_init(&bus, &ram, UINT32_C(0xfffffff8)));
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 5, 1));
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_ram_write(&ram, 4, 4, UINT32_C(0x000282e7)));
+    cpu.pc = UINT32_C(0xfffffffc);
+    before = cpu;
+    before.regs[5] = 0;
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(0, cpu.pc);
+    TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
+}
+
+static void jalr_invalid_encodings(void)
+{
+    for (uint32_t funct3 = 1; funct3 < 8; ++funct3) {
+        check_control(jalr_word(2, 0, 1) | (funct3 << 12), YAN_UNSUPPORTED_INSTRUCTION, 0, 1);
+        check_control(jalr_word(0, 0, 0) | (funct3 << 12), YAN_UNSUPPORTED_INSTRUCTION, 0, 0);
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -218,5 +293,10 @@ int main(void)
     RUN_TEST(jal_offset_bits_and_boundaries);
     RUN_TEST(jal_destinations_and_deferred_fetch);
     RUN_TEST(jal_address_and_link_wrap);
+    RUN_TEST(jalr_fixed_vectors);
+    RUN_TEST(jalr_all_immediates_and_low_bits);
+    RUN_TEST(jalr_register_aliases);
+    RUN_TEST(jalr_wrap_and_deferred_fetch);
+    RUN_TEST(jalr_invalid_encodings);
     return UNITY_END();
 }
