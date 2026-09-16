@@ -54,20 +54,60 @@ YanBusResult yan_cpu_fetch(const YanCpu *cpu, const YanBus *bus,
     return yan_bus_fetch32(bus, cpu->pc, instruction);
 }
 
-YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
+static uint32_t arithmetic_shift_right(uint32_t value, uint32_t amount)
 {
-    uint32_t instruction = 0;
-    YanBusResult fetch = yan_cpu_fetch(cpu, bus, &instruction);
-    if (fetch.status != YAN_OK) {
-        return fetch.status;
+    if (amount == 0) {
+        return value;
     }
+    uint32_t result = value >> amount;
+    if ((value & UINT32_C(0x80000000)) != 0) {
+        result |= UINT32_MAX << (32 - amount);
+    }
+    return result;
+}
+
+/* funct3 is a validated three-bit field; all eight operations are defined. */
+static uint32_t integer_operation(uint32_t funct3, uint32_t left,
+                                  uint32_t right, int alternate)
+{
+    const uint32_t amount = right & UINT32_C(31);
+    switch (funct3) {
+    case 0: return alternate ? left - right : left + right;
+    case 1: return left << amount;
+    /* Flipping the sign bit orders two's-complement values as unsigned. */
+    case 2: return (left ^ UINT32_C(0x80000000)) < (right ^ UINT32_C(0x80000000));
+    case 3: return left < right;
+    case 4: return left ^ right;
+    case 5: return alternate ? arithmetic_shift_right(left, amount) : left >> amount;
+    case 6: return left | right;
+    default: return left & right;
+    }
+}
+
+static YanStatus compute_integer_result(const YanCpu *cpu, uint32_t instruction,
+                                        uint32_t *value)
+{
     const uint32_t opcode = instruction & UINT32_C(0x7f);
+    if (opcode == UINT32_C(0x37) || opcode == UINT32_C(0x17)) {
+        const uint32_t immediate = instruction & UINT32_C(0xfffff000);
+        *value = opcode == UINT32_C(0x37) ? immediate : cpu->pc + immediate;
+        return YAN_OK;
+    }
     const uint32_t funct3 = (instruction >> 12) & UINT32_C(7);
-    if (opcode != UINT32_C(0x13) || funct3 != 0) {
+    if (opcode != UINT32_C(0x13) && opcode != UINT32_C(0x33)) {
+        return YAN_UNSUPPORTED_INSTRUCTION;
+    }
+    const uint32_t upper = instruction >> 25;
+    const int register_op = opcode == UINT32_C(0x33);
+    if (register_op && upper != 0 &&
+        !(upper == UINT32_C(0x20) && (funct3 == 0 || funct3 == 5))) {
+        return YAN_UNSUPPORTED_INSTRUCTION;
+    }
+    if (!register_op && ((funct3 == 1 && upper != 0) ||
+        (funct3 == 5 && upper != 0 && upper != UINT32_C(0x20)))) {
         return YAN_UNSUPPORTED_INSTRUCTION;
     }
 
-    const uint32_t rd = (instruction >> 7) & UINT32_C(31);
     const uint32_t rs1 = (instruction >> 15) & UINT32_C(31);
     uint32_t immediate = instruction >> 20;
     if ((immediate & UINT32_C(0x800)) != 0) {
@@ -77,9 +117,31 @@ YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
     uint32_t source = 0;
     /* Decoded register indices are in range; fetch validated the CPU pointer. */
     (void)yan_cpu_read_reg(cpu, rs1, &source);
-    const uint32_t value = source + immediate;
+    uint32_t operand = immediate;
+    if (register_op) {
+        const uint32_t rs2 = (instruction >> 20) & UINT32_C(31);
+        (void)yan_cpu_read_reg(cpu, rs2, &operand);
+    }
+    const int alternate = upper == UINT32_C(0x20) && (register_op || funct3 == 5);
+    *value = integer_operation(funct3, source, operand, alternate);
+    return YAN_OK;
+}
+
+YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
+{
+    uint32_t instruction = 0;
+    YanBusResult fetch = yan_cpu_fetch(cpu, bus, &instruction);
+    if (fetch.status != YAN_OK) {
+        return fetch.status;
+    }
+    uint32_t value = 0;
+    YanStatus status = compute_integer_result(cpu, instruction, &value);
+    if (status != YAN_OK) {
+        return status;
+    }
+    const uint32_t rd = (instruction >> 7) & UINT32_C(31);
     const uint32_t next_pc = cpu->pc + UINT32_C(4);
-    /* Unsigned arithmetic keeps the low 32 bits, including negative immediates. */
+    /* Commit only after decoding and reading every source operand. */
     (void)yan_cpu_write_reg(cpu, rd, value);
     cpu->pc = next_pc;
     return YAN_OK;
