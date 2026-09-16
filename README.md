@@ -6,7 +6,7 @@ YanOS 是一个用于学习计算机系统的项目，计划实现 RISC-V 模拟
 
 ## 状态
 
-已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位、取指和整数指令单步执行。当前支持 37 条 RV32I 指令，涵盖整数计算、条件分支、跳转与 Load / Store；FENCE 和系统指令仍待实现。详细进度见 [STATUS](docs/STATUS.md)。
+已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位、取指和整数指令单步执行。已实现 RV32I 的整数计算、控制转移、访存、FENCE、ECALL 和 EBREAK，并提供六种 CSR 指令及 MRET，支持 M-mode 同步异常处理。中断、分页和 M 扩展仍待实现。详细进度见 [STATUS](docs/STATUS.md)。
 
 ## 构建与测试
 
@@ -42,7 +42,7 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 
 ## 开发
 
-参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md) 和 [Load / Store 规格](docs/specs/0008-load-store.md)。
+参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md) 和 [Guest 异常规格](docs/specs/0009-guest-traps.md)。
 
 ## 许可证
 

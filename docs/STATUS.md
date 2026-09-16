@@ -1,6 +1,6 @@
 # 项目状态
 
-当前阶段：Load / Store。实现与本地验证已完成，用户审查待完成。条件分支与跳转阶段已通过用户审查并合入主分支。
+当前阶段：M-mode 同步异常。实现与本地验证已完成，用户审查待完成。Load / Store 阶段已通过用户审查并合入主分支。
 
 ## 已完成
 
@@ -13,11 +13,13 @@
 - 六条条件分支与 JAL、JALR，支持目标对齐检查和返回地址写回，见 [控制转移规格](specs/0007-control-flow.md)。
 - LB、LBU、LH、LHU、LW、SB、SH、SW，经 Bus 访问 RAM，见 [Load / Store 规格](specs/0008-load-store.md)。
 - 符号扩展、32 位回绕、移位量屏蔽及编码拒绝后的状态保持。
+- 同步异常进入、mepc / mcause / mtval、MIE / MPIE 状态保存与 MRET 返回。
+- 六种 CSR 指令与有限的机器模式 CSR 集合；ECALL、EBREAK 和当前 RAM 平台下的 FENCE。
 - C17 / CMake 构建、Unity 单元测试、CTest 及 GitHub Actions。
 
 ## 验证
 
-GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建均通过九组 CTest：RAM、Bus、Machine、CPU、Fetch、Step、ALU、Control、Memory，共 63 个 Unity 测试用例。
+GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建均通过十一组 CTest：RAM、Bus、Machine、CPU、Fetch、Step、ALU、Control、Memory、CSR、Trap，共 77 个 Unity 测试用例。
 
 立即数测试覆盖全部 4096 种编码；移位覆盖 0～31 及寄存器移位量高位屏蔽。十条寄存器运算各覆盖 32768 种 rd / rs1 / rs2 组合。固定向量和边界矩阵检查符号比较、算术回绕、逻辑运算与 AUIPC 当前 PC 语义。
 
@@ -25,7 +27,9 @@ GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建均通过九组 CTest：R
 
 访存测试覆盖八条指令的全部 4096 种偏移、寄存器字段组合、符号边界、小端读写与截断、地址和 PC 回绕、RAM 首尾及错误状态保持。取指失败时无数据访问，加载到 x0 仍检查错误；Store 可覆盖已经取出的当前指令。
 
-Load 与 Store 的新增执行测试均确认在对应实现前失败，实现后通过。
+异常测试覆盖各原因码、mtval、入口状态、Host 错误隔离、嵌套异常、无效入口、六种 CSR 指令的寄存器组合和读写抑制、MRET 恢复及 Machine 复位。Guest 集成测试通过 CSR 指令配置入口，在 ECALL 后调整 mepc 并返回继续执行。
+
+新增异常与系统指令执行测试均确认在实现前失败，实现后通过；原有单步错误用例已迁移到 Guest 异常语义。
 
 Debug 启用 AddressSanitizer 和 UndefinedBehaviorSanitizer。内存分配失败分支尚未通过故障注入验证。
 
@@ -33,9 +37,11 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。各任务
 
 ## 下一步
 
-审查 [Load / Store 规格](specs/0008-load-store.md) 及配套实现，随后确定 FENCE、系统指令与 Guest 异常机制的实现顺序。
+审查 [Guest 异常规格](specs/0009-guest-traps.md) 及配套实现，随后确定 M 扩展与设备阶段的任务范围。
 
-当前支持 37 条 RV32I 指令；其余编码返回 Host 状态 `YAN_UNSUPPORTED_INSTRUCTION`。数据访问错误沿用 Bus / RAM 状态，尚不转换为 Guest 异常。M 扩展、FENCE、ECALL、EBREAK、CSR、中断和设备尚未实现。Machine 装载调用者提供的内存缓冲区，文件读取及 Guest 启动仍待实现。
+已实现 40 条 RV32I 基础指令的功能路径、六种 CSR 指令和 MRET。单步返回 YAN_OK 表示正常完成，YAN_TRAP 表示已进入 Guest 异常；Host 参数和对象状态错误仍直接返回。Bus、RAM 与独立取指接口保留原有错误语义。
+
+当前只覆盖 M-mode 同步异常及规格列出的 CSR，尚未实现中断、U/S 模式、分页、M 扩展和设备，也未完成完整 ISA / 特权架构符合性验收。Machine 装载调用者提供的内存缓冲区，Host 文件加载与 Guest 工具链集成仍待实现。
 
 ## 待定设计
 
