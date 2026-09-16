@@ -12,6 +12,7 @@ YanStatus yan_cpu_reset(YanCpu *cpu, uint32_t entry)
     }
     /* Register clearing is the Yan platform's deterministic reset policy. */
     *cpu = (YanCpu){0};
+    cpu->csr.mstatus = YAN_MSTATUS_MPP;
     cpu->pc = entry;
     return YAN_OK;
 }
