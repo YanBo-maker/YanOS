@@ -161,6 +161,27 @@ static YanStatus compute_branch_target(const YanCpu *cpu, uint32_t instruction,
     return YAN_OK;
 }
 
+static YanStatus load_value(const YanCpu *cpu, const YanBus *bus,
+                             uint32_t instruction, uint32_t *value)
+{
+    const uint32_t kind = (instruction >> 12) & UINT32_C(7);
+    if (kind != 0 && kind != 1 && kind != 2 && kind != 4 && kind != 5) {
+        return YAN_UNSUPPORTED_INSTRUCTION;
+    }
+    uint32_t base = 0;
+    (void)yan_cpu_read_reg(cpu, (instruction >> 15) & UINT32_C(31), &base);
+    const uint32_t address = base + sign_extend(instruction >> 20, 12);
+    const size_t width = (size_t)1 << (kind & UINT32_C(3));
+    YanBusResult result = yan_bus_read(bus, address, width, value);
+    if (result.status != YAN_OK) {
+        return result.status;
+    }
+    if (kind == 0 || kind == 1) {
+        *value = sign_extend(*value, kind == 0 ? 8 : 16);
+    }
+    return YAN_OK;
+}
+
 YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
 {
     uint32_t instruction = 0;
@@ -173,7 +194,9 @@ YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
     const uint32_t opcode = instruction & UINT32_C(0x7f);
     const int branch = opcode == UINT32_C(0x63);
     YanStatus status = YAN_OK;
-    if (branch) {
+    if (opcode == UINT32_C(0x03)) {
+        status = load_value(cpu, bus, instruction, &value);
+    } else if (branch) {
         status = compute_branch_target(cpu, instruction, &next_pc);
     } else if (opcode == UINT32_C(0x6f)) {
         const uint32_t offset = ((instruction >> 31) << 20) |
