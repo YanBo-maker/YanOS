@@ -29,7 +29,7 @@ YanStatus yan_cpu_write_csr(YanCpu *cpu, uint32_t address, uint32_t value);
 /* Reads the word at PC; preserves CPU state, RAM, and outputs on failure. */
 YanBusResult yan_cpu_fetch(const YanCpu *cpu, const YanBus *bus,
                            uint32_t *instruction);
-/* Executes one supported instruction; failures preserve CPU state and RAM. */
+/* YAN_TRAP enters the Guest handler; Host errors preserve the whole state. */
 YanStatus yan_cpu_step(YanCpu *cpu, YanBus *bus);
 
 #endif

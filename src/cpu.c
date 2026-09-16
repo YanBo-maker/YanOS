@@ -163,7 +163,7 @@ static YanStatus compute_branch_target(const YanCpu *cpu, uint32_t instruction,
 }
 
 static YanStatus load_value(const YanCpu *cpu, const YanBus *bus,
-                             uint32_t instruction, uint32_t *value)
+                             uint32_t instruction, uint32_t *value, uint32_t *fault_address)
 {
     const uint32_t kind = (instruction >> 12) & UINT32_C(7);
     if (kind != 0 && kind != 1 && kind != 2 && kind != 4 && kind != 5) {
@@ -172,6 +172,7 @@ static YanStatus load_value(const YanCpu *cpu, const YanBus *bus,
     uint32_t base = 0;
     (void)yan_cpu_read_reg(cpu, (instruction >> 15) & UINT32_C(31), &base);
     const uint32_t address = base + sign_extend(instruction >> 20, 12);
+    *fault_address = address;
     const size_t width = (size_t)1 << (kind & UINT32_C(3));
     YanBusResult result = yan_bus_read(bus, address, width, value);
     if (result.status != YAN_OK) {
@@ -183,7 +184,8 @@ static YanStatus load_value(const YanCpu *cpu, const YanBus *bus,
     return YAN_OK;
 }
 
-static YanStatus store_value(const YanCpu *cpu, YanBus *bus, uint32_t instruction)
+static YanStatus store_value(const YanCpu *cpu, YanBus *bus, uint32_t instruction,
+                              uint32_t *fault_address)
 {
     const uint32_t kind = (instruction >> 12) & UINT32_C(7);
     if (kind > 2) {
@@ -195,7 +197,30 @@ static YanStatus store_value(const YanCpu *cpu, YanBus *bus, uint32_t instructio
     (void)yan_cpu_read_reg(cpu, (instruction >> 15) & UINT32_C(31), &base);
     (void)yan_cpu_read_reg(cpu, (instruction >> 20) & UINT32_C(31), &value);
     const uint32_t address = base + sign_extend(offset, 12);
+    *fault_address = address;
     return yan_bus_write(bus, address, (size_t)1 << kind, value).status;
+}
+
+static YanStatus enter_trap(YanCpu *cpu, uint32_t cause, uint32_t value)
+{
+    cpu->csr.mepc = cpu->pc & UINT32_C(0xfffffffc);
+    cpu->csr.mcause = cause;
+    cpu->csr.mtval = value;
+    cpu->csr.mstatus = YAN_MSTATUS_MPP |
+        ((cpu->csr.mstatus & YAN_MSTATUS_MIE) != 0 ? YAN_MSTATUS_MPIE : 0);
+    cpu->pc = cpu->csr.mtvec & UINT32_C(0xfffffffc);
+    return YAN_TRAP;
+}
+
+static YanStatus access_fault(YanCpu *cpu, YanStatus status, uint32_t cause, uint32_t address)
+{
+    if (status == YAN_UNALIGNED) {
+        return enter_trap(cpu, cause, address);
+    }
+    if (status == YAN_UNMAPPED || status == YAN_OUT_OF_BOUNDS) {
+        return enter_trap(cpu, cause + 1, address);
+    }
+    return status;
 }
 
 YanStatus yan_cpu_step(YanCpu *cpu, YanBus *bus)
@@ -203,16 +228,17 @@ YanStatus yan_cpu_step(YanCpu *cpu, YanBus *bus)
     uint32_t instruction = 0;
     YanBusResult fetch = yan_cpu_fetch(cpu, bus, &instruction);
     if (fetch.status != YAN_OK) {
-        return fetch.status;
+        return access_fault(cpu, fetch.status, 0, fetch.address);
     }
     uint32_t value = 0;
+    uint32_t fault_address = 0;
     uint32_t next_pc = cpu->pc + UINT32_C(4);
     const uint32_t opcode = instruction & UINT32_C(0x7f);
     const int branch = opcode == UINT32_C(0x63);
     const int store = opcode == UINT32_C(0x23);
     YanStatus status = YAN_OK;
     if (opcode == UINT32_C(0x03)) {
-        status = load_value(cpu, bus, instruction, &value);
+        status = load_value(cpu, bus, instruction, &value, &fault_address);
     } else if (branch) {
         status = compute_branch_target(cpu, instruction, &next_pc);
     } else if (opcode == UINT32_C(0x6f)) {
@@ -224,7 +250,7 @@ YanStatus yan_cpu_step(YanCpu *cpu, YanBus *bus)
         next_pc = cpu->pc + sign_extend(offset, 21);
     } else if (opcode == UINT32_C(0x67)) {
         if (((instruction >> 12) & UINT32_C(7)) != 0) {
-            return YAN_UNSUPPORTED_INSTRUCTION;
+            return enter_trap(cpu, 2, instruction);
         }
         uint32_t source = 0;
         (void)yan_cpu_read_reg(cpu, (instruction >> 15) & UINT32_C(31), &source);
@@ -235,19 +261,25 @@ YanStatus yan_cpu_step(YanCpu *cpu, YanBus *bus)
         status = compute_integer_result(cpu, instruction, &value);
     }
     if (status != YAN_OK) {
-        return status;
+        if (status == YAN_UNSUPPORTED_INSTRUCTION) {
+            return enter_trap(cpu, 2, instruction);
+        }
+        return access_fault(cpu, status, 4, fault_address);
     }
     /* A non-taken branch keeps PC+4; it does not check its encoded target. */
     if (next_pc % 4 != 0) {
-        return YAN_UNALIGNED;
+        return enter_trap(cpu, 0, next_pc);
     }
     const uint32_t rd = (instruction >> 7) & UINT32_C(31);
     /* Commit only after decoding and reading every source operand. */
     if (store) {
         /* Bus validates the entire write before modifying RAM. */
-        status = store_value(cpu, bus, instruction);
+        status = store_value(cpu, bus, instruction, &fault_address);
         if (status != YAN_OK) {
-            return status;
+            if (status == YAN_UNSUPPORTED_INSTRUCTION) {
+                return enter_trap(cpu, 2, instruction);
+            }
+            return access_fault(cpu, status, 6, fault_address);
         }
     } else if (!branch) {
         (void)yan_cpu_write_reg(cpu, rd, value);

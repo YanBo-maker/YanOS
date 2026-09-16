@@ -34,8 +34,8 @@ static void check_control(uint32_t word, YanStatus status, uint32_t target, uint
     }
     uint8_t memory[8];
     memcpy(memory, ram.data, sizeof memory);
-    TEST_ASSERT_EQUAL_INT(status, yan_cpu_step(&cpu, &bus));
-    TEST_ASSERT_EQUAL_HEX32(status == YAN_OK ? target : expected.pc, cpu.pc);
+    TEST_ASSERT_EQUAL_INT(status == YAN_OK ? YAN_OK : YAN_TRAP, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(status == YAN_OK ? target : cpu.csr.mtvec, cpu.pc);
     TEST_ASSERT_EQUAL_HEX32_ARRAY(expected.regs, cpu.regs, 32);
     TEST_ASSERT_EQUAL_MEMORY(memory, ram.data, sizeof memory);
 }
@@ -122,8 +122,8 @@ static void branch_wrap_and_deferred_fetch(void)
 {
     check_control(branch_word(8, 0, 0, 0), YAN_OK, bus.ram_base + 8, 0);
     YanCpu before = cpu;
-    TEST_ASSERT_EQUAL_INT(YAN_UNMAPPED, yan_cpu_step(&cpu, &bus));
-    TEST_ASSERT_EQUAL_HEX32(before.pc, cpu.pc);
+    TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(cpu.csr.mtvec, cpu.pc);
     TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_bus_init(&bus, &ram, UINT32_C(0xfffffff8)));
     check_control(branch_word(8, 0, 0, 0), YAN_OK, 0, 0);
@@ -138,8 +138,8 @@ static void branch_invalid_encoding_and_fetch(void)
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_ram_write(&ram, 0, 4, UINT32_C(0x00000063)));
     cpu.pc = bus.ram_base + 1;
     YanCpu before = cpu;
-    TEST_ASSERT_EQUAL_INT(YAN_UNALIGNED, yan_cpu_step(&cpu, &bus));
-    TEST_ASSERT_EQUAL_HEX32(before.pc, cpu.pc);
+    TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(cpu.csr.mtvec, cpu.pc);
     TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
 }
 
@@ -183,8 +183,8 @@ static void jal_destinations_and_deferred_fetch(void)
     for (uint32_t rd = 0; rd < 32; ++rd) {
         check_control(jal_word(8, rd), YAN_OK, bus.ram_base + 8, rd);
         YanCpu before = cpu;
-        TEST_ASSERT_EQUAL_INT(YAN_UNMAPPED, yan_cpu_step(&cpu, &bus));
-        TEST_ASSERT_EQUAL_HEX32(before.pc, cpu.pc);
+        TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_cpu_step(&cpu, &bus));
+        TEST_ASSERT_EQUAL_HEX32(cpu.csr.mtvec, cpu.pc);
         TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
         check_control(jal_word(2, rd), YAN_UNALIGNED, 0, rd);
     }
@@ -256,8 +256,8 @@ static void jalr_wrap_and_deferred_fetch(void)
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, UINT32_MAX));
     check_control(jalr_word(1, 6, 5), YAN_OK, 0, 5);
     YanCpu before = cpu;
-    TEST_ASSERT_EQUAL_INT(YAN_UNMAPPED, yan_cpu_step(&cpu, &bus));
-    TEST_ASSERT_EQUAL_HEX32(before.pc, cpu.pc);
+    TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(cpu.csr.mtvec, cpu.pc);
     TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, 0));
     check_control(jalr_word(-3, 6, 5), YAN_OK, UINT32_C(0xfffffffc), 5);
