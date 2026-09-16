@@ -182,7 +182,22 @@ static YanStatus load_value(const YanCpu *cpu, const YanBus *bus,
     return YAN_OK;
 }
 
-YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
+static YanStatus store_value(const YanCpu *cpu, YanBus *bus, uint32_t instruction)
+{
+    const uint32_t kind = (instruction >> 12) & UINT32_C(7);
+    if (kind > 2) {
+        return YAN_UNSUPPORTED_INSTRUCTION;
+    }
+    const uint32_t offset = ((instruction >> 25) << 5) |
+                             ((instruction >> 7) & UINT32_C(31));
+    uint32_t base = 0, value = 0;
+    (void)yan_cpu_read_reg(cpu, (instruction >> 15) & UINT32_C(31), &base);
+    (void)yan_cpu_read_reg(cpu, (instruction >> 20) & UINT32_C(31), &value);
+    const uint32_t address = base + sign_extend(offset, 12);
+    return yan_bus_write(bus, address, (size_t)1 << kind, value).status;
+}
+
+YanStatus yan_cpu_step(YanCpu *cpu, YanBus *bus)
 {
     uint32_t instruction = 0;
     YanBusResult fetch = yan_cpu_fetch(cpu, bus, &instruction);
@@ -193,6 +208,7 @@ YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
     uint32_t next_pc = cpu->pc + UINT32_C(4);
     const uint32_t opcode = instruction & UINT32_C(0x7f);
     const int branch = opcode == UINT32_C(0x63);
+    const int store = opcode == UINT32_C(0x23);
     YanStatus status = YAN_OK;
     if (opcode == UINT32_C(0x03)) {
         status = load_value(cpu, bus, instruction, &value);
@@ -214,7 +230,7 @@ YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
         value = next_pc;
         /* Read rs1 before writing rd, then clear bit zero before alignment. */
         next_pc = (source + sign_extend(instruction >> 20, 12)) & UINT32_C(0xfffffffe);
-    } else {
+    } else if (!store) {
         status = compute_integer_result(cpu, instruction, &value);
     }
     if (status != YAN_OK) {
@@ -226,7 +242,13 @@ YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
     }
     const uint32_t rd = (instruction >> 7) & UINT32_C(31);
     /* Commit only after decoding and reading every source operand. */
-    if (!branch) {
+    if (store) {
+        /* Bus validates the entire write before modifying RAM. */
+        status = store_value(cpu, bus, instruction);
+        if (status != YAN_OK) {
+            return status;
+        }
+    } else if (!branch) {
         (void)yan_cpu_write_reg(cpu, rd, value);
     }
     cpu->pc = next_pc;

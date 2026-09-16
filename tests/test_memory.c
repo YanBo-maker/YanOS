@@ -160,6 +160,147 @@ static void load_wrap_and_invalid_encoding(void)
     TEST_ASSERT_EQUAL_HEX32_ARRAY(expected.regs, cpu.regs, 32);
 }
 
+static uint32_t store_word(int32_t offset, uint32_t kind, uint32_t rs1, uint32_t rs2)
+{
+    const uint32_t bits = (uint32_t)offset & UINT32_C(0xfff);
+    return ((bits / 32) << 25) | ((bits % 32) << 7) | (rs1 << 15) |
+           (rs2 << 20) | (kind << 12) | UINT32_C(0x23);
+}
+
+static void check_store(uint32_t word, YanStatus status, size_t offset, size_t width, uint32_t value)
+{
+    memset(ram.data, 0xa5, ram.size);
+    cpu.pc = bus.ram_base;
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_ram_write(&ram, 0, 4, word));
+    const YanCpu before = cpu;
+    uint8_t expected[64];
+    memcpy(expected, ram.data, ram.size);
+    if (status == YAN_OK) {
+        for (size_t byte = 0; byte < width; ++byte) {
+            expected[offset + byte] = (uint8_t)(value % 256);
+            value /= 256;
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(status, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(status == YAN_OK ? before.pc + UINT32_C(4) : before.pc, cpu.pc);
+    TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
+    TEST_ASSERT_EQUAL_MEMORY(expected, ram.data, ram.size);
+}
+
+static void store_fixed_vectors(void)
+{
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, bus.ram_base + 32));
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 7, UINT32_C(0x807f01fe)));
+    check_store(0x00730023, YAN_OK, 32, 1, 0xfe);
+    check_store(0x007301a3, YAN_OK, 35, 1, 0xfe);
+    check_store(0x00731023, YAN_OK, 32, 2, 0x01fe);
+    check_store(0x00732023, YAN_OK, 32, 4, 0x807f01fe);
+    check_store(0xfe732e23, YAN_OK, 28, 4, 0x807f01fe);
+    check_store(0x00032023, YAN_OK, 32, 4, 0);
+}
+
+static void store_all_offsets(void)
+{
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 7, UINT32_C(0x01234567)));
+    for (int32_t offset = -2048; offset <= 2047; ++offset) {
+        TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6,
+            (uint32_t)((int64_t)bus.ram_base + 32 - offset)));
+        for (uint32_t kind = 0; kind < 3; ++kind) {
+            check_store(store_word(offset, kind, 6, 7), YAN_OK, 32, (size_t)1 << kind, 0x01234567);
+        }
+    }
+}
+
+static void store_register_aliases_and_x0(void)
+{
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_bus_init(&bus, &ram, 0));
+    for (uint32_t rs1 = 0; rs1 < 32; ++rs1) {
+        for (uint32_t rs2 = 0; rs2 < 32; ++rs2) {
+            for (uint32_t kind = 0; kind < 3; ++kind) {
+                TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, rs2, UINT32_C(0x87654321)));
+                TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, rs1, 32));
+                const uint32_t value = rs2 == 0 ? 0 : (rs1 == rs2 ? 32 : UINT32_C(0x87654321));
+                check_store(store_word(rs1 == 0 ? 32 : 0, kind, rs1, rs2), YAN_OK,
+                            32, (size_t)1 << kind, value);
+            }
+        }
+    }
+}
+
+static void store_errors_and_boundaries(void)
+{
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, bus.ram_base));
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 7, UINT32_MAX));
+    for (uint32_t kind = 0; kind < 3; ++kind) {
+        check_store(store_word(64, kind, 6, 7), YAN_UNMAPPED, 0, 0, 0);
+        check_store(store_word(-4, kind, 6, 7), YAN_UNMAPPED, 0, 0, 0);
+    }
+    for (int32_t low = 1; low < 4; ++low) {
+        check_store(store_word(low, 2, 6, 7), YAN_UNALIGNED, 0, 0, 0);
+        if (low % 2 != 0) {
+            check_store(store_word(low, 1, 6, 7), YAN_UNALIGNED, 0, 0, 0);
+        }
+    }
+    check_store(store_word(63, 0, 6, 7), YAN_OK, 63, 1, UINT32_MAX);
+    check_store(store_word(62, 1, 6, 7), YAN_OK, 62, 2, UINT32_MAX);
+    check_store(store_word(60, 2, 6, 7), YAN_OK, 60, 4, UINT32_MAX);
+    yan_ram_destroy(&ram);
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_ram_init(&ram, 63));
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_bus_init(&bus, &ram, UINT32_C(0x80000000)));
+    check_store(store_word(60, 2, 6, 7), YAN_OUT_OF_BOUNDS, 0, 0, 0);
+    check_store(store_word(62, 1, 6, 7), YAN_OUT_OF_BOUNDS, 0, 0, 0);
+    for (uint32_t kind = 3; kind < 8; ++kind) {
+        check_store(store_word(1, kind, 6, 7), YAN_UNSUPPORTED_INSTRUCTION, 0, 0, 0);
+    }
+}
+
+static void store_wrap_and_instruction_overlap(void)
+{
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_bus_init(&bus, &ram, 0));
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, UINT32_MAX));
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 7, UINT32_C(0x12345678)));
+    check_store(store_word(33, 2, 6, 7), YAN_OK, 32, 4, 0x12345678);
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, 0));
+    check_store(store_word(0, 2, 6, 7), YAN_OK, 0, 4, 0x12345678);
+    cpu.pc = 0;
+    uint32_t word = 0;
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_fetch(&cpu, &bus, &word).status);
+    TEST_ASSERT_EQUAL_HEX32(0x12345678, word);
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_bus_init(&bus, &ram, UINT32_C(0xffffffc0)));
+    check_store(store_word(-1, 0, 6, 7), YAN_OK, 63, 1, 0x78);
+    check_store(store_word(-4, 2, 6, 7), YAN_OK, 60, 4, 0x12345678);
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_ram_write(&ram, 60, 4, store_word(-32, 2, 0, 7)));
+    cpu.pc = UINT32_C(0xfffffffc);
+    YanCpu before = cpu;
+    uint8_t expected[64];
+    memcpy(expected, ram.data, sizeof expected);
+    expected[32] = 0x78; expected[33] = 0x56; expected[34] = 0x34; expected[35] = 0x12;
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(0, cpu.pc);
+    TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
+    TEST_ASSERT_EQUAL_MEMORY(expected, ram.data, sizeof expected);
+}
+
+static void fetch_failure_prevents_data_access(void)
+{
+    const uint32_t words[] = {0x00032283, 0x00732023};
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, bus.ram_base + 32));
+    for (size_t i = 0; i < 2; ++i) {
+        TEST_ASSERT_EQUAL_INT(YAN_OK, yan_ram_write(&ram, 0, 4, words[i]));
+        const uint32_t pcs[] = {bus.ram_base + 1, bus.ram_base + 64};
+        for (size_t p = 0; p < 2; ++p) {
+            cpu.pc = pcs[p];
+            YanCpu before = cpu;
+            uint8_t memory[64];
+            memcpy(memory, ram.data, sizeof memory);
+            TEST_ASSERT_EQUAL_INT(p == 0 ? YAN_UNALIGNED : YAN_UNMAPPED, yan_cpu_step(&cpu, &bus));
+            TEST_ASSERT_EQUAL_HEX32(before.pc, cpu.pc);
+            TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
+            TEST_ASSERT_EQUAL_MEMORY(memory, ram.data, sizeof memory);
+        }
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -169,5 +310,11 @@ int main(void)
     RUN_TEST(load_register_aliases_and_x0);
     RUN_TEST(load_errors_and_boundaries);
     RUN_TEST(load_wrap_and_invalid_encoding);
+    RUN_TEST(store_fixed_vectors);
+    RUN_TEST(store_all_offsets);
+    RUN_TEST(store_register_aliases_and_x0);
+    RUN_TEST(store_errors_and_boundaries);
+    RUN_TEST(store_wrap_and_instruction_overlap);
+    RUN_TEST(fetch_failure_prevents_data_access);
     return UNITY_END();
 }
