@@ -157,9 +157,6 @@ static YanStatus compute_branch_target(const YanCpu *cpu, uint32_t instruction,
             (((instruction >> 25) & UINT32_C(0x3f)) << 5) |
             (((instruction >> 8) & UINT32_C(0xf)) << 1);
         *target = cpu->pc + sign_extend(offset, 13);
-        if (*target % 4 != 0) {
-            return YAN_UNALIGNED;
-        }
     }
     return YAN_OK;
 }
@@ -173,11 +170,27 @@ YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
     }
     uint32_t value = 0;
     uint32_t next_pc = cpu->pc + UINT32_C(4);
-    const int branch = (instruction & UINT32_C(0x7f)) == UINT32_C(0x63);
-    YanStatus status = branch ? compute_branch_target(cpu, instruction, &next_pc) :
-                               compute_integer_result(cpu, instruction, &value);
+    const uint32_t opcode = instruction & UINT32_C(0x7f);
+    const int branch = opcode == UINT32_C(0x63);
+    YanStatus status = YAN_OK;
+    if (branch) {
+        status = compute_branch_target(cpu, instruction, &next_pc);
+    } else if (opcode == UINT32_C(0x6f)) {
+        const uint32_t offset = ((instruction >> 31) << 20) |
+            (instruction & UINT32_C(0xff000)) |
+            (((instruction >> 20) & UINT32_C(1)) << 11) |
+            (((instruction >> 21) & UINT32_C(0x3ff)) << 1);
+        value = next_pc;
+        next_pc = cpu->pc + sign_extend(offset, 21);
+    } else {
+        status = compute_integer_result(cpu, instruction, &value);
+    }
     if (status != YAN_OK) {
         return status;
+    }
+    /* A non-taken branch keeps PC+4; it does not check its encoded target. */
+    if (next_pc % 4 != 0) {
+        return YAN_UNALIGNED;
     }
     const uint32_t rd = (instruction >> 7) & UINT32_C(31);
     /* Commit only after decoding and reading every source operand. */
