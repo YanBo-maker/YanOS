@@ -127,6 +127,40 @@ static YanStatus compute_integer_result(const YanCpu *cpu, uint32_t instruction,
     return YAN_OK;
 }
 
+static uint32_t sign_extend(uint32_t value, uint32_t bits)
+{
+    const uint32_t sign = UINT32_C(1) << (bits - 1);
+    return (value ^ sign) - sign;
+}
+
+static YanStatus compute_branch_target(const YanCpu *cpu, uint32_t instruction,
+                                       uint32_t *target)
+{
+    uint32_t left = 0, right = 0;
+    (void)yan_cpu_read_reg(cpu, (instruction >> 15) & UINT32_C(31), &left);
+    (void)yan_cpu_read_reg(cpu, (instruction >> 20) & UINT32_C(31), &right);
+    const int less = (left ^ UINT32_C(0x80000000)) < (right ^ UINT32_C(0x80000000));
+    int taken;
+    switch ((instruction >> 12) & UINT32_C(7)) {
+    case 0: taken = left == right; break;
+    case 1: taken = left != right; break;
+    case 4: taken = less; break;
+    case 5: taken = !less; break;
+    case 6: taken = left < right; break;
+    case 7: taken = left >= right; break;
+    default: return YAN_UNSUPPORTED_INSTRUCTION;
+    }
+    *target = cpu->pc + UINT32_C(4);
+    if (taken) {
+        const uint32_t offset = ((instruction >> 31) << 12) |
+            (((instruction >> 7) & UINT32_C(1)) << 11) |
+            (((instruction >> 25) & UINT32_C(0x3f)) << 5) |
+            (((instruction >> 8) & UINT32_C(0xf)) << 1);
+        *target = cpu->pc + sign_extend(offset, 13);
+    }
+    return YAN_OK;
+}
+
 YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
 {
     uint32_t instruction = 0;
@@ -135,14 +169,43 @@ YanStatus yan_cpu_step(YanCpu *cpu, const YanBus *bus)
         return fetch.status;
     }
     uint32_t value = 0;
-    YanStatus status = compute_integer_result(cpu, instruction, &value);
+    uint32_t next_pc = cpu->pc + UINT32_C(4);
+    const uint32_t opcode = instruction & UINT32_C(0x7f);
+    const int branch = opcode == UINT32_C(0x63);
+    YanStatus status = YAN_OK;
+    if (branch) {
+        status = compute_branch_target(cpu, instruction, &next_pc);
+    } else if (opcode == UINT32_C(0x6f)) {
+        const uint32_t offset = ((instruction >> 31) << 20) |
+            (instruction & UINT32_C(0xff000)) |
+            (((instruction >> 20) & UINT32_C(1)) << 11) |
+            (((instruction >> 21) & UINT32_C(0x3ff)) << 1);
+        value = next_pc;
+        next_pc = cpu->pc + sign_extend(offset, 21);
+    } else if (opcode == UINT32_C(0x67)) {
+        if (((instruction >> 12) & UINT32_C(7)) != 0) {
+            return YAN_UNSUPPORTED_INSTRUCTION;
+        }
+        uint32_t source = 0;
+        (void)yan_cpu_read_reg(cpu, (instruction >> 15) & UINT32_C(31), &source);
+        value = next_pc;
+        /* Read rs1 before writing rd, then clear bit zero before alignment. */
+        next_pc = (source + sign_extend(instruction >> 20, 12)) & UINT32_C(0xfffffffe);
+    } else {
+        status = compute_integer_result(cpu, instruction, &value);
+    }
     if (status != YAN_OK) {
         return status;
     }
+    /* A non-taken branch keeps PC+4; it does not check its encoded target. */
+    if (next_pc % 4 != 0) {
+        return YAN_UNALIGNED;
+    }
     const uint32_t rd = (instruction >> 7) & UINT32_C(31);
-    const uint32_t next_pc = cpu->pc + UINT32_C(4);
     /* Commit only after decoding and reading every source operand. */
-    (void)yan_cpu_write_reg(cpu, rd, value);
+    if (!branch) {
+        (void)yan_cpu_write_reg(cpu, rd, value);
+    }
     cpu->pc = next_pc;
     return YAN_OK;
 }
