@@ -1,8 +1,16 @@
 #include "yan/cpu.h"
+#include "yan/machine.h"
 #include "unity.h"
 
-void setUp(void) {}
-void tearDown(void) {}
+static YanMachine first, second;
+void setUp(void)
+{
+    first = (YanMachine){0}; second = (YanMachine){0};
+}
+void tearDown(void)
+{
+    yan_machine_destroy(&first); yan_machine_destroy(&second);
+}
 
 static void reset_and_masks(void)
 {
@@ -61,11 +69,32 @@ static void invalid_access_preserves_state(void)
     TEST_ASSERT_EQUAL_MEMORY(&before.csr, &cpu.csr, sizeof cpu.csr);
 }
 
+static void machine_reset_and_independent_csrs(void)
+{
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_machine_init(&first));
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_machine_init(&second));
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_csr(&first.cpu, 0x305, YAN_RAM_BASE + 32));
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_csr(&second.cpu, 0x340, 42));
+    const uint8_t image[] = {0x73, 0, 0, 0};
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_machine_load_image(&first, image, sizeof image));
+    TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_cpu_step(&first.cpu, &first.bus));
+    TEST_ASSERT_EQUAL_HEX32(11, first.cpu.csr.mcause);
+    TEST_ASSERT_EQUAL_HEX32(0, second.cpu.csr.mcause);
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_machine_reset(&first));
+    const YanCsr reset = {YAN_MSTATUS_MPP, 0, 0, 0, 0, 0};
+    TEST_ASSERT_EQUAL_MEMORY(&reset, &first.cpu.csr, sizeof reset);
+    TEST_ASSERT_EQUAL_HEX32(42, second.cpu.csr.mscratch);
+    yan_machine_destroy(&first);
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_machine_init(&first));
+    TEST_ASSERT_EQUAL_MEMORY(&reset, &first.cpu.csr, sizeof reset);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(reset_and_masks);
     RUN_TEST(fixed_and_readonly_csrs);
     RUN_TEST(invalid_access_preserves_state);
+    RUN_TEST(machine_reset_and_independent_csrs);
     return UNITY_END();
 }

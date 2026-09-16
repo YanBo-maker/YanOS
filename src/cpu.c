@@ -201,6 +201,41 @@ static YanStatus store_value(const YanCpu *cpu, YanBus *bus, uint32_t instructio
     return yan_bus_write(bus, address, (size_t)1 << kind, value).status;
 }
 
+static YanStatus execute_csr(YanCpu *cpu, uint32_t instruction, uint32_t *value)
+{
+    const uint32_t kind = (instruction >> 12) & UINT32_C(7);
+    if (kind == 0 || kind == 4) {
+        return YAN_UNSUPPORTED_INSTRUCTION;
+    }
+    const uint32_t address = instruction >> 20;
+    const uint32_t source_index = (instruction >> 15) & UINT32_C(31);
+    uint32_t operand = source_index;
+    if (kind < 4) {
+        (void)yan_cpu_read_reg(cpu, source_index, &operand);
+    }
+    const uint32_t operation = kind & UINT32_C(3);
+    const uint32_t rd = (instruction >> 7) & UINT32_C(31);
+    uint32_t old = 0;
+    YanStatus status;
+    /* CSRRW[I] with rd=x0 suppresses the read; the write validates the CSR. */
+    if (operation != 1 || rd != 0) {
+        status = yan_cpu_read_csr(cpu, address, &old);
+        if (status != YAN_OK) {
+            return status;
+        }
+    }
+    if (operation == 1 || source_index != 0) {
+        uint32_t updated = operation == 1 ? operand :
+            (operation == 2 ? old | operand : old & ~operand);
+        status = yan_cpu_write_csr(cpu, address, updated);
+        if (status != YAN_OK) {
+            return status;
+        }
+    }
+    *value = old;
+    return YAN_OK;
+}
+
 static YanStatus enter_trap(YanCpu *cpu, uint32_t cause, uint32_t value)
 {
     cpu->csr.mepc = cpu->pc & UINT32_C(0xfffffffc);
@@ -236,8 +271,22 @@ YanStatus yan_cpu_step(YanCpu *cpu, YanBus *bus)
     const uint32_t opcode = instruction & UINT32_C(0x7f);
     const int branch = opcode == UINT32_C(0x63);
     const int store = opcode == UINT32_C(0x23);
+    const int fence = opcode == UINT32_C(0x0f) && ((instruction >> 12) & UINT32_C(7)) == 0;
+    const int mret = instruction == UINT32_C(0x30200073);
     YanStatus status = YAN_OK;
-    if (opcode == UINT32_C(0x03)) {
+    if (instruction == UINT32_C(0x00000073)) {
+        return enter_trap(cpu, 11, 0);
+    } else if (instruction == UINT32_C(0x00100073)) {
+        return enter_trap(cpu, 3, cpu->pc);
+    } else if (mret) {
+        next_pc = cpu->csr.mepc & UINT32_C(0xfffffffc);
+        cpu->csr.mstatus = YAN_MSTATUS_MPP | YAN_MSTATUS_MPIE |
+            ((cpu->csr.mstatus & YAN_MSTATUS_MPIE) != 0 ? YAN_MSTATUS_MIE : 0);
+    } else if (opcode == UINT32_C(0x73)) {
+        status = execute_csr(cpu, instruction, &value);
+    } else if (fence) {
+        /* One hart, synchronous RAM accesses, no asynchronous devices. */
+    } else if (opcode == UINT32_C(0x03)) {
         status = load_value(cpu, bus, instruction, &value, &fault_address);
     } else if (branch) {
         status = compute_branch_target(cpu, instruction, &next_pc);
@@ -281,7 +330,7 @@ YanStatus yan_cpu_step(YanCpu *cpu, YanBus *bus)
             }
             return access_fault(cpu, status, 6, fault_address);
         }
-    } else if (!branch) {
+    } else if (!branch && !fence && !mret) {
         (void)yan_cpu_write_reg(cpu, rd, value);
     }
     cpu->pc = next_pc;
