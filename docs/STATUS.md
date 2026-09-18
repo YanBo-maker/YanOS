@@ -1,6 +1,6 @@
 # 项目状态
 
-当前阶段：M-mode 同步异常。实现与本地验证已完成，用户审查待完成。Load / Store 阶段已通过用户审查并合入主分支。
+当前阶段：RV32M 乘除扩展。实现与本地验证已完成，用户审查待完成。Load / Store 阶段已通过用户审查并合入主分支。
 
 ## 已完成
 
@@ -15,11 +15,12 @@
 - 符号扩展、32 位回绕、移位量屏蔽及编码拒绝后的状态保持。
 - 同步异常进入、mepc / mcause / mtval、MIE / MPIE 状态保存与 MRET 返回。
 - 六种 CSR 指令与有限的机器模式 CSR 集合；ECALL、EBREAK 和当前 RAM 平台下的 FENCE。
+- RV32M 的 MUL、MULH、MULHSU、MULHU、DIV、DIVU、REM、REMU，包含除零和有符号溢出规则。
 - C17 / CMake 构建、Unity 单元测试、CTest 及 GitHub Actions。
 
 ## 验证
 
-GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建均通过十一组 CTest：RAM、Bus、Machine、CPU、Fetch、Step、ALU、Control、Memory、CSR、Trap，共 77 个 Unity 测试用例。
+GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建均通过十二组 CTest：RAM、Bus、Machine、CPU、Fetch、Step、ALU、Control、Memory、CSR、Trap、M，共 81 个 Unity 测试用例。
 
 立即数测试覆盖全部 4096 种编码；移位覆盖 0～31 及寄存器移位量高位屏蔽。十条寄存器运算各覆盖 32768 种 rd / rs1 / rs2 组合。固定向量和边界矩阵检查符号比较、算术回绕、逻辑运算与 AUIPC 当前 PC 语义。
 
@@ -29,6 +30,8 @@ GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建均通过十一组 CTest�
 
 异常测试覆盖各原因码、mtval、入口状态、Host 错误隔离、嵌套异常、无效入口、六种 CSR 指令的寄存器组合和读写抑制、MRET 恢复及 Machine 复位。Guest 集成测试通过 CSR 指令配置入口，在 ECALL 后调整 mepc 并返回继续执行。
 
+M 扩展测试覆盖四种乘法结果、四种除法和余数结果、零除数、`INT_MIN / -1`、全部寄存器字段及非法 `funct7` 编码。
+
 新增异常与系统指令执行测试均确认在实现前失败，实现后通过；原有单步错误用例已迁移到 Guest 异常语义。
 
 Debug 启用 AddressSanitizer 和 UndefinedBehaviorSanitizer。内存分配失败分支尚未通过故障注入验证。
@@ -37,11 +40,11 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。各任务
 
 ## 下一步
 
-审查 [Guest 异常规格](specs/0009-guest-traps.md) 及配套实现，随后确定 M 扩展与设备阶段的任务范围。
+审查 [M 扩展规格](specs/0010-m-extension.md) 及配套实现，随后确定设备阶段的任务范围。
 
-已实现 40 条 RV32I 基础指令的功能路径、六种 CSR 指令和 MRET。单步返回 YAN_OK 表示正常完成，YAN_TRAP 表示已进入 Guest 异常；Host 参数和对象状态错误仍直接返回。Bus、RAM 与独立取指接口保留原有错误语义。
+已实现 40 条 RV32I 基础指令的功能路径、八条 RV32M 指令、六种 CSR 指令和 MRET。单步返回 YAN_OK 表示正常完成，YAN_TRAP 表示已进入 Guest 异常；Host 参数和对象状态错误仍直接返回。Bus、RAM 与独立取指接口保留原有错误语义。
 
-当前只覆盖 M-mode 同步异常及规格列出的 CSR，尚未实现中断、U/S 模式、分页、M 扩展和设备，也未完成完整 ISA / 特权架构符合性验收。Machine 装载调用者提供的内存缓冲区，Host 文件加载与 Guest 工具链集成仍待实现。
+当前只覆盖 M-mode 同步异常及规格列出的 CSR，尚未实现中断、U/S 模式、分页和设备，也未完成完整 ISA / 特权架构符合性验收。Machine 装载调用者提供的内存缓冲区，Host 文件加载与 Guest 工具链集成仍待实现。
 
 ## 待定设计
 

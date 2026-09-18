@@ -6,7 +6,7 @@ YanOS 是一个用于学习计算机系统的项目，计划实现 RISC-V 模拟
 
 ## 状态
 
-已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位、取指和整数指令单步执行。已实现 RV32I 的整数计算、控制转移、访存、FENCE、ECALL 和 EBREAK，并提供六种 CSR 指令及 MRET，支持 M-mode 同步异常处理。中断、分页和 M 扩展仍待实现。详细进度见 [STATUS](docs/STATUS.md)。
+已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位、取指和整数指令单步执行。已实现 RV32I 的整数计算、控制转移、访存、FENCE、ECALL 和 EBREAK，并提供六种 CSR 指令及 MRET，支持 M-mode 同步异常处理。RV32M 的八条乘除指令已加入。中断、分页和设备仍待实现。详细进度见 [STATUS](docs/STATUS.md)。
 
 ## 构建与测试
 

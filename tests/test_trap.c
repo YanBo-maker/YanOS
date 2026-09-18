@@ -213,7 +213,7 @@ static void fence_and_unsupported_extensions(void)
         TEST_ASSERT_EQUAL_MEMORY(&before.csr, &cpu.csr, sizeof cpu.csr);
     }
     instruction(0x0000100f); check_trap(2, 0x0000100f);
-    instruction(0x027302b3); check_trap(2, 0x027302b3); /* M extension not implemented. */
+    instruction(0x047302b3); check_trap(2, 0x047302b3);
 }
 
 int main(void)
