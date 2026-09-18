@@ -99,8 +99,8 @@ static void sequential_steps_and_nop(void)
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_step(&cpu, &bus));
     TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
     TEST_ASSERT_EQUAL_HEX32(base + 8, cpu.pc);
-    TEST_ASSERT_EQUAL_INT(YAN_UNMAPPED, yan_cpu_step(&cpu, &bus));
-    TEST_ASSERT_EQUAL_HEX32(base + 8, cpu.pc);
+    TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(cpu.csr.mtvec, cpu.pc);
     TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
 }
 
@@ -110,8 +110,10 @@ static void assert_rejected_word(uint32_t word)
     YanCpu before = cpu;
     uint8_t memory[8];
     memcpy(memory, ram.data, sizeof memory);
-    TEST_ASSERT_EQUAL_INT(YAN_UNSUPPORTED_INSTRUCTION, yan_cpu_step(&cpu, &bus));
-    TEST_ASSERT_EQUAL_HEX32(before.pc, cpu.pc);
+    TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(cpu.csr.mtvec, cpu.pc);
+    TEST_ASSERT_EQUAL_HEX32(2, cpu.csr.mcause);
+    TEST_ASSERT_EQUAL_HEX32(word, cpu.csr.mtval);
     TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
     TEST_ASSERT_EQUAL_MEMORY(memory, ram.data, sizeof memory);
 }
@@ -121,7 +123,8 @@ static void unsupported_encodings_preserve_state(void)
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 5, 73));
     for (uint32_t opcode = 0; opcode < 128; ++opcode) {
         if (opcode != 0x13 && opcode != 0x33 && opcode != 0x37 && opcode != 0x17 &&
-            opcode != 0x63 && opcode != 0x6f && opcode != 0x67 && opcode != 0x03 && opcode != 0x23) {
+            opcode != 0x63 && opcode != 0x6f && opcode != 0x67 && opcode != 0x03 &&
+            opcode != 0x23 && opcode != 0x0f) {
             assert_rejected_word(UINT32_C(0x00128280) | opcode);
         }
     }
@@ -144,23 +147,25 @@ static void fetch_failures_preserve_state(void)
     YanCpu before = cpu;
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; ++i) {
         cpu.pc = cases[i].address;
-        TEST_ASSERT_EQUAL_INT(cases[i].status, yan_cpu_step(&cpu, &bus));
-        TEST_ASSERT_EQUAL_HEX32(cases[i].address, cpu.pc);
+        TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_cpu_step(&cpu, &bus));
+        TEST_ASSERT_EQUAL_HEX32(cpu.csr.mtvec, cpu.pc);
+        TEST_ASSERT_EQUAL_HEX32(cases[i].status == YAN_UNALIGNED ? 0 : 1, cpu.csr.mcause);
+        TEST_ASSERT_EQUAL_HEX32(cases[i].address, cpu.csr.mtval);
         TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
     }
     YanBus empty = {0};
     TEST_ASSERT_EQUAL_INT(YAN_INVALID_ARGUMENT, yan_cpu_step(NULL, &bus));
     TEST_ASSERT_EQUAL_INT(YAN_INVALID_ARGUMENT, yan_cpu_step(&cpu, NULL));
     TEST_ASSERT_EQUAL_INT(YAN_INVALID_STATE, yan_cpu_step(&cpu, &empty));
-    TEST_ASSERT_EQUAL_HEX32(cases[4].address, cpu.pc);
+    TEST_ASSERT_EQUAL_HEX32(cpu.csr.mtvec, cpu.pc);
     TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
     TEST_ASSERT_EQUAL_MEMORY(memory, ram.data, sizeof memory);
     yan_ram_destroy(&ram);
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_ram_init(&ram, 3));
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_bus_init(&bus, &ram, base));
     cpu.pc = base;
-    TEST_ASSERT_EQUAL_INT(YAN_OUT_OF_BOUNDS, yan_cpu_step(&cpu, &bus));
-    TEST_ASSERT_EQUAL_HEX32(base, cpu.pc);
+    TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(cpu.csr.mtvec, cpu.pc);
     TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
     TEST_ASSERT_EACH_EQUAL_UINT8(0, ram.data, 3);
 }
@@ -174,7 +179,7 @@ static void pc_wraps_at_address_space_top(void)
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_step(&cpu, &bus));
     TEST_ASSERT_EQUAL_HEX32(0, cpu.pc);
     TEST_ASSERT_EQUAL_HEX32(1, cpu.regs[5]);
-    TEST_ASSERT_EQUAL_INT(YAN_UNMAPPED, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_cpu_step(&cpu, &bus));
     TEST_ASSERT_EQUAL_HEX32(0, cpu.pc);
     TEST_ASSERT_EQUAL_HEX32(1, cpu.regs[5]);
 }

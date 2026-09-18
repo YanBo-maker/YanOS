@@ -45,8 +45,10 @@ static void check_rejected(uint32_t word)
     YanCpu before = cpu;
     uint8_t memory[8];
     memcpy(memory, ram.data, sizeof memory);
-    TEST_ASSERT_EQUAL_INT(YAN_UNSUPPORTED_INSTRUCTION, yan_cpu_step(&cpu, &bus));
-    TEST_ASSERT_EQUAL_HEX32(before.pc, cpu.pc);
+    TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(cpu.csr.mtvec, cpu.pc);
+    TEST_ASSERT_EQUAL_HEX32(2, cpu.csr.mcause);
+    TEST_ASSERT_EQUAL_HEX32(word, cpu.csr.mtval);
     TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
     TEST_ASSERT_EQUAL_MEMORY(memory, ram.data, sizeof memory);
 }

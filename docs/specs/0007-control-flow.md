@@ -1,5 +1,7 @@
 # 0007：条件分支与跳转
 
+单步中的 Guest 错误处理已由 [0009：M-mode 同步异常](0009-guest-traps.md) 更新；本文件保留对应阶段的指令规格。
+
 ## INTENTION
 
 在整数计算基础上实现控制转移，让 CPU 根据条件选择后续指令，并保存函数调用的返回地址。新增 BEQ、BNE、BLT、BGE、BLTU、BGEU、JAL、JALR，共八条指令。

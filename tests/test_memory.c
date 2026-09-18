@@ -41,8 +41,8 @@ static void check_load(uint32_t word, YanStatus status, uint32_t rd, uint32_t va
     }
     uint8_t memory[64];
     memcpy(memory, ram.data, ram.size);
-    TEST_ASSERT_EQUAL_INT(status, yan_cpu_step(&cpu, &bus));
-    TEST_ASSERT_EQUAL_HEX32(status == YAN_OK ? bus.ram_base + UINT32_C(4) : expected.pc, cpu.pc);
+    TEST_ASSERT_EQUAL_INT(status == YAN_OK ? YAN_OK : YAN_TRAP, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(status == YAN_OK ? bus.ram_base + UINT32_C(4) : cpu.csr.mtvec, cpu.pc);
     TEST_ASSERT_EQUAL_HEX32_ARRAY(expected.regs, cpu.regs, 32);
     TEST_ASSERT_EQUAL_MEMORY(memory, ram.data, ram.size);
 }
@@ -181,8 +181,8 @@ static void check_store(uint32_t word, YanStatus status, size_t offset, size_t w
             value /= 256;
         }
     }
-    TEST_ASSERT_EQUAL_INT(status, yan_cpu_step(&cpu, &bus));
-    TEST_ASSERT_EQUAL_HEX32(status == YAN_OK ? before.pc + UINT32_C(4) : before.pc, cpu.pc);
+    TEST_ASSERT_EQUAL_INT(status == YAN_OK ? YAN_OK : YAN_TRAP, yan_cpu_step(&cpu, &bus));
+    TEST_ASSERT_EQUAL_HEX32(status == YAN_OK ? before.pc + UINT32_C(4) : cpu.csr.mtvec, cpu.pc);
     TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
     TEST_ASSERT_EQUAL_MEMORY(expected, ram.data, ram.size);
 }
@@ -293,8 +293,8 @@ static void fetch_failure_prevents_data_access(void)
             YanCpu before = cpu;
             uint8_t memory[64];
             memcpy(memory, ram.data, sizeof memory);
-            TEST_ASSERT_EQUAL_INT(p == 0 ? YAN_UNALIGNED : YAN_UNMAPPED, yan_cpu_step(&cpu, &bus));
-            TEST_ASSERT_EQUAL_HEX32(before.pc, cpu.pc);
+            TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_cpu_step(&cpu, &bus));
+            TEST_ASSERT_EQUAL_HEX32(cpu.csr.mtvec, cpu.pc);
             TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
             TEST_ASSERT_EQUAL_MEMORY(memory, ram.data, sizeof memory);
         }

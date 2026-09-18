@@ -22,7 +22,7 @@ if(YAN_ENABLE_SANITIZERS)
     endif()
 endif()
 
-add_library(yan_machine STATIC src/ram.c src/bus.c src/machine.c src/cpu.c)
+add_library(yan_machine STATIC src/ram.c src/bus.c src/machine.c src/cpu.c src/csr.c)
 target_include_directories(yan_machine PUBLIC include)
 target_compile_options(yan_machine PRIVATE ${YAN_WARNINGS})
 
@@ -38,7 +38,7 @@ if(BUILD_TESTING)
         URL_HASH SHA256=a197ea06556f524e378861e503fcfe2fe040447c7b90540ad86b653b13245ae4)
     FetchContent_MakeAvailable(unity)
 
-    foreach(suite ram bus machine cpu fetch step alu control memory)
+    foreach(suite ram bus machine cpu fetch step alu control memory csr trap)
         add_executable(test_${suite} tests/test_${suite}.c)
         target_link_libraries(test_${suite} PRIVATE yan_machine unity::framework)
         target_compile_options(test_${suite} PRIVATE ${YAN_WARNINGS})
