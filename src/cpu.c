@@ -85,6 +85,31 @@ static uint32_t integer_operation(uint32_t funct3, uint32_t left,
     }
 }
 
+static uint32_t m_extension_operation(uint32_t funct3, uint32_t left,
+                                       uint32_t right)
+{
+    const int64_t signed_left = left <= INT32_MAX ? (int64_t)left :
+        (int64_t)left - INT64_C(4294967296);
+    const int64_t signed_right = right <= INT32_MAX ? (int64_t)right :
+        (int64_t)right - INT64_C(4294967296);
+    switch (funct3) {
+    case 0: return (uint32_t)((uint64_t)left * right);
+    case 1: return (uint32_t)(((uint64_t)(signed_left * signed_right)) >> 32);
+    case 2: return (uint32_t)(((uint64_t)(signed_left * (int64_t)(uint64_t)right)) >> 32);
+    case 3: return (uint32_t)(((uint64_t)left * right) >> 32);
+    case 4:
+        if (right == 0) return UINT32_MAX;
+        if (left == UINT32_C(0x80000000) && right == UINT32_MAX) return left;
+        return (uint32_t)(signed_left / signed_right);
+    case 5: return right == 0 ? UINT32_MAX : left / right;
+    case 6:
+        if (right == 0) return left;
+        if (left == UINT32_C(0x80000000) && right == UINT32_MAX) return 0;
+        return (uint32_t)(signed_left % signed_right);
+    default: return right == 0 ? left : left % right;
+    }
+}
+
 static YanStatus compute_integer_result(const YanCpu *cpu, uint32_t instruction,
                                         uint32_t *value)
 {
@@ -100,6 +125,15 @@ static YanStatus compute_integer_result(const YanCpu *cpu, uint32_t instruction,
     }
     const uint32_t upper = instruction >> 25;
     const int register_op = opcode == UINT32_C(0x33);
+    if (register_op && upper == UINT32_C(0x01)) {
+        const uint32_t rs1 = (instruction >> 15) & UINT32_C(31);
+        const uint32_t rs2 = (instruction >> 20) & UINT32_C(31);
+        uint32_t left = 0, right = 0;
+        (void)yan_cpu_read_reg(cpu, rs1, &left);
+        (void)yan_cpu_read_reg(cpu, rs2, &right);
+        *value = m_extension_operation(funct3, left, right);
+        return YAN_OK;
+    }
     if (register_op && upper != 0 &&
         !(upper == UINT32_C(0x20) && (funct3 == 0 || funct3 == 5))) {
         return YAN_UNSUPPORTED_INSTRUCTION;
