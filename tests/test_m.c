@@ -55,7 +55,10 @@ static void run_one(uint32_t funct3, uint32_t rd, uint32_t rs1, uint32_t rs2,
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_ram_write(&ram, 0, 4, encode_m(funct3, rd, rs1, rs2)));
     cpu.pc = bus.ram_base;
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_step(&cpu, &bus));
-    TEST_ASSERT_EQUAL_HEX32(oracle(funct3, left, right), cpu.regs[rd]);
+    const uint32_t actual_left = rs1 == 0 ? 0 : left;
+    const uint32_t actual_right = rs2 == 0 ? 0 : right;
+    const uint32_t expected = rd == 0 ? 0 : oracle(funct3, actual_left, actual_right);
+    TEST_ASSERT_EQUAL_HEX32(expected, cpu.regs[rd]);
     TEST_ASSERT_EQUAL_HEX32(bus.ram_base + 4, cpu.pc);
 }
 
@@ -97,7 +100,8 @@ static void register_fields_and_x0(void)
                     if (rd == 0) {
                         TEST_ASSERT_EQUAL_HEX32(0, cpu.regs[0]);
                     } else {
-                        TEST_ASSERT_EQUAL_HEX32(oracle(funct3, left, right), cpu.regs[rd]);
+                        TEST_ASSERT_EQUAL_HEX32(oracle(funct3, rs1 == 0 ? 0 : left,
+                                                       rs2 == 0 ? 0 : right), cpu.regs[rd]);
                     }
                 }
             }
