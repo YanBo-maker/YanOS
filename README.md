@@ -24,6 +24,8 @@ ctest --test-dir build -C Debug --output-on-failure
 
 GCC / Clang 的 Unix 构建可在配置时添加 `-DYAN_ENABLE_SANITIZERS=ON`，启用地址与未定义行为检测。
 
+构建 Guest 验证执行器可添加 `-DYAN_BUILD_TOOLS=ON`。`yan_run` 支持 RV32 ELF、最大步数、`tohost` 退出、签名区导出和逐条架构状态记录；完整参考模型差分流程见 [CPU 验证规格](docs/specs/0011-cpu-validation.md)。
+
 ## 设计
 
 YanCPU 使用 C17 编写，在本机命令行运行。初始目标为 RV32IM_Zicsr，采用 32 位、小端、单核和 M-mode 配置。模拟器关注指令执行后的状态变化，电路时序和微架构留待后续探索。

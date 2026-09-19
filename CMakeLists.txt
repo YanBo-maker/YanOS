@@ -22,9 +22,17 @@ if(YAN_ENABLE_SANITIZERS)
     endif()
 endif()
 
+option(YAN_BUILD_TOOLS "Build Guest validation tools" OFF)
+
 add_library(yan_machine STATIC src/ram.c src/bus.c src/machine.c src/cpu.c src/csr.c)
 target_include_directories(yan_machine PUBLIC include)
 target_compile_options(yan_machine PRIVATE ${YAN_WARNINGS})
+
+if(YAN_BUILD_TOOLS)
+    add_executable(yan_run tools/yan_run.c)
+    target_link_libraries(yan_run PRIVATE yan_machine)
+    target_compile_options(yan_run PRIVATE ${YAN_WARNINGS})
+endif()
 
 include(CTest)
 if(BUILD_TESTING)
