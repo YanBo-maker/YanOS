@@ -17,6 +17,7 @@
 - 六种 CSR 指令与有限的机器模式 CSR 集合；ECALL、EBREAK 和当前 RAM 平台下的 FENCE。
 - RV32M 的 MUL、MULH、MULHSU、MULHU、DIV、DIVU、REM、REMU，包含除零和有符号溢出规则。
 - 面向外部验证模型的只读 CPU 架构状态快照接口。
+- `yan_run` Guest ELF 执行器基础版本，支持最大步数、tohost 退出、签名区导出和 JSONL 架构状态记录。
 - C17 / CMake 构建、Unity 单元测试、CTest 及 GitHub Actions。
 
 ## 验证
