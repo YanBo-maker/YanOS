@@ -315,7 +315,10 @@ YanStatus yan_cpu_step(YanCpu *cpu, YanBus *bus)
     const uint32_t opcode = instruction & UINT32_C(0x7f);
     const int branch = opcode == UINT32_C(0x63);
     const int store = opcode == UINT32_C(0x23);
-    const int fence = opcode == UINT32_C(0x0f) && ((instruction >> 12) & UINT32_C(7)) == 0;
+    /* Zifencei: FENCE (funct3=0) and FENCE.I (funct3=1) only advance the PC.
+     * A store may overwrite the instruction already fetched and every step
+     * re-reads RAM, so no instruction stream synchronisation is needed. */
+    const int fence = opcode == UINT32_C(0x0f) && ((instruction >> 12) & UINT32_C(7)) <= 1;
     const int mret = instruction == UINT32_C(0x30200073);
     YanStatus status = YAN_OK;
     if (instruction == UINT32_C(0x00000073)) {
