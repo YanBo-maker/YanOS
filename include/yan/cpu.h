@@ -21,11 +21,15 @@ typedef struct {
     YanCsr csr;
 } YanCpu;
 
+/* Stable architectural state exchanged with external validation models. */
+typedef YanCpu YanCpuState;
+
 YanStatus yan_cpu_reset(YanCpu *cpu, uint32_t entry);
 YanStatus yan_cpu_read_reg(const YanCpu *cpu, uint32_t index, uint32_t *value);
 YanStatus yan_cpu_write_reg(YanCpu *cpu, uint32_t index, uint32_t value);
 YanStatus yan_cpu_read_csr(const YanCpu *cpu, uint32_t address, uint32_t *value);
 YanStatus yan_cpu_write_csr(YanCpu *cpu, uint32_t address, uint32_t value);
+YanStatus yan_cpu_snapshot(const YanCpu *cpu, YanCpuState *state);
 /* Reads the word at PC; preserves CPU state, RAM, and outputs on failure. */
 YanBusResult yan_cpu_fetch(const YanCpu *cpu, const YanBus *bus,
                            uint32_t *instruction);

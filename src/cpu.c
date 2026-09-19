@@ -44,6 +44,16 @@ YanStatus yan_cpu_write_reg(YanCpu *cpu, uint32_t index, uint32_t value)
     return YAN_OK;
 }
 
+YanStatus yan_cpu_snapshot(const YanCpu *cpu, YanCpuState *state)
+{
+    if (cpu == NULL || state == NULL) {
+        return YAN_INVALID_ARGUMENT;
+    }
+    *state = *cpu;
+    state->regs[0] = 0;
+    return YAN_OK;
+}
+
 YanBusResult yan_cpu_fetch(const YanCpu *cpu, const YanBus *bus,
                            uint32_t *instruction)
 {
