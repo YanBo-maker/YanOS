@@ -2,40 +2,110 @@
 
 ## INTENTION
 
-当前 CTest 主要验证单条指令和模块边界。它们适合定位实现错误，不能单独回答 CPU 在真实 Guest 指令流中是否持续保持架构状态，也不能发现某一步错误后对后续执行的影响。
+模块测试适合定位实现错误，不能回答 CPU 在真实 Guest 指令流中是否**持续**保持架构状态，也不能发现某一步错误对后续执行的影响。验证层要把 YanCPU 放到外部参考模型和官方测试套件面前，并且明确声明哪些架构状态已被覆盖、哪些没有。
 
-验证层需要引入一生一芯使用的逐指令差分思路，并接入 RISC-V 官方架构测试。每条已提交指令都应有可记录的架构状态，测试驱动可以把 YanCPU 与参考模型放在同一条指令边界上比较。
+本项目使用两条外部路线：一生一芯的逐指令差分思路（参考模型 NEMU），以及 RISC-V 官方测试（riscv-tests 自检套件与 Sail 参考签名比对）。三条链——测试生成、参考模型签名、DUT 执行器——都必须在同一次运行里真实参与比对。
 
 ## SPEC
 
-验证分成三层：
+验证分成四层。前两层随仓库自带，后两层是可选外部验证层。
 
-1. **模块测试**：现有 Unity / CTest，覆盖 RAM、Bus、CPU、CSR 和异常接口。
-2. **架构测试**：接入 RISC-V Architectural Compatibility Tests（ACT）及其 RV32I、M、Zicsr、Zifencei 测试，使用 ELF、签名区和 PASS / FAIL 退出协议。
-3. **差分测试**：测试驱动加载同一份 Guest 镜像，让 YanCPU 和外部参考模型逐条执行；每次提交比较 PC、32 个通用寄存器和当前支持的 M-mode CSR。首次不一致时保存指令地址、机器码、DUT 状态、参考状态和最近的执行窗口。
+1. **模块测试**：Unity / CTest，覆盖 RAM、Bus、Machine、CPU、取指、整数、控制转移、访存、CSR、异常、M 扩展、架构快照，以及镜像加载与差分比较两个模块。
+2. **逐指令差分测试**：`yan_difftest` 加载同一份 Guest 镜像，让 YanCPU 与外部参考模型从同一内存镜像、同一复位状态出发，YanCPU 每提交一条指令就与参考模型比较一次 PC 与 32 个通用寄存器；首次不一致时输出出错指令地址、机器码、首个不同寄存器与两侧完整寄存器表。运行结束时再比较整段 RAM。
+3. **官方架构测试**：`riscv-tests` 的 `rv32ui` 与 `rv32um` 自检套件。测试通过 `tohost` 报告结果，`yan_run` 从 ELF 符号表解析该符号，不硬编码地址。
+4. **签名比对**：`sail_riscv_sim`（第三方独立实现）按 ELF 的 `begin_signature` / `end_signature` 符号导出期望签名，`yan_run --signature` 导出 DUT 签名，两者逐字节 `cmp`。签名区由链接脚本决定，在本仓库的 Guest 语料里它覆盖整个可写段（含栈），因此这一层比较的是**步数上限处的整段可写状态**，而不是 ACT 风格的显式输出数组。
+5. **官方 ACT4 测试语料**：直接使用 `riscv-arch-test` 的官方测试源（`tests/rv32i/I` 与 `tests/rv32i/M`），用本仓库的 DUT 配置 `tests/act4/`（`rvtest_config.h`、`rvmodel_macros.h`、`link.ld`）汇编成镜像；同一镜像由 Sail 产生参考签名、由 `yan_run` 产生 DUT 签名，逐字节比较。这一层不使用 ACT4 自带的构建系统（它需要 UDB/Docker 环境），但**测试源与参考模型都是官方的**。
 
-架构测试与差分测试属于可选外部验证层。它们需要明确的 Guest 镜像加载、测试退出、签名区和参考模型适配接口，不能由现有单元测试名称代替。
+### 覆盖边界
 
-当前的 `yan_run` 是执行器基础版本。配置 `-DYAN_BUILD_TOOLS=ON` 后，可以使用以下参数加载 RV32 ELF、限制步数、轮询 `tohost`、导出签名区和写出逐条架构状态：
+以下边界必须与实现一致，不能靠测试名称掩盖。
+
+- 差分测试比较 **PC + 32 个通用寄存器 + 结束时的整段 RAM**（x0 按架构语义归一化为零，两侧内存镜像在开始前完全一致）。
+- 差分测试**不比较 CSR**：`mstatus`、`mtvec`、`mscratch`、`mepc`、`mcause`、`mtval` 以及 trap / MRET 语义都不在 NEMU riscv32 参考状态里（`DIFFTEST_REG_SIZE` 只有 132 字节 = 32 GPR + pc）。含 CSR、ECALL / EBREAK、MRET 的 Guest 不适用于本层；DUT 进入异常时工具返回 3，并显式说明该情形超出参考模型范围。
+- 参考模型由本仓库补全：上游 NEMU 的 `src/cpu/difftest/ref.c` 与 `src/isa/riscv32/inst.c` 是留白桩，本项目的 RV32IM 参考实现与 DUT 出自同一作者。因此它证明的是**两份实现的一致性**，证据强度不等同第三方模型。
+- 官方测试层只覆盖 `riscv-tests` 的 `rv32ui` 与 `rv32um`。`rv32ui-p-ma_data` 是**显式排除项**：Yan 平台按设计拒绝非对齐访存，而该测试要求非对齐访问成功；脚本打印 SKIP 与原因，不计为通过。`riscv-tests` 是自检式套件，不产生签名，因此它不能替代签名比对，也不与 `riscv-arch-test`（ACT4）互相等同。
+- 签名层的参考模型是 Sail（第三方独立实现），但它只在用户态 RV32IM 上运行，同样不为 CSR / 特权语义提供证据。
+- ACT4 官方框架（`riscv-arch-test`、RVMODEL 宏、`testplans`、Sail 期望结果编译进自检 ELF）**尚未接入**。
+
+### ACT4 层的能力边界
+
+- 只选 `tests/rv32i/I` 与 `tests/rv32i/M`。YanOS 没有中断控制器、计时器、S/U 模式和 PMP，`tests/rv32i/Zicsr`、`tests/rv32i/priv` 及其以上都跑不了。
+- 汇编时必须传 `-DUNROLLSZ=0`：框架默认把入口对齐到 32 字节，在没有 C 扩展时只能用零填充，而执行流会踩过这段填充（Sail 与 YanOS 都会在那里取到非法指令）。
+- 需要异常处理器的测试（非对齐的分支/跳转目标）报 SKIP：框架的标准 M-mode 启动路径会写 `mie`、`mip`、`medeleg`、`mideleg`，这些 CSR 不在 YanOS 的六个 CSR 之列，因此 `mtvec` 不会被安装，两个模型都会落到地址 0。
+- **中断与计时器由语料检查拦住，不由宏拦住**：本框架在 DUT 头之后 include `sail_macros.h`，并把 `RVMODEL_SET/CLR_MEXT_INT`、`SET/CLR_MSW_INT` 全部 `#undef` 成真实的 CLINT/PLIC 实现，因此 DUT 头里的 `.error` 守卫**不生效**（`-DRVTEST_SELFCHECK` 下才会生效）。真正生效的守卫在 `tests/official/run_act4.sh`：选中测试的**源码文本**里出现 `RVMODEL_(SET|CLR)_(MEXT|MSW)_INT`、`RVMODEL_MSIP_ADDRESS` 或 `RVMODEL_MTIME_ADDRESS` 时，该用例在运行前就被拒绝并报 SKIP。这条检查只看测试 `.S` 文本，不覆盖在 env 头里间接展开的路径；当前 47 个用例全部有明确归属（40 通过、7 因需要异常处理器而 SKIP）。
+- 这一层用签名比对决定结论，**不使用测试自身的 pass/fail 字**，也不使用 `tohost`：ACT4 的 `sail_macros.h` 把 `tohost` 当作 HTIF 控制台寄存器，逐字符写摘要串（首字符是 `'\n'` = 10），所以"第一个非零值"不是停机请求。`yan_run` 因此用 `--ignore-tohost` 跑满步数上限，只导出签名。只有两侧签名都存在且逐字节相同时才算通过。
+
+### 退出码
+
+`yan_run` 与 `yan_difftest` 共用出口约定，调用方不能把非零一律当作同一类失败。
+
+| 码 | 含义 |
+| --- | --- |
+| 0 | PASS：命中 `tohost` 且值为 1（差分测试还要求每条指令状态一致、结束时 RAM 一致） |
+| 1 | 差分测试发现首个不一致（仅 `yan_difftest`） |
+| 2 | 用法或 Host I/O 错误 |
+| 3 | DUT 进入异常，超出参考模型范围（仅 `yan_difftest`） |
+| 4 | 达到步数上限仍未命中 `tohost` |
+| 5 | 工具、镜像或参考模型内部失败 |
+| 6 | Guest 通过 `tohost` 报告失败（值不为 1），工具同时打印该值。注意：当 Guest 把 `tohost` 用作控制台一类用途时该判据不成立，此时用 `--ignore-tohost` |
+| 7 | 跑到步数上限并已导出签名区（`yan_run --signature`，`--ignore-tohost` 时也返回该值） |
+
+### 运行方式
+
+外部验证层由 CMake 选项开启；依赖缺失时它们**不注册或报 SKIP**，从不显示为通过。
 
 ```sh
-./yan_run --image test.elf --max-steps 1000000 \
-  --tohost 0x80001000 --trace dut.jsonl \
-  --signature dut.sig 0x80002000 0x80003000
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DYAN_BUILD_TOOLS=ON \
+  -DYAN_NEMU_REF_SO=/path/to/riscv32-nemu-interpreter-so \
+  -DYAN_NEMU_REF_DIR=/path/to/nemu-source \
+  -DYAN_RISCV_TESTS_DIR=/path/to/riscv-tests \
+  -DYAN_RISCV_ARCH_TEST_DIR=/path/to/riscv-arch-test \
+  -DYAN_SAIL_BIN=/path/to/sail_riscv_sim
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 ```
 
-它已经具备镜像执行和状态记录能力；参考模型比较、官方测试环境宏和完整 ACT 流程仍需接入。
+`YAN_NEMU_REF_DIR` 只在参考模型侧变异测试中使用：它指向 NEMU 源码，测试会在副本里改坏一条指令、重新构建参考模型，并要求差分测试仍然报告不一致。
+
+各层也可以单独运行：
+
+```sh
+./yan_difftest --image dut.elf --ref-so ref.so --max-steps 2000000 --report dut.jsonl
+./yan_run --image test.elf --max-steps 4000000
+./yan_run --image test.elf --max-steps 2000000 --signature dut.sig 0x80000610 0x80004930
+```
+
+参考模型共享对象按一生一芯流程构建：`NEMU_HOME=<nemu> make SHARE=1 ENGINE=interpreter`。
 
 ## IMPLE PLAN
 
-1. 暴露只读的架构状态快照接口，固定差分比较的数据布局。
-2. 增加 ELF32 little-endian Guest 加载器和受控执行器，支持入口地址、最大步数、tohost 退出和签名区导出。
-3. 增加统一的 JSONL 提交记录格式，并提供参考模型适配器接口；参考模型优先采用 NEMU，架构兼容性验收采用官方 `riscv-arch-test`。
-4. 在 Linux CI 中以显式工具链和参考模型版本运行 RV32IM_Zicsr_Zifencei 子集；依赖缺失时保留本地模块测试，CI 不得把跳过外部测试报告为通过。
-5. 用第一条不一致指令的最小复现镜像作为回归用例，回归用例进入 CTest。
+1. ~~暴露只读的架构状态快照接口，固定差分比较的数据布局。~~ 已完成。
+2. ~~增加 ELF32 little-endian Guest 加载器与受控执行器，支持入口地址、最大步数、`tohost` 退出和签名区导出。~~ 已完成，符号表解析使 `tohost` 与签名区都不依赖固定地址。
+3. ~~统一提交记录格式并提供参考模型适配接口（参考模型采用 NEMU）。~~ 已完成。
+4. ~~在 Linux 上以显式工具链与参考模型运行 RV32IM_Zicsr_Zifencei 子集；依赖缺失时保留本地模块测试，且不把跳过的外部测试报告为通过。~~ 已完成。
+5. ~~用不一致指令的最小复现作为回归用例，并进入 CTest。~~ 已完成，形式是两组变异测试：往 DUT 注入已知缺陷，以及**改坏参考模型**。后者证明比较确实消费了参考状态，而不是把 DUT 与自己比较。
+6. ~~接入 ACT4 官方框架，替换当前的自检式官方套件。~~ 部分完成：官方 ACT4 的**测试语料与参考模型**已接入（见第 5 层），框架自带的构建系统没有接入。
 
 ## VERIFY
 
-当前提交只落地第 1 步，并验证快照不会改变 CPU、Bus 或内存状态。完成第 2～4 步前，项目不宣称通过 RISC-V 架构兼容性测试，也不把现有 12 组 CTest 解释为 CPU 合规性证明。
+外部验证层需要一个 RISC-V 裸机工具链、一个 NEMU 参考共享对象、一份 `riscv-tests` 检出和 Sail。工具链按 `YAN_RISCV_PREFIX`、`riscv64-unknown-elf-gcc`、`riscv32-unknown-elf-gcc`、`riscv64-linux-gnu-gcc` 的顺序探测；本机 `riscv64-unknown-elf-gcc` 不在 `PATH` 中，所以按上面的命令配置时实际选中的是 **`/usr/bin/riscv64-linux-gnu-gcc`（GCC 11.4.0）**。要使用 `/home/ybg/opt/riscv/usr/bin` 下解包的 `riscv64-unknown-elf-gcc 10.2.0`，需要同时把该目录加入 `PATH` 并传 `-DYAN_RISCV_PREFIX=riscv64-unknown-elf-`。
 
-参考：[一生一芯 DiffTest 介绍](https://oscpu.github.io/ysyx/events/2021-07-17_Difftest/difftest%E6%A1%86%E6%9E%B6%E4%BB%8B%E7%BB%8D.pdf)、[RISC-V Architectural Test](https://github.com/riscv/riscv-arch-test)。
+以下数字是 Debug 构建、本机实测结果：
+
+| 层 | 结果 |
+| --- | --- |
+| 模块测试 | 15 个套件、93 个 Unity 用例全部通过 |
+| 逐指令差分测试 | 18 个 Guest 镜像（5 个手写源 × -O0 / -O2 + 8 个随机生成程序）逐条比较全部一致，结束时 RAM 一致 |
+| 变异测试（DUT 侧） | 4 个注入缺陷（SLTI 有符号改无符号、JALR 不清 bit 0、DIV 除零改 0、LB 去符号扩展）全部被检出，均报出出错指令 pc 与机器码 |
+| 变异测试（参考模型侧） | 把 NEMU 的 `slt` 改成无符号比较并重新构建参考模型，差分测试仍然报告不一致，且未变异时同一镜像通过 |
+| 官方 riscv-tests | `rv32ui` + `rv32um` 共 50 例：49 通过，1 例显式 SKIP（`rv32ui-p-ma_data`） |
+| 签名比对 | 8 个镜像的签名与 Sail 逐字节相同（手写用例 16384 / 17184 字节，随机程序 256 字节） |
+| 官方 ACT4 测试语料 | `rv32i/I` + `rv32i/M` 共 47 例：40 例签名与 Sail 逐字节相同，0 例不同，7 例 SKIP（都需要异常处理器） |
+| 超范围判定 | 故意非对齐访存的 Guest 被判为 exit 3（`mcause = 4`），且报告里不出现 `MISMATCH` |
+| CTest 汇总 | 只做本地模块测试时 15 个；给出 `YAN_NEMU_REF_SO`、`YAN_RISCV_TESTS_DIR`、`YAN_RISCV_ARCH_TEST_DIR`、`YAN_SAIL_BIN` 后 21 个；再加上 `YAN_NEMU_REF_DIR` 共 22 个，全部通过 |
+
+模块测试开启 AddressSanitizer 与 UndefinedBehaviorSanitizer 后同样通过。
+
+尚未完成：ACT4 官方框架与 RVMODEL 宏未接入；CSR、特权与异常语义没有外部参考模型覆盖；中断、分页、设备不在验证范围内。
+
+参考：[一生一芯 DiffTest 介绍](https://oscpu.github.io/ysyx/events/2021-07-17_Difftest/difftest%E6%A1%86%E6%9E%B6%E4%BB%8B%E7%BB%8D.pdf)、[riscv-tests](https://github.com/riscv-software-src/riscv-tests)、[RISC-V Architectural Test](https://github.com/riscv/riscv-arch-test)、[Sail RISC-V model](https://github.com/riscv/sail-riscv)。

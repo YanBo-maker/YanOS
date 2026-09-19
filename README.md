@@ -6,7 +6,7 @@ YanOS 是一个用于学习计算机系统的项目，计划实现 RISC-V 模拟
 
 ## 状态
 
-已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位、取指和整数指令单步执行。已实现 RV32I 的整数计算、控制转移、访存、FENCE、ECALL 和 EBREAK，并提供六种 CSR 指令及 MRET，支持 M-mode 同步异常处理。RV32M 的八条乘除指令已加入。CPU 验证规格正在接入架构测试和逐指令差分测试。中断、分页和设备仍待实现。详细进度见 [STATUS](docs/STATUS.md)。
+已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位、取指和整数指令单步执行。已实现 RV32I 的整数计算、控制转移、访存、FENCE、FENCE.I、ECALL 和 EBREAK，并提供六种 CSR 指令及 MRET，支持 M-mode 同步异常处理。RV32M 的八条乘除指令已加入。验证层已接入逐指令差分测试、官方 `riscv-tests` 套件、官方 `riscv-arch-test`（ACT4）测试语料与 Sail 签名比对。中断、分页和设备仍待实现。详细进度见 [STATUS](docs/STATUS.md)。
 
 ## 构建与测试
 
@@ -24,7 +24,22 @@ ctest --test-dir build -C Debug --output-on-failure
 
 GCC / Clang 的 Unix 构建可在配置时添加 `-DYAN_ENABLE_SANITIZERS=ON`，启用地址与未定义行为检测。
 
-构建 Guest 验证执行器可添加 `-DYAN_BUILD_TOOLS=ON`。`yan_run` 支持 RV32 ELF、最大步数、`tohost` 退出、签名区导出和逐条架构状态记录；完整参考模型差分流程见 [CPU 验证规格](docs/specs/0011-cpu-validation.md)。
+构建 Guest 验证工具可添加 `-DYAN_BUILD_TOOLS=ON`。`yan_run` 支持 RV32 ELF、最大步数、`tohost` 退出、签名区导出和逐条架构状态记录；`yan_difftest` 让 YanCPU 与外部参考模型逐条比较架构状态；`yan_gen` 生成随机 RV32IM 指令流。
+
+外部验证层是可选依赖，缺失时对应的 CTest 不注册或报 SKIP，从不显示为通过：
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DYAN_BUILD_TOOLS=ON \
+  -DYAN_NEMU_REF_SO=/path/to/riscv32-nemu-interpreter-so \
+  -DYAN_NEMU_REF_DIR=/path/to/nemu-source \
+  -DYAN_RISCV_TESTS_DIR=/path/to/riscv-tests \
+  -DYAN_RISCV_ARCH_TEST_DIR=/path/to/riscv-arch-test \
+  -DYAN_SAIL_BIN=/path/to/sail_riscv_sim
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+分层、覆盖边界与退出码见 [CPU 验证规格](docs/specs/0011-cpu-validation.md)。
 
 ## 设计
 
