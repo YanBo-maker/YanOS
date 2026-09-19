@@ -47,7 +47,7 @@ mepc 保存故障指令 PC，低两位清零。跳转目标错误记录跳转指
 
 MRET 的精确编码为 0x30200073：PC=mepc，MIE=MPIE，MPIE=1，MPP 保持 3。MRET 不自动给 mepc 加 4；Guest 决定重试还是跳过。ECALL / EBREAK 仅接受精确编码 0x00000073 / 0x00100073。
 
-补齐基础 FENCE，opcode=0x0f、funct3=0；当前单 hart、同步 RAM 访问下仅推进 PC，忽略 fm/pred/succ/rs1/rd。其他该 opcode 编码（含 FENCE.I）产生非法指令异常。未实现扩展不再作为普通单步错误返回。
+补齐 FENCE 与 FENCE.I，opcode=0x0f、funct3=0/1；当前单 hart、同步 RAM 访问且每次取指都重读 RAM，两者都只推进 PC，fm/pred/succ/rs1/rd 不参与运算。该 opcode 下 funct3 的其余编码产生非法指令异常。未实现扩展不再作为普通单步错误返回。
 
 ### 规范依据
 

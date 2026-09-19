@@ -44,6 +44,16 @@ YanStatus yan_cpu_write_reg(YanCpu *cpu, uint32_t index, uint32_t value)
     return YAN_OK;
 }
 
+YanStatus yan_cpu_snapshot(const YanCpu *cpu, YanCpuState *state)
+{
+    if (cpu == NULL || state == NULL) {
+        return YAN_INVALID_ARGUMENT;
+    }
+    *state = *cpu;
+    state->regs[0] = 0;
+    return YAN_OK;
+}
+
 YanBusResult yan_cpu_fetch(const YanCpu *cpu, const YanBus *bus,
                            uint32_t *instruction)
 {
@@ -305,7 +315,10 @@ YanStatus yan_cpu_step(YanCpu *cpu, YanBus *bus)
     const uint32_t opcode = instruction & UINT32_C(0x7f);
     const int branch = opcode == UINT32_C(0x63);
     const int store = opcode == UINT32_C(0x23);
-    const int fence = opcode == UINT32_C(0x0f) && ((instruction >> 12) & UINT32_C(7)) == 0;
+    /* Zifencei: FENCE (funct3=0) and FENCE.I (funct3=1) only advance the PC.
+     * A store may overwrite the instruction already fetched and every step
+     * re-reads RAM, so no instruction stream synchronisation is needed. */
+    const int fence = opcode == UINT32_C(0x0f) && ((instruction >> 12) & UINT32_C(7)) <= 1;
     const int mret = instruction == UINT32_C(0x30200073);
     YanStatus status = YAN_OK;
     if (instruction == UINT32_C(0x00000073)) {
