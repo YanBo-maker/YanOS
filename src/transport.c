@@ -39,10 +39,14 @@ static uint32_t ring_free(uint32_t head, uint32_t tail, uint32_t size)
 static uint32_t transport_status(const YanTransport *transport)
 {
     uint32_t status = 0;
+    /* Every bit is gated on the same predicate. While HOST_READY is zero the
+     * guest is not allowed to touch either ring, so the ring bits have no
+     * meaning to report: "empty" would be an invented reading, and the overrun
+     * latch could only have come from a configuration that is no longer
+     * current. A configuration is cleared by reset or destroy, and reset
+     * clears the latch too, so nothing is lost by holding it back. */
     if (transport_usable(transport)) {
         status |= YAN_TRANSPORT_STATUS_HOST_READY;
-    }
-    if (transport != NULL && transport->ring_size != 0) {
         if (ring_free(transport->g2h_head, transport->g2h_tail,
                       transport->ring_size) == 0) {
             status |= YAN_TRANSPORT_STATUS_G2H_FULL;
@@ -196,13 +200,10 @@ YanStatus yan_transport_configure(YanTransport *transport, uint32_t ring_base,
         (ring_size & (ring_size - 1)) != 0) {
         return YAN_INVALID_ARGUMENT;
     }
-    /* The base must be aligned to the size, otherwise the two rings do not
-     * start on a ring boundary and the offsets stop being a mask. */
-    if ((ring_base & (ring_size - 1)) != 0) {
-        return YAN_INVALID_ARGUMENT;
-    }
-    /* Two rings must fit the window. Written as a division so a ring_size near
-     * the top of the range cannot wrap when it is doubled. */
+    /* Where the base sits inside the window is free: every offset is taken
+     * modulo the size, so the device never needs the base aligned to it. Two
+     * rings must still fit the window. Written as a division so a ring_size
+     * near the top of the range cannot wrap when it is doubled. */
     if (ram_size < 2 || ring_size > ram_size / 2) {
         return YAN_INVALID_ARGUMENT;
     }

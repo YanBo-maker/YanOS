@@ -171,11 +171,21 @@ static void host_ready_is_derived_from_the_configuration(void)
         0, read_word(YAN_TRANSPORT_BASE + YAN_TRANSPORT_STATUS) &
                YAN_TRANSPORT_STATUS_HOST_READY);
 
+    /* Until the host is reachable the ring semantics are undefined, so the
+     * status word reports nothing at all rather than inventing "empty". */
+    TEST_ASSERT_EQUAL_HEX32(0, read_word(YAN_TRANSPORT_BASE + YAN_TRANSPORT_STATUS));
+    TEST_ASSERT_EQUAL_HEX32(0, channel.overflow_detected);
+
+    /* A latched overrun is held back with the other ring bits while no host is
+     * reachable, and comes back with them once one is. */
+    channel.overflow_detected = 1;
+    TEST_ASSERT_EQUAL_HEX32(0, read_word(YAN_TRANSPORT_BASE + YAN_TRANSPORT_STATUS));
+
     yan_transport_set_notify(&channel, counting_notify, &channel);
     TEST_ASSERT_EQUAL_HEX32(
-        YAN_TRANSPORT_STATUS_HOST_READY,
-        read_word(YAN_TRANSPORT_BASE + YAN_TRANSPORT_STATUS) &
-            YAN_TRANSPORT_STATUS_HOST_READY);
+        YAN_TRANSPORT_STATUS_HOST_READY | YAN_TRANSPORT_STATUS_H2G_EMPTY |
+            YAN_TRANSPORT_STATUS_OVERFLOW_DETECTED,
+        read_word(YAN_TRANSPORT_BASE + YAN_TRANSPORT_STATUS));
     TEST_ASSERT_EQUAL_HEX32(RING_BASE,
                             read_word(YAN_TRANSPORT_BASE + YAN_TRANSPORT_RING_BASE));
     TEST_ASSERT_EQUAL_HEX32(RING_SIZE,
@@ -237,8 +247,10 @@ static void read_only_registers_ignore_writes(void)
 
 static void configuration_validates_placement(void)
 {
-    /* A ring needs a power-of-two size, at least 64 bytes, room for both rings
-     * inside RAM, and a base that keeps the wrap a mask. None of the rejected
+    /* A ring needs a power-of-two size of at least 64 bytes and room for both
+     * rings inside the RAM window. Nothing else: the ring offset is taken
+     * modulo the size, so where the base sits inside the window is free, and a
+     * base that is not aligned to the size is legal. None of the rejected
      * shapes may disturb the standing configuration. */
     const uint32_t bad_sizes[] = {0,          1,  63, 65, 96, 128 + 64, UINT32_MAX,
                                   UINT32_C(0x80000000)};
@@ -248,10 +260,10 @@ static void configuration_validates_placement(void)
             yan_transport_configure(&channel, RING_BASE, bad_sizes[index], RAM_BASE,
                                     RAM_BYTES));
     }
-    /* Base and size must agree: the ring offset is taken modulo the size. */
+    /* An unaligned base that really does run off the end is still rejected. */
     TEST_ASSERT_EQUAL_INT(
         YAN_INVALID_ARGUMENT,
-        yan_transport_configure(&channel, RING_BASE + 64, 128, RAM_BASE, RAM_BYTES));
+        yan_transport_configure(&channel, RING_BASE + 32, 256, RAM_BASE, RAM_BYTES));
     /* The two rings run off the end of RAM. */
     TEST_ASSERT_EQUAL_INT(
         YAN_INVALID_ARGUMENT,
@@ -278,7 +290,35 @@ static void configuration_validates_placement(void)
     TEST_ASSERT_EQUAL_HEX32(0, channel.h2g_head);
     TEST_ASSERT_EQUAL_HEX32(0, channel.h2g_tail);
 
-    /* The largest ring this window fits, with the base aligned to it. */
+    /* An unaligned base inside the window is a legal configuration, and the
+     * ring it starts behaves like any other. */
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_transport_configure(&channel, RING_BASE + 32,
+                                                          RING_SIZE, RAM_BASE,
+                                                          RAM_BYTES));
+    TEST_ASSERT_EQUAL_HEX32(RING_BASE + 32, channel.ring_base);
+    TEST_ASSERT_EQUAL_HEX32(RING_BASE + 32,
+                            read_word(YAN_TRANSPORT_BASE + YAN_TRANSPORT_RING_BASE));
+    yan_transport_set_notify(&channel, counting_notify, &channel);
+    TEST_ASSERT_EQUAL_HEX32(
+        YAN_TRANSPORT_STATUS_HOST_READY | YAN_TRANSPORT_STATUS_H2G_EMPTY,
+        read_word(YAN_TRANSPORT_BASE + YAN_TRANSPORT_STATUS));
+    guest_produce_g2h(4);
+    TEST_ASSERT_EQUAL_HEX32(4, yan_transport_host_readable(&channel));
+    host_drain_g2h(4);
+    /* Fill from wherever the tail ended up: a full ring is head - tail ==
+     * RING_SIZE - 1, which the absolute register value does not decide. */
+    write_word(YAN_TRANSPORT_BASE + YAN_TRANSPORT_G2H_HEAD,
+               channel.g2h_tail + RING_SIZE - 1);
+    TEST_ASSERT_EQUAL_HEX32(RING_SIZE - 1, yan_transport_host_readable(&channel));
+    TEST_ASSERT_EQUAL_HEX32(
+        YAN_TRANSPORT_STATUS_HOST_READY | YAN_TRANSPORT_STATUS_H2G_EMPTY |
+            YAN_TRANSPORT_STATUS_G2H_FULL,
+        read_word(YAN_TRANSPORT_BASE + YAN_TRANSPORT_STATUS));
+    host_drain_g2h(RING_SIZE - 1);
+    yan_transport_set_notify(&channel, NULL, NULL);
+    yan_transport_reset(&channel);
+
+    /* The largest ring this window fits. */
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_transport_configure(&channel, RAM_BASE,
                                                           RAM_BYTES / 2, RAM_BASE,
                                                           RAM_BYTES));
