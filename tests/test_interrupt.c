@@ -97,9 +97,14 @@ static void disarm_mtip(YanMachine *m)
 
 static uint32_t arm_meip(YanMachine *m, uint32_t source, uint32_t priority)
 {
+    /* A source a caller drives must not be one the platform owns. Sources 1
+     * and 2 are wired to the transport and the UART, so every step overwrites
+     * whatever a caller put there; the tests use 5 and 7 instead. */
+    TEST_ASSERT_TRUE(source != YAN_MACHINE_PLIC_SOURCE_TRANSPORT);
+    TEST_ASSERT_TRUE(source != YAN_MACHINE_PLIC_SOURCE_UART);
     write_word(m, YAN_PLIC_BASE + YAN_PLIC_PRIORITY + 4 * source, priority);
     write_word(m, YAN_PLIC_BASE + YAN_PLIC_ENABLE_M, UINT32_C(1) << source);
-    yan_plic_raise(&m->plic, source);
+    yan_plic_set_level(&m->plic, source, true);
     return read_word(m, YAN_PLIC_BASE + YAN_PLIC_PENDING) & (UINT32_C(1) << source);
 }
 
@@ -168,17 +173,22 @@ static void poll_samples_each_device_line(void)
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_poll_interrupts(&machine.cpu, &machine.bus));
     TEST_ASSERT_EQUAL_HEX32(0, read_csr(&machine, CSR_MIP));
 
-    TEST_ASSERT_EQUAL_HEX32(1U << 1, arm_meip(&machine, 1, 1));
+    TEST_ASSERT_EQUAL_HEX32(1U << 5, arm_meip(&machine, 5, 1));
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_poll_interrupts(&machine.cpu, &machine.bus));
     TEST_ASSERT_EQUAL_HEX32(YAN_INTERRUPT_MEIP, read_csr(&machine, CSR_MIP));
-    TEST_ASSERT_EQUAL_HEX32(1, claim_meip(&machine));
+    TEST_ASSERT_EQUAL_HEX32(5, claim_meip(&machine));
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_poll_interrupts(&machine.cpu, &machine.bus));
     TEST_ASSERT_EQUAL_HEX32(0, read_csr(&machine, CSR_MIP));
+    /* A handler has to complete the source it claimed. The line drops first,
+     * because completion re-pends a source that is still asking for service. */
+    yan_plic_set_level(&machine.plic, 5, false);
+    write_word(&machine, YAN_PLIC_BASE + YAN_PLIC_CLAIM_M, 5);
+    TEST_ASSERT_EQUAL_HEX32(0, machine.plic.pending);
 
     /* All three lines at once are all visible in mip. */
     arm_msip(&machine);
     arm_mtip(&machine, 0);
-    TEST_ASSERT_EQUAL_HEX32(1U << 1, arm_meip(&machine, 1, 1));
+    TEST_ASSERT_EQUAL_HEX32(1U << 5, arm_meip(&machine, 5, 1));
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_poll_interrupts(&machine.cpu, &machine.bus));
     TEST_ASSERT_EQUAL_HEX32(YAN_INTERRUPT_MSIP | YAN_INTERRUPT_MTIP |
                             YAN_INTERRUPT_MEIP, read_csr(&machine, CSR_MIP));
@@ -189,7 +199,7 @@ static void mie_mask_limits_the_cause(void)
     bring_up(&machine);
     arm_msip(&machine);
     arm_mtip(&machine, 0);
-    TEST_ASSERT_EQUAL_HEX32(1U << 1, arm_meip(&machine, 1, 1));
+    TEST_ASSERT_EQUAL_HEX32(1U << 5, arm_meip(&machine, 5, 1));
 
     /* All three lines are pending, but mie only enables the software one. */
     enable_interrupts(&machine, YAN_INTERRUPT_MSIP);
@@ -244,7 +254,7 @@ static void interrupt_entry_fields_and_priority(void)
     bring_up(&machine);
     arm_msip(&machine);
     arm_mtip(&machine, 0);
-    TEST_ASSERT_EQUAL_HEX32(1U << 1, arm_meip(&machine, 1, 1));
+    TEST_ASSERT_EQUAL_HEX32(1U << 5, arm_meip(&machine, 5, 1));
     enable_interrupts(&machine, YAN_MIE_MASK);
 
     YanCpu before = machine.cpu;
@@ -259,7 +269,7 @@ static void interrupt_entry_fields_and_priority(void)
                             YAN_INTERRUPT_MEIP, read_csr(&machine, CSR_MIP));
 
     /* MEIP wins while it is pending; claiming it clears the line. */
-    TEST_ASSERT_EQUAL_HEX32(1, claim_meip(&machine));
+    TEST_ASSERT_EQUAL_HEX32(5, claim_meip(&machine));
     set_csr(&machine, CSR_MSTATUS, YAN_MSTATUS_MIE);
     TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_machine_step(&machine));
     TEST_ASSERT_EQUAL_HEX32(MCAUSE_MTIP, machine.cpu.csr.mcause);
@@ -439,7 +449,7 @@ static void device_reset_is_independent_per_machine(void)
     arm_msip(&machine);
     arm_mtip(&machine, 5);
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_machine_tick(&machine, 9));
-    TEST_ASSERT_EQUAL_HEX32(1U << 1, arm_meip(&machine, 1, 3));
+    TEST_ASSERT_EQUAL_HEX32(1U << 5, arm_meip(&machine, 5, 3));
     TEST_ASSERT_EQUAL_HEX32(YAN_INTERRUPT_MSIP | YAN_INTERRUPT_MTIP |
                             YAN_INTERRUPT_MEIP,
                             yan_bus_pending_interrupts(&machine.bus));
@@ -477,7 +487,7 @@ static void external_source_interface_drives_meip(void)
 {
     bring_up(&machine);
     /* A source without priority, enable or threshold never raises MEIP. */
-    yan_plic_raise(&machine.plic, 5);
+    yan_plic_set_level(&machine.plic, 5, true);
     TEST_ASSERT_EQUAL_HEX32(1U << 5, read_word(&machine, YAN_PLIC_BASE + YAN_PLIC_PENDING));
     TEST_ASSERT_EQUAL_HEX32(0, yan_bus_pending_interrupts(&machine.bus));
 
@@ -500,7 +510,7 @@ static void external_source_interface_drives_meip(void)
     write_word(&other, YAN_PLIC_BASE + YAN_PLIC_PRIORITY + 4 * 7, 4);
     write_word(&other, YAN_PLIC_BASE + YAN_PLIC_ENABLE_M, 1U << 7);
     enable_interrupts(&other, YAN_INTERRUPT_MEIP);
-    yan_plic_raise(&other.plic, 7);
+    yan_plic_set_level(&other.plic, 7, true);
     TEST_ASSERT_EQUAL_INT(YAN_TRAP, yan_machine_step(&other));
     TEST_ASSERT_EQUAL_HEX32(MCAUSE_MEIP, other.cpu.csr.mcause);
     TEST_ASSERT_EQUAL_HEX32(ENTRY, other.cpu.csr.mepc);

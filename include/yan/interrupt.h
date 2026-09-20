@@ -1,6 +1,7 @@
 #ifndef YAN_INTERRUPT_H
 #define YAN_INTERRUPT_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "yan/status.h"
@@ -39,10 +40,15 @@ typedef struct {
 
 typedef struct {
     uint32_t priority[YAN_PLIC_SOURCE_COUNT];
+    /* Latched service requests produced by the gateways. */
     uint32_t pending;
+    /* Last level driven onto each source line. A device reports a level and
+     * nothing else; the platform drives it here and the gateway decides. */
+    uint32_t level;
     uint32_t enable_m;
     uint32_t threshold_m;
-    /* Claimed but not yet completed sources. */
+    /* Claimed but not yet completed sources. A source in service cannot become
+     * pending again until it is completed. */
     uint32_t in_service_m;
 } YanPlic;
 
@@ -57,8 +63,13 @@ void yan_plic_reset(YanPlic *plic);
 /* A claim read has side effects, so it takes a mutable controller. */
 YanStatus yan_plic_read(YanPlic *plic, uint32_t offset, uint32_t *value);
 YanStatus yan_plic_write(YanPlic *plic, uint32_t offset, uint32_t value);
-/* Host interface for one external source line; source 0 is ignored. */
-void yan_plic_raise(YanPlic *plic, uint32_t source);
+/* Drive one source line. Level semantics: asserted means the device requests
+ * service now; deasserted withdraws a request that has not been claimed. A
+ * source that is already in service is held closed until it is completed, so
+ * driving an asserted level again does not re-pend it. Source 0 is ignored.
+ * This is the only external source interface; platform device lines reach the
+ * controller through it. See docs/specs/0016-plic-gateway-and-irq-lines.md. */
+void yan_plic_set_level(YanPlic *plic, uint32_t source, bool asserted);
 uint32_t yan_plic_pending(const YanPlic *plic);
 
 #endif

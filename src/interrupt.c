@@ -176,20 +176,51 @@ YanStatus yan_plic_write(YanPlic *plic, uint32_t offset, uint32_t value)
     case YAN_PLIC_PENDING: return YAN_OK;
     case YAN_PLIC_ENABLE_M: plic->enable_m = value & ~UINT32_C(1); return YAN_OK;
     case YAN_PLIC_THRESHOLD_M: plic->threshold_m = value; return YAN_OK;
-    case YAN_PLIC_CLAIM_M:
-        /* Writes complete a previously claimed source. */
+    case YAN_PLIC_CLAIM_M: {
+        /* Writes complete a previously claimed source, and only that. An id
+         * that is not in service is ignored rather than clearing a bit or
+         * re-pending a line. The in-service test is defensive: no observable
+         * state reaches it today, because a source can only be pending while
+         * its level is asserted, and a pending source is always claimable or
+         * already in service. It is kept so the code matches the table in
+         * docs/specs/0016 rather than relying on that argument.
+         *
+         * Completion re-samples the line: a device that is still requesting
+         * service is pended again, one that stopped asking is not. */
         if (value >= 1 && value <= YAN_PLIC_SOURCE_MAX) {
-            plic->in_service_m &= ~(UINT32_C(1) << value);
+            const uint32_t bit = UINT32_C(1) << value;
+            if ((plic->in_service_m & bit) != 0) {
+                plic->in_service_m &= ~bit;
+                if ((plic->level & bit) != 0) {
+                    plic->pending |= bit;
+                }
+            }
         }
         return YAN_OK;
+    }
     default: return YAN_UNMAPPED;
     }
 }
 
-void yan_plic_raise(YanPlic *plic, uint32_t source)
+/* Level-driven gateway, as specified in docs/specs/0016. Asserting a line
+ * pends the source unless it is already in service; dropping the line withdraws
+ * a request that has not been claimed. A source that is in service is held
+ * closed however often its line is driven, so a handler cannot be re-entered
+ * before it completes. */
+void yan_plic_set_level(YanPlic *plic, uint32_t source, bool asserted)
 {
-    if (plic != NULL && source >= 1 && source <= YAN_PLIC_SOURCE_MAX) {
-        plic->pending |= UINT32_C(1) << source;
+    if (plic == NULL || source < 1 || source > YAN_PLIC_SOURCE_MAX) {
+        return;
+    }
+    const uint32_t bit = UINT32_C(1) << source;
+    if (asserted) {
+        plic->level |= bit;
+        if ((plic->in_service_m & bit) == 0) {
+            plic->pending |= bit;
+        }
+    } else {
+        plic->level &= ~bit;
+        plic->pending &= ~bit;
     }
 }
 

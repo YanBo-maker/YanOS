@@ -95,7 +95,7 @@ ctest --test-dir build --output-on-failure
 
 | 层 | 结果 |
 | --- | --- |
-| 模块测试 | 19 个套件、133 个 Unity 用例全部通过（启用 Guest 工具链时另有 `guest_trap_env`，共 20 组） |
+| 模块测试 | 19 个套件、133 个 Unity 用例全部通过（启用 Guest 工具链时另有 `guest_trap_env`，共 20 组）。接入 UART 与传输通道后为 21 个套件（启用工具链时 22 组），新增用例另计 |
 | 逐指令差分测试 | 18 个 Guest 镜像（5 个手写源 × -O0 / -O2 + 8 个随机生成程序）逐条比较全部一致，结束时 RAM 一致 |
 | 变异测试（DUT 侧） | 4 个注入缺陷（SLTI 有符号改无符号、JALR 不清 bit 0、DIV 除零改 0、LB 去符号扩展）全部被检出，均报出出错指令 pc 与机器码 |
 | 变异测试（参考模型侧） | 把 NEMU 的 `slt` 改成无符号比较并重新构建参考模型，差分测试仍然报告不一致，且未变异时同一镜像通过 |
@@ -103,10 +103,10 @@ ctest --test-dir build --output-on-failure
 | 签名比对 | 8 个镜像的签名与 Sail 逐字节相同（手写用例 16384 / 17184 字节，随机程序 256 字节） |
 | 官方 ACT4 测试语料 | `rv32i/I` + `rv32i/M` 共 47 例：40 例签名与 Sail 逐字节相同，0 例不同，7 例 SKIP（都需要异常处理器） |
 | 超范围判定 | 故意非对齐访存的 Guest 被判为 exit 3（`mcause = 4`），且报告里不出现 `MISMATCH` |
-| CTest 汇总 | 只做本地模块测试时 19 个；给出 `YAN_NEMU_REF_SO`、`YAN_RISCV_TESTS_DIR`、`YAN_RISCV_ARCH_TEST_DIR`、`YAN_SAIL_BIN` 后 25 个；再加上 `YAN_NEMU_REF_DIR` 共 27 个（含 `guest_trap_env` 与 `boot`），全部通过 |
-| 中断层变异检查 | 在副本里注入 7 个缺陷（中断原因码优先级改成软件优先、中断 mtval 填 PC、MTIP 改成严格大于、PLIC 阈值改成不小于、claim 不清 pending、source 0 可 raise、mie 写入不截断），`clint` / `plic` / `interrupt` 三组测试对每一个都报告失败 |
+| CTest 汇总 | 本机按当前 `CMakeLists.txt` 实测的**注册数**：只做本地模块测试时 21 个；加 `-DYAN_BUILD_TOOLS=ON` 为 22 个；再给出 `YAN_NEMU_REF_SO`、`YAN_RISCV_TESTS_DIR`、`YAN_RISCV_ARCH_TEST_DIR`、`YAN_SAIL_BIN` 为 28 个；再加上 `YAN_NEMU_REF_DIR` 共 29 个。这是注册数而不是通过数：本阶段新增的 `transport` 套件仍在实现中，通过情况以 [STATUS](../STATUS.md) 的验证一节为准。外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册，因此上一阶段记录的 25 / 27 不能按 +2 机械推算 |
+| 中断层变异检查 | 在副本里注入 7 个缺陷（中断原因码优先级改成软件优先、中断 mtval 填 PC、MTIP 改成严格大于、PLIC 阈值改成不小于、claim 不清 pending、source 0 可被驱动、`mie` 写入不截断），`clint` / `plic` / `interrupt` 三组测试对每一个都报告失败。注意这一轮针对的是**旧网关**（接口名当时为 `raise`）；电平网关那一轮（[0016](0016-plic-gateway-and-irq-lines.md) 的 E 节）由独立验证进行，结果见 [STATUS](../STATUS.md) |
 
-模块测试开启 AddressSanitizer 与 UndefinedBehaviorSanitizer 后同样通过。
+模块测试开启 AddressSanitizer 与 UndefinedBehaviorSanitizer 后同样通过。本阶段新增的 `transport` 套件尚未全绿，不在该结论内。
 
 尚未完成：ACT4 官方框架（`testplans` / UDB / RVMODEL 生成）未接入；CSR、特权、异常与中断语义没有外部参考模型覆盖；CLINT / PLIC 的与平台相关行为（gateway 电平锁存、多 context、多 hart）不在验证范围内；Guest 陷阱环境的证据来自本仓库自检，不是与外部模型的一致性证据，且外部中断（MEIP）无法从 Guest 侧驱动，只由机器层测试覆盖。
 
