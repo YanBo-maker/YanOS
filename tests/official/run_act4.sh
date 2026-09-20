@@ -81,18 +81,59 @@ declare -a skip_reasons=()
 # interrupt macros to `.error`, but the framework includes sail_macros.h after
 # it and replaces them; that is worth stating out loud rather than claiming a
 # protection that does not exist.
+#
+# `-DTEST_FILE` and `-DSIGUPD_COUNT` are what let riscv_arch_test.h preprocess
+# at all. Without them check_defines.h aborts before the DUT header is reached,
+# and an empty preprocessor output would be read as "the framework overrides the
+# guard" without anything having been preprocessed.
 probe="$work/guard-probe.S"
 printf '#include "riscv_arch_test.h"\nRVMODEL_SET_MEXT_INT(t0, t1)\n' > "$probe"
-if "$gcc" -E -march=rv32im -mabi=ilp32 -DTEST_FLEN=32 -DUNROLLSZ=0 \
+if "$gcc" -E -march=rv32im -mabi=ilp32 -DTEST_FILE='"guard-probe.S"' \
+        -DSIGUPD_COUNT=1 -DTEST_FLEN=32 -DUNROLLSZ=0 \
         -DSAIL_CLINT_BASE_ADDRESS=0x02000000 \
         -DSAIL_SIMPLE_INTERRUPT_GENERATOR_BASE_ADDRESS=0x0 \
         -I "$suite/tests/env" -I "$config_dir" "$probe" 2> /dev/null |
-   grep -q 'YanOS has no external interrupt controller'; then
+   grep -q 'YanOS has no external interrupt source register'; then
     echo "note: the DUT interrupt guard is in effect"
 else
     echo "note: the framework overrides the DUT interrupt guard (sail_macros.h); the per-test source check is what holds"
 fi
 rm -f "$probe"
+
+# The CLINT mapping the DUT declares must be the mapping the framework will
+# actually use. sail_macros.h replaces the RVMODEL_* addresses with its own
+# SAIL_* values, so a disagreement would be invisible in the generated code and
+# every timer test would silently target the wrong registers. Assembling this
+# probe turns that into a hard failure, and an undefined macro counts as a
+# mismatch, which also catches a DUT header that stopped declaring the mapping.
+clint_probe="$work/clint-probe.S"
+cat > "$clint_probe" <<'PROBE'
+#include "riscv_arch_test.h"
+.if (RVMODEL_MSIP_ADDRESS) != 0x02000000
+.error "YanOS: effective RVMODEL_MSIP_ADDRESS is not the DUT CLINT base"
+.endif
+.if (RVMODEL_MTIMECMP_ADDRESS) != 0x02004000
+.error "YanOS: effective RVMODEL_MTIMECMP_ADDRESS is not CLINT base + 0x4000"
+.endif
+.if (RVMODEL_MTIME_ADDRESS) != 0x0200bff8
+.error "YanOS: effective RVMODEL_MTIME_ADDRESS is not CLINT base + 0xbff8"
+.endif
+PROBE
+if ! "$gcc" -march=rv32im -mabi=ilp32 -mcmodel=medany -static -nostdlib \
+        -nostartfiles -DTEST_FILE='"clint-probe.S"' -DSIGUPD_COUNT=1 \
+        -DTEST_FLEN=32 -DUNROLLSZ=0 \
+        -DSAIL_CLINT_BASE_ADDRESS=0x02000000 \
+        -DSAIL_SIMPLE_INTERRUPT_GENERATOR_BASE_ADDRESS=0x0 \
+        -I "$suite/tests/env" -I "$config_dir" -c "$clint_probe" \
+        -o "$work/clint-probe.o" > "$work/clint-probe.log" 2>&1; then
+    echo "FAIL the CLINT mapping the DUT declares is not the one the framework uses:"
+    sed 's/^/    /' "$work/clint-probe.log"
+    echo "ACT4: 0 matched, 0 differed, 0 skipped (configuration check failed)"
+    rm -f "$clint_probe"
+    exit 1
+fi
+rm -f "$clint_probe" "$work/clint-probe.o"
+echo "note: the DUT CLINT mapping matches the framework's effective addresses"
 
 to_hex_words() {
     python3 - "$1" "$2" <<'PYTHON'

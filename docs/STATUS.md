@@ -1,6 +1,6 @@
 # 项目状态
 
-当前阶段：机器模式中断。模块测试、逐指令差分测试、官方 `riscv-tests` 套件与 Sail 签名比对都已接入并在本机通过；ACT4 官方框架尚未接入。M-mode 的 CLINT、PLIC 与中断进入 / 返回已实现并通过单元测试，中断仍没有外部参考模型可比较。Load / Store 阶段已通过用户审查并合入主分支。
+当前阶段：Guest 启动与统一 trap 环境。模块测试、逐指令差分测试、官方 `riscv-tests` 套件与 Sail 签名比对都已接入并在本机通过；ACT4 官方框架尚未接入。M-mode 的 CLINT、PLIC、中断进入 / 返回，以及 Guest 侧的启动入口、陷阱向量与设备访问封装都已实现；中断与陷阱语义仍没有外部参考模型可比较。
 
 ## 已完成
 
@@ -18,6 +18,8 @@
 - 机器模式中断：`mie` / `mip` 的 MSIP、MTIP、MEIP 三位，全局 `mstatus.MIE`，中断进入（mcause 最高位置 1、mepc 指向未执行指令、mtval 为 0）与 MRET 返回，原因码优先级 MEIP > MTIP > MSIP，见 [机器模式中断规格](specs/0012-machine-interrupts.md)。
 - 单 hart CLINT：标准基址 `0x02000000`，msip、mtimecmp、mtime 的 32 位半字读写；mtime 只由 Host 的离散 tick 推进，不读宿主墙上时钟。
 - 单 context M-mode PLIC：标准基址 `0x0c000000`，priority、pending、enable、threshold、claim / complete，source 0 保留，只有 pending、enabled 且 priority 大于 threshold 的源拉高 MEIP；Host 通过 `yan_plic_raise` 驱动外部源。
+- 最小 M-mode Guest 环境：`tests/guest/mtrap_entry.S` 提供入口与 Direct 陷阱向量（固定 20 字帧、保存调用者保存寄存器与被中断的 `sp`），`mtrap.c` 提供统一调度与 CSR 访问，`guest_devices.h` 提供 Guest 可见的 CLINT / PLIC 地址与访问封装，见 [Guest 启动与统一 trap 环境规格](specs/0013-guest-trap-environment.md)。
+- `yan_run` 现在按平台语义连接 CLINT / PLIC 并每条指令推进一次 `mtime`，因此 Guest 程序能真正访问设备并接收中断；`yan_difftest` 保持不连接设备。
 - RV32M 的 MUL、MULH、MULHSU、MULHU、DIV、DIVU、REM、REMU，包含除零和有符号溢出规则。
 - 面向外部验证模型的只读 CPU 架构状态快照接口。
 - RV32 ELF32 镜像加载与符号表解析；`tohost` 与签名区都由符号决定，不依赖固定地址。
@@ -31,7 +33,7 @@
 
 ## 验证
 
-GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建均通过 **18 组 CTest**：RAM、Bus、Machine、CPU、Fetch、Step、ALU、Control、Memory、CSR、Trap、M、Snapshot、Image、DiffTest、Interrupt、CLINT、PLIC，共 **129 个 Unity 测试用例**。
+GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建均通过 **19 组 CTest**：RAM、Bus、Machine、CPU、Fetch、Step、ALU、Control、Memory、CSR、Trap、M、Snapshot、Image、DiffTest、Interrupt、CLINT、PLIC、Boot，共 **133 个 Unity 测试用例**。启用 Guest 工具链与 `yan_run` 时再加一组 `guest_trap_env`（编译并运行 Guest 自检），共 20 组。
 
 立即数测试覆盖全部 4096 种编码；移位覆盖 0～31 及寄存器移位量高位屏蔽。十条寄存器运算各覆盖 32768 种 rd / rs1 / rs2 组合。固定向量和边界矩阵检查符号比较、算术回绕、逻辑运算与 AUIPC 当前 PC 语义。
 
@@ -49,6 +51,10 @@ M 扩展测试覆盖四种乘法结果、四种除法和余数结果、零除数
 
 中断测试另做了一轮变异检查：在副本里注入 7 个缺陷——中断原因码优先级改成软件优先、中断的 mtval 填 PC、MTIP 的判据改成严格大于、PLIC 阈值比较改成不小于、claim 不清 pending、source 0 可 raise、`mie` 写入不做掩码截断——`clint` / `plic` / `interrupt` 三组测试对每一个都报告失败，没有存活者。
 
+Guest 环境分两层。Host 层（`Boot`，始终运行、不需要交叉工具链）逐条比对 Guest 与 Host 的设备常量、CSR 编号与 `mie` / `mstatus` 位，检查陷阱帧的 17 个槽位互不重叠且帧长为 16 字节倍数，并让 CPU 执行 Guest 的 `sw` / `lw` 真正读写 CLINT 与 PLIC；另有启动契约：复位后无向量、`csrw mtvec` 只保留 31:2 位、`mstatus` 掩码行为与 Guest 启动假设一致。Guest 层（`guest_trap_env`）编译并运行一段自检程序，覆盖启动状态、向量安装、ECALL / EBREAK / 非法指令 / 非对齐访存四种同步异常走同一向量、MSIP 与 MTIP 的中断进入与返回、调用者保存寄存器跨陷阱不变、被中断指令按处理程序的决定重放或跳过，以及 CLINT / PLIC 的 Guest 访问。
+
+Guest 层同样做了变异检查：在副本里注入 10 个缺陷（不清 MSIP、不 disarm MTIP、MTIP 未使能、不改 `mepc`、不装 `mtvec`、帧只压 4 字节、帧槽位与 `a4` 重叠、错误 CLINT 基址、错误 PLIC enable 偏移、`mtimecmp` 只写低半字），Guest 自检或 Host 测试对每一个都报告失败，没有存活者。第一轮还暴露出自检自身的漏洞：失败码 1 与「通过」的 `tohost = 1` 撞车，使 `no-mtvec` 变异体存活，修正为失败码最高位置 1 后才被检出。
+
 ### 外部验证层
 
 以下结果来自外部工具链与参考模型，依赖缺失时对应的 CTest **不注册或报 SKIP**，从不显示为通过。
@@ -57,13 +63,16 @@ M 扩展测试覆盖四种乘法结果、四种除法和余数结果、零除数
 - **变异测试（DUT 侧）**：向副本注入 4 个已知缺陷——SLTI 有符号比较改无符号、JALR 不清 bit 0、DIV 除零结果改 0、LB 去符号扩展——差分测试对每一个都报告了不一致，并给出出错指令的 pc 与机器码。测试本身若放过任何一个即判失败。
 - **变异测试（参考模型侧）**：把 NEMU 参考模型的 `slt` 改成无符号比较、重新构建共享对象，差分测试仍然报告不一致，而未变异时同一镜像通过。只改 DUT 只能证明工具有检测力；改参考模型才能证明比较真的读取了参考状态。
 - **官方 riscv-tests**：`rv32ui` 与 `rv32um` 共 50 例，49 例通过，1 例显式 SKIP（`rv32ui-p-ma_data` 要求非对齐访存成功，而 Yan 平台按设计拒绝）。
-- **官方 ACT4 测试语料**：`riscv-arch-test` 的 `rv32i/I` 与 `rv32i/M` 共 47 例，其中 40 例的 DUT 签名与 Sail 参考模型的签名逐字节相同，0 例不同，7 例 SKIP（都需要异常处理器，而框架的标准 M-mode 启动路径依赖 YanOS 仍没有的 `medeleg` / `mideleg`；`mie` / `mip` 已实现）。这一层使用官方测试源与官方参考模型，但不使用 ACT4 自带的构建系统。
+- **官方 ACT4 测试语料**：`riscv-arch-test` 的 `rv32i/I` 与 `rv32i/M` 共 47 例，其中 40 例的 DUT 签名与 Sail 参考模型的签名逐字节相同，0 例不同，7 例 SKIP。7 例全部是 `I-beq/bge/bgeu/blt/bltu/bne/jal` 的分支与跳转用例，它们故意构造未对齐目标并期望陷阱处理器接管；框架把陷阱处理器的实例化放在 `STANDARD_SM_SUPPORTED` 之内，而该开关的前提是 `medeleg` / `mideleg` 委托、PMP 与 S-mode，YanOS 都没有，所以两侧都落到地址 0 并报「possible trap loop」，脚本据此报 SKIP 而不报通过。`mie` / `mip` 与 CLINT / PLIC 已实现，但语料里**没有任何用例调用中断宏**（`RVMODEL_SET/CLR_MEXT_INT`、`RVMODEL_SET/CLR_MSW_INT`、`RVMODEL_MSIP_ADDRESS`、`RVMODEL_MTIME_ADDRESS` 在 `tests/rv32i/I` 与 `tests/rv32i/M` 中出现 0 次），因此本阶段交付的是接口而不是 ACT4 中断通过数。脚本另有两项配置检查：DUT 头声明的 CLINT 地址必须与框架 `sail_macros.h` 的有效地址一致（探针汇编失败即 FAIL），以及 DUT 中断宏守卫确实被框架覆盖。这一层使用官方测试源与官方参考模型，但不使用 ACT4 自带的构建系统。
 - **签名比对**：8 个镜像的签名与 Sail（第三方参考模型）逐字节相同，签名区大小 256～17184 字节。
+- **Guest trap 环境**：编译 `tests/guest/mtrap_entry.S`、`mtrap.c`、`trap_env.c` 并由 `yan_run` 执行，Guest 自检的每一项都通过（退出码 0）。该层只用交叉工具链与 DUT，不需要参考模型，因为陷阱与中断语义不在参考模型范围内。
 
 ### 覆盖边界
 
 - 差分测试比较 PC、32 个通用寄存器与结束时的整段 RAM；NEMU riscv32 参考状态里没有 CSR 字段，因此 `mstatus`、`mtvec`、`mscratch`、`mepc`、`mcause`、`mtval`、`mie`、`mip` 与 trap / MRET / 中断语义**不在差分测试覆盖范围内**，含这些指令的 Guest 不适用于该层。差分执行器不连接 CLINT / PLIC，中断线恒为低。
 - 参考模型由本仓库补全（上游对应文件是留白桩），与 DUT 同作者，证明的是两份实现一致，不等同第三方模型提供的证据；第三方证据来自官方 `riscv-tests` 与 Sail 签名比对，二者都只覆盖用户态 RV32IM。
+- Guest trap 环境由自检程序验证，证据来自本仓库：它证明陷阱路径在**这台**实现上按规格工作，不构成与外部模型的一致性证据。外部中断（MEIP）无法从 Guest 侧驱动——PLIC 没有 raise 寄存器，只有 Host 能通过 `yan_plic_raise` 拉起源线——因此 Guest 自检只覆盖 MSIP 与 MTIP 的进入 / 返回，MEIP 的投递由 `Interrupt` 那组 Host 测试覆盖。
+- `yan_run` 现在按平台语义映射 CLINT / PLIC 并每条指令推进一次 `mtime`，`yan_difftest` 不映射设备、不推进时间。同一镜像在两个执行器下若读取 `mtime` 会得到不同结果，因此含设备访问的 Guest 只适用于 `yan_run`，这一条已在工具注释与规格里写明。
 
 Debug 启用 AddressSanitizer 和 UndefinedBehaviorSanitizer。内存分配失败分支尚未通过故障注入验证。
 
@@ -71,11 +80,11 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-接入 ACT4 自带的构建系统（`testplans`、UDB 配置与框架的 RVMODEL 生成），让参考模型的期望结果在构建期编译进自检 ELF，从而把当前依赖签名比对与 SKIP 的 7 个异常相关测试也纳入；这需要先补齐 `medeleg` / `mideleg` 与异常委托，或为框架提供一条不经过它们的 M-mode 启动路径。CLINT / PLIC 的寄存器已经存在，把框架的中断流程（`RVMODEL_*` 地址与 `mtvec` 安装）接到这两个设备上，是后续让 ACT4 中断用例可运行的前置工作。
+接入 ACT4 自带的构建系统（`testplans`、UDB 配置与框架的 RVMODEL 生成），让参考模型的期望结果在构建期编译进自检 ELF，从而把当前依赖签名比对与 SKIP 的 7 个异常相关测试也纳入；这需要先补齐 `medeleg` / `mideleg` 与异常委托，或为框架提供一条不经过它们的 M-mode 启动路径。CLINT / PLIC 的寄存器与 Guest 侧陷阱环境已经存在，地址映射也已与框架核对过；剩下的是框架启动路径依赖的委托与 PMP 状态，以及语料中尚不存在的中断用例。
 
 已实现 40 条 RV32I 基础指令的功能路径、八条 RV32M 指令、CSR 指令和 MRET。单步返回 YAN_OK 表示正常完成，YAN_TRAP 表示已进入 Guest 异常或中断；Host 参数和对象状态错误仍直接返回。Bus、RAM 与独立取指接口保留原有错误语义。
 
-中断目前只覆盖单 hart、M-mode、直接入口与非抢占的固定优先级：没有 S/U 模式，没有 `medeleg` / `mideleg` 委托，没有 `mtvec` 向量模式，没有中断嵌套，PLIC 只有一个 M-mode context，CLINT 只有 hart 0 的 msip / mtimecmp。也未完成完整 ISA / 特权架构符合性验收。中断与特权语义既没有参考模型可比较，因此证据只来自本仓库的模块测试，属于已知边界而非已验收能力。
+中断与陷阱目前只覆盖单 hart、M-mode、直接入口与非抢占的固定优先级：没有 S/U 模式，没有 `medeleg` / `mideleg` 委托，没有 `mtvec` 向量模式，没有中断嵌套，PLIC 只有一个 M-mode context，CLINT 只有 hart 0 的 msip / mtimecmp。Guest 环境是最小运行时，不是操作系统：无系统调用 ABI、无进程、无页表、无调度。也未完成完整 ISA / 特权架构符合性验收。陷阱与中断语义没有参考模型可比较，证据来自本仓库的模块测试与 Guest 自检，属于已知边界而非已验收能力。
 
 ## 待定设计
 

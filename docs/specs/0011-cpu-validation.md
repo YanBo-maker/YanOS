@@ -10,7 +10,7 @@
 
 验证分成四层。前两层随仓库自带，后两层是可选外部验证层。
 
-1. **模块测试**：Unity / CTest，覆盖 RAM、Bus、Machine、CPU、取指、整数、控制转移、访存、CSR、异常、M 扩展、架构快照、机器模式中断与 CLINT / PLIC 设备，以及镜像加载与差分比较两个模块。
+1. **模块测试**：Unity / CTest，覆盖 RAM、Bus、Machine、CPU、取指、整数、控制转移、访存、CSR、异常、M 扩展、架构快照、机器模式中断、CLINT / PLIC 设备，以及 Guest 平台视图与陷阱 ABI 的跨层一致性，另有镜像加载与差分比较两个模块。
 2. **逐指令差分测试**：`yan_difftest` 加载同一份 Guest 镜像，让 YanCPU 与外部参考模型从同一内存镜像、同一复位状态出发，YanCPU 每提交一条指令就与参考模型比较一次 PC 与 32 个通用寄存器；首次不一致时输出出错指令地址、机器码、首个不同寄存器与两侧完整寄存器表。运行结束时再比较整段 RAM。
 3. **官方架构测试**：`riscv-tests` 的 `rv32ui` 与 `rv32um` 自检套件。测试通过 `tohost` 报告结果，`yan_run` 从 ELF 符号表解析该符号，不硬编码地址。
 4. **签名比对**：`sail_riscv_sim`（第三方独立实现）按 ELF 的 `begin_signature` / `end_signature` 符号导出期望签名，`yan_run --signature` 导出 DUT 签名，两者逐字节 `cmp`。签名区由链接脚本决定，在本仓库的 Guest 语料里它覆盖整个可写段（含栈），因此这一层比较的是**步数上限处的整段可写状态**，而不是 ACT 风格的显式输出数组。
@@ -29,10 +29,11 @@
 
 ### ACT4 层的能力边界
 
-- 只选 `tests/rv32i/I` 与 `tests/rv32i/M`。YanOS 有单 hart 的 CLINT 与单 context 的 M-mode PLIC，但没有 S/U 模式、没有中断委托、没有 PMP，本路径也没有把框架的中断流程接到这两个设备上，`tests/rv32i/Zicsr`、`tests/rv32i/priv` 及其以上都跑不了。
+- 只选 `tests/rv32i/I` 与 `tests/rv32i/M`。YanOS 有单 hart 的 CLINT 与单 context 的 M-mode PLIC，但没有 S/U 模式、没有中断委托、没有 PMP，框架的陷阱处理器与中断助手又都 gated 在 `STANDARD_SM_SUPPORTED` 之内，因此 `tests/rv32i/Zicsr`、`tests/rv32i/priv` 及其以上都跑不了。这两个目录里也没有任何用例调用中断宏，所以这一层今天只交付接口，不交付中断通过数。
 - 汇编时必须传 `-DUNROLLSZ=0`：框架默认把入口对齐到 32 字节，在没有 C 扩展时只能用零填充，而执行流会踩过这段填充（Sail 与 YanOS 都会在那里取到非法指令）。
-- 需要异常处理器的测试（非对齐的分支/跳转目标）报 SKIP：框架的标准 M-mode 启动路径会写 `medeleg`、`mideleg`，这两者仍不在 YanOS 的 CSR 之列，因此 `mtvec` 不会被安装，两个模型都会落到地址 0。`mie` / `mip` 已随机器模式中断实现，不再是这条 SKIP 的原因。
-- **中断与计时器由语料检查拦住，不由宏拦住**：本框架在 DUT 头之后 include `sail_macros.h`，并把 `RVMODEL_SET/CLR_MEXT_INT`、`SET/CLR_MSW_INT` 全部 `#undef` 成真实的 CLINT/PLIC 实现，因此 DUT 头里的 `.error` 守卫**不生效**（`-DRVTEST_SELFCHECK` 下才会生效）。真正生效的守卫在 `tests/official/run_act4.sh`：选中测试的**源码文本**里出现 `RVMODEL_(SET|CLR)_(MEXT|MSW)_INT`、`RVMODEL_MSIP_ADDRESS` 或 `RVMODEL_MTIME_ADDRESS` 时，该用例在运行前就被拒绝并报 SKIP。这条检查只看测试 `.S` 文本，不覆盖在 env 头里间接展开的路径；当前 47 个用例全部有明确归属（40 通过、7 因需要异常处理器而 SKIP）。
+- 需要异常处理器的测试（非对齐的分支/跳转目标）报 SKIP：框架把陷阱处理器的实例化与整套 M-mode 中断助手都放在 `#ifdef STANDARD_SM_SUPPORTED` 之内，而该开关的前提是 `medeleg` / `mideleg` 委托、PMP 与 S-mode，这三者仍不在 YanOS 之列，因此 `mtvec` 不会被安装，两个模型都会落到地址 0 并报 `possible trap loop`。`mie` / `mip` 与 CLINT / PLIC 已实现，但都不是这个开关需要的东西，所以这条 SKIP 的原因没有消失。
+- **中断与计时器由语料检查拦住，不由宏拦住**：本框架在 DUT 头之后 include `sail_macros.h`，并把 `RVMODEL_SET/CLR_MEXT_INT`、`SET/CLR_MSW_INT` 全部 `#undef` 成真实的 CLINT/PLIC 实现，因此 DUT 头里的 `.error` 守卫**不生效**（`-DRVTEST_SELFCHECK` 下才会生效）。真正生效的守卫在 `tests/official/run_act4.sh`：选中测试的**源码文本**里出现 `RVMODEL_(SET|CLR)_(MEXT|MSW)_INT`、`RVMODEL_MSIP_ADDRESS` 或 `RVMODEL_MTIME_ADDRESS` 时，该用例在运行前就被拒绝并报 SKIP。这条检查只看测试 `.S` 文本，不覆盖在 env 头里间接展开的路径；当前 47 个用例全部有明确归属（40 通过、7 因需要陷阱处理器而 SKIP）。`tests/rv32i/I` 与 `tests/rv32i/M` 里没有用例调用中断宏，所以这一层目前没有中断用例可跑。
+- **两项配置检查**：脚本先做两次构建期探针，任一项失败即整体 FAIL，而不是 SKIP。(1) DUT 头声明的中断宏守卫是否真的被框架覆盖——探针必须让 `riscv_arch_test.h` 真正预处理（传 `-DTEST_FILE` 与 `-DSIGUPD_COUNT`），否则 `check_defines.h` 会在到达 DUT 头之前就中止，空的预处理输出会被误读成「框架覆盖了守卫」。(2) `tests/act4/rvmodel_macros.h` 声明的 CLINT 地址是否等于框架的有效地址——`sail_macros.h` 会用 `SAIL_*` 值替换 `RVMODEL_*`，所以不一致在生成代码里完全不可见；探针用 `.if` / `.error` 汇编，宏未定义也算不一致，从而同时拦住「DUT 头不再声明映射」这种情况。
 - 这一层用签名比对决定结论，**不使用测试自身的 pass/fail 字**，也不使用 `tohost`：ACT4 的 `sail_macros.h` 把 `tohost` 当作 HTIF 控制台寄存器，逐字符写摘要串（首字符是 `'\n'` = 10），所以"第一个非零值"不是停机请求。`yan_run` 因此用 `--ignore-tohost` 跑满步数上限，只导出签名。只有两侧签名都存在且逐字节相同时才算通过。
 
 ### 退出码
@@ -94,7 +95,7 @@ ctest --test-dir build --output-on-failure
 
 | 层 | 结果 |
 | --- | --- |
-| 模块测试 | 18 个套件、129 个 Unity 用例全部通过 |
+| 模块测试 | 19 个套件、133 个 Unity 用例全部通过（启用 Guest 工具链时另有 `guest_trap_env`，共 20 组） |
 | 逐指令差分测试 | 18 个 Guest 镜像（5 个手写源 × -O0 / -O2 + 8 个随机生成程序）逐条比较全部一致，结束时 RAM 一致 |
 | 变异测试（DUT 侧） | 4 个注入缺陷（SLTI 有符号改无符号、JALR 不清 bit 0、DIV 除零改 0、LB 去符号扩展）全部被检出，均报出出错指令 pc 与机器码 |
 | 变异测试（参考模型侧） | 把 NEMU 的 `slt` 改成无符号比较并重新构建参考模型，差分测试仍然报告不一致，且未变异时同一镜像通过 |
@@ -102,11 +103,11 @@ ctest --test-dir build --output-on-failure
 | 签名比对 | 8 个镜像的签名与 Sail 逐字节相同（手写用例 16384 / 17184 字节，随机程序 256 字节） |
 | 官方 ACT4 测试语料 | `rv32i/I` + `rv32i/M` 共 47 例：40 例签名与 Sail 逐字节相同，0 例不同，7 例 SKIP（都需要异常处理器） |
 | 超范围判定 | 故意非对齐访存的 Guest 被判为 exit 3（`mcause = 4`），且报告里不出现 `MISMATCH` |
-| CTest 汇总 | 只做本地模块测试时 18 个；给出 `YAN_NEMU_REF_SO`、`YAN_RISCV_TESTS_DIR`、`YAN_RISCV_ARCH_TEST_DIR`、`YAN_SAIL_BIN` 后 24 个；再加上 `YAN_NEMU_REF_DIR` 共 25 个，全部通过 |
+| CTest 汇总 | 只做本地模块测试时 19 个；给出 `YAN_NEMU_REF_SO`、`YAN_RISCV_TESTS_DIR`、`YAN_RISCV_ARCH_TEST_DIR`、`YAN_SAIL_BIN` 后 25 个；再加上 `YAN_NEMU_REF_DIR` 共 27 个（含 `guest_trap_env` 与 `boot`），全部通过 |
 | 中断层变异检查 | 在副本里注入 7 个缺陷（中断原因码优先级改成软件优先、中断 mtval 填 PC、MTIP 改成严格大于、PLIC 阈值改成不小于、claim 不清 pending、source 0 可 raise、mie 写入不截断），`clint` / `plic` / `interrupt` 三组测试对每一个都报告失败 |
 
 模块测试开启 AddressSanitizer 与 UndefinedBehaviorSanitizer 后同样通过。
 
-尚未完成：ACT4 官方框架与 RVMODEL 宏未接入；CSR、特权、异常与中断语义没有外部参考模型覆盖；CLINT / PLIC 的与平台相关行为（gateway 电平锁存、多 context、多 hart）不在验证范围内。
+尚未完成：ACT4 官方框架（`testplans` / UDB / RVMODEL 生成）未接入；CSR、特权、异常与中断语义没有外部参考模型覆盖；CLINT / PLIC 的与平台相关行为（gateway 电平锁存、多 context、多 hart）不在验证范围内；Guest 陷阱环境的证据来自本仓库自检，不是与外部模型的一致性证据，且外部中断（MEIP）无法从 Guest 侧驱动，只由机器层测试覆盖。
 
 参考：[一生一芯 DiffTest 介绍](https://oscpu.github.io/ysyx/events/2021-07-17_Difftest/difftest%E6%A1%86%E6%9E%B6%E4%BB%8B%E7%BB%8D.pdf)、[riscv-tests](https://github.com/riscv-software-src/riscv-tests)、[RISC-V Architectural Test](https://github.com/riscv/riscv-arch-test)、[Sail RISC-V model](https://github.com/riscv/sail-riscv)。

@@ -58,23 +58,51 @@
 # is decided by the signature comparison against the reference model.
 #define RVMODEL_IO_WRITE_STR(_R1, _R2, _R3, _STR_PTR)
 
+##### MACHINE TIMER AND SOFTWARE INTERRUPT #####
+
+# YanOS has a single-hart CLINT at the standard base. The offsets are the ones
+# the Host header include/yan/interrupt.h implements, and they are also the ones
+# sail_macros.h derives from SAIL_CLINT_BASE_ADDRESS, so the DUT description and
+# the framework's effective addresses agree by construction.
+#
+# The framework #undefs these and substitutes its SAIL_* values, so declaring
+# them here cannot change generated code. What it does change is that a
+# mismatch becomes detectable: tests/official/run_act4.sh assembles a probe
+# that fails if the effective addresses differ from the ones declared here.
+#define YANOS_CLINT_BASE_ADDRESS 0x02000000
+#define RVMODEL_MSIP_ADDRESS (YANOS_CLINT_BASE_ADDRESS + 0x0)
+#define RVMODEL_MTIMECMP_ADDRESS (YANOS_CLINT_BASE_ADDRESS + 0x4000)
+#define RVMODEL_MTIME_ADDRESS (YANOS_CLINT_BASE_ADDRESS + 0xbff8)
+
 ##### UNSUPPORTED CAPABILITIES #####
 
-# These macros must exist for the framework's checks. See the note at the top of
-# this file: the framework replaces them, so the effective guard is the corpus
-# check in tests/official/run_act4.sh.
-#define RVMODEL_SET_MEXT_INT(_R1, _R2) .error "YanOS has no external interrupt controller"
-#define RVMODEL_CLR_MEXT_INT(_R1, _R2) .error "YanOS has no external interrupt controller"
-#define RVMODEL_SET_MSW_INT(_R1, _R2)  .error "YanOS has no software interrupt register"
-#define RVMODEL_CLR_MSW_INT(_R1, _R2)  .error "YanOS has no software interrupt register"
+# External interrupts have no Guest-visible source: YanOS's PLIC has no raise
+# register, and only the Host can assert a source line through
+# yan_plic_raise(). The framework's own RVMODEL_SET_MEXT_INT writes to a Sail
+# test-interrupt-generator device (SAIL_SIG_ADDRESS) that this platform does not
+# have, and adding a device for it is out of scope. These macros must exist for
+# the framework's checks; see the note at the top of this file about which guard
+# is actually in effect.
+#define RVMODEL_SET_MEXT_INT(_R1, _R2) .error "YanOS has no external interrupt source register"
+#define RVMODEL_CLR_MEXT_INT(_R1, _R2) .error "YanOS has no external interrupt source register"
 
-# Required by the framework's checks even though no timer test can run here.
+# Software interrupts go through the CLINT msip register, which the address
+# macro above already describes, so the platform-specific pair stays an error.
+#define RVMODEL_SET_MSW_INT(_R1, _R2)  .error "use RVMODEL_MSIP_ADDRESS for software interrupts"
+#define RVMODEL_CLR_MSW_INT(_R1, _R2)  .error "use RVMODEL_MSIP_ADDRESS for software interrupts"
+
+# Required by the framework's checks. No timer test reaches these values today:
+# every helper that reads them is gated on STANDARD_SM_SUPPORTED below.
 #define RVMODEL_INTERRUPT_LATENCY 1
 #define RVMODEL_TIMER_INT_SOON_DELAY 1
 #define RVMODEL_MAX_CYCLES_PER_TIMER_TICK 1
 
-# The framework's standard M-mode CSR bank also assumes delegation and PMP,
-# which YanOS does not implement, so STANDARD_SM_SUPPORTED stays unset and that
-# initialisation block is skipped even though mie and mip now exist.
+# STANDARD_SM_SUPPORTED stays unset. It gates the framework's trap handler
+# instantiation and its whole M-mode interrupt helper bank, and it assumes CSR
+# state YanOS deliberately does not implement: medeleg/mideleg for delegation,
+# PMP registers, and S-mode. mie, mip and the CLINT now exist, but they are not
+# what this switch needs. The consequence is explicit and verified in
+# tests/official/run_act4.sh: the seven branch and jump tests that expect a trap
+# handler are reported as SKIP with that reason, never as passes.
 
 #endif // _RVMODEL_MACROS_H
