@@ -159,6 +159,22 @@ if(BUILD_TESTING)
                                                       TIMEOUT 300)
     endif()
 
+    # The cooperative runtime is Guest-only C and assembly, and its hardest case
+    # is a property of timing rather than of a value: an interrupt delivered
+    # between the predicate check and the switch that follows it. That is why the
+    # suite carries its own scripted driver instead of going through yan_run:
+    # the tool advances a whole step at a time and cannot be asked to inject a
+    # device line at one chosen instruction.
+    if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
+        add_test(NAME guest_runtime
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_runtime.sh"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --work "${CMAKE_BINARY_DIR}/runtime")
+        set_tests_properties(guest_runtime PROPERTIES SKIP_RETURN_CODE 77
+                                                      TIMEOUT 300)
+    endif()
+
     # The block request protocol runs on the channel, so this suite has three
     # faces and the script drives all of them: a host-only unit face that can
     # place chosen bytes in a ring (which no guest can be asked to do), a guest
@@ -221,6 +237,15 @@ if(BUILD_TESTING)
         # "restore an unconditional 1" - is an equivalent mutant under the
         # precondition the same specification requires, and is recorded as such
         # rather than counted as a survivor.
+        add_test(NAME guest_runtime_mutation
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_runtime_mutation.sh"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --work "${YAN_MUTATION_WORK_ROOT}/runtime")
+        set_tests_properties(guest_runtime_mutation PROPERTIES
+                                                        SKIP_RETURN_CODE 77
+                                                        TIMEOUT 900)
+
         # Planted-defect run for the block protocol: eight on the host side, five
         # in the guest frame layer. The gate counts only assertion failures - a
         # hang, a crash or a sanitizer report is a harness error, not a detection.
