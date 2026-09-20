@@ -46,7 +46,7 @@ target_include_directories(yan_machine PUBLIC include)
 target_compile_options(yan_machine PRIVATE ${YAN_WARNINGS})
 
 if(YAN_BUILD_TOOLS)
-    add_executable(yan_run tools/yan_run.c tools/host_file.c)
+    add_executable(yan_run tools/yan_run.c tools/host_file.c tools/host_terminal.c)
     target_link_libraries(yan_run PRIVATE yan_machine)
     target_compile_options(yan_run PRIVATE ${YAN_WARNINGS})
 
@@ -84,9 +84,12 @@ if(BUILD_TESTING)
     endforeach()
 
     # The boot suite compares the Guest-visible platform description with the
-    # Host one, so it needs the Guest headers on its include path.
+    # Host one, so it needs the Guest headers on its include path. It also
+    # compares os/platform.h against include/yan/uart.h, which is why the YanOS
+    # layer is on the path too.
     target_include_directories(test_boot PRIVATE
-                               "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest")
+                               "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest"
+                               "${CMAKE_CURRENT_SOURCE_DIR}/os")
 
     # ---------------------------------------------------------------- external
     set(_yan_gcc_names riscv64-unknown-elf-gcc riscv32-unknown-elf-gcc
@@ -109,6 +112,92 @@ if(BUILD_TESTING)
                     --work "${CMAKE_BINARY_DIR}/trap-env")
         set_tests_properties(guest_trap_env PROPERTIES SKIP_RETURN_CODE 77
                                                      TIMEOUT 300)
+    endif()
+
+    # The console needs the UART terminal backend, which lives on the Host; the
+    # Guest program drives the device directly so the test does not depend on
+    # the console driver being finished.
+    if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
+        add_test(NAME guest_terminal
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_terminal.sh"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${CMAKE_BINARY_DIR}/terminal")
+        set_tests_properties(guest_terminal PROPERTIES SKIP_RETURN_CODE 77
+                                                       TIMEOUT 300)
+    endif()
+
+    # The executor's default path is frozen as a golden baseline: a deterministic
+    # Guest probe plus its trace and signature bytes, compared byte for byte. A
+    # change to the default path has to be seen and reviewed, not discovered
+    # later. It needs the toolchain and the executor, nothing else.
+    if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
+        add_test(NAME guest_golden
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_golden.sh"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${CMAKE_BINARY_DIR}/golden")
+        set_tests_properties(guest_golden PROPERTIES SKIP_RETURN_CODE 77
+                                                     TIMEOUT 300)
+    endif()
+
+    # The console driver runs inside the Guest but is plain C, so its test
+    # drives it twice: once through yan_run --terminal (the real path) and once
+    # through a scripted UART backend that can refuse a byte or detach the
+    # terminal mid-line, which the production tool cannot be asked to do.
+    if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
+        add_test(NAME guest_console
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_console.sh"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${CMAKE_BINARY_DIR}/console")
+        set_tests_properties(guest_console PROPERTIES SKIP_RETURN_CODE 77
+                                                      TIMEOUT 300)
+    endif()
+
+    # Mutation checks live behind one switch, not one switch per component. Both
+    # suites plant defects in a private copy, rebuild and run the tests there,
+    # and count a defect as detected only when an assertion fails; crashes and
+    # sanitizer reports do not count.
+    #
+    # Off by default because they dominate the suite: the console check takes
+    # about 50 s and the device check about 290 s, against roughly 13 s for
+    # everything else. They must be run explicitly before a merge, which
+    # CONTRIBUTING records.
+    # Mutation runs copy the tree, relink and rerun dozens of times, and that is
+    # dominated by filesystem traffic: under WSL the same five mutants took 78 s
+    # with scratch space on the Windows mount and 11 s on a native filesystem.
+    # Their scratch space therefore lives outside the build tree on purpose.
+    # One definition point, so a native-Linux checkout can move it in one place.
+    set(YAN_MUTATION_WORK_ROOT "/tmp/yan-mutation")
+
+    option(YAN_ENABLE_MUTATION_TESTS
+           "Register the mutation checks with CTest (slow)" OFF)
+    if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC AND YAN_ENABLE_MUTATION_TESTS)
+        # Planted-defect run for the console: every mutation must be caught, so
+        # a surviving defect fails this test rather than passing quietly.
+        add_test(NAME guest_console_mutation
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_console.sh"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${YAN_MUTATION_WORK_ROOT}/console"
+                    --mutation --drive scripted)
+        set_tests_properties(guest_console_mutation PROPERTIES SKIP_RETURN_CODE 77
+                                                              TIMEOUT 600)
+
+        # Planted-defect run for the devices and the PLIC gateway.
+        add_test(NAME device_mutation
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_device_mutation.sh"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --work "${YAN_MUTATION_WORK_ROOT}/device"
+                    --unity "${unity_SOURCE_DIR}"
+                    --jobs 8)
+        set_tests_properties(device_mutation PROPERTIES SKIP_RETURN_CODE 77
+                                                        TIMEOUT 1800)
     endif()
 
     if(YAN_BUILD_TOOLS AND UNIX AND EXISTS "${YAN_NEMU_REF_SO}" AND YAN_RISCV_GCC)

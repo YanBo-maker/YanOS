@@ -150,6 +150,45 @@ static void cpu_reset_and_image_loading(void)
     yan_machine_destroy(&machine);
 }
 
+/* An explicit geometry is assembled as asked and reset to its own base, but a
+ * window that would overlap a device window is refused before anything is
+ * allocated: the Bus decodes devices before RAM, so such a machine would lose
+ * part of its memory with no diagnostic at all. */
+static void explicit_geometry_is_validated(void)
+{
+    TEST_ASSERT_EQUAL_INT(YAN_OK,
+                          yan_machine_init_with(&machine, UINT32_C(0x40000000),
+                                                4096));
+    TEST_ASSERT_EQUAL_UINT64(4096, machine.ram.size);
+    TEST_ASSERT_EQUAL_HEX32(UINT32_C(0x40000000), machine.bus.ram_base);
+    TEST_ASSERT_EQUAL_INT(YAN_OK, yan_machine_reset(&machine));
+    TEST_ASSERT_EQUAL_HEX32(UINT32_C(0x40000000), machine.cpu.pc);
+    yan_machine_destroy(&machine);
+
+    /* Zero size, and windows that touch each device, are all rejected. */
+    TEST_ASSERT_EQUAL_INT(YAN_INVALID_ARGUMENT,
+                          yan_machine_init_with(&first, UINT32_C(0x40000000), 0));
+    TEST_ASSERT_EQUAL_INT(YAN_INVALID_ARGUMENT,
+                          yan_machine_init_with(&first, YAN_CLINT_BASE, YAN_CLINT_SIZE));
+    TEST_ASSERT_EQUAL_INT(YAN_INVALID_ARGUMENT,
+                          yan_machine_init_with(&first, YAN_PLIC_BASE, 4096));
+    TEST_ASSERT_EQUAL_INT(YAN_INVALID_ARGUMENT,
+                          yan_machine_init_with(&first, YAN_UART_BASE, 4096));
+    TEST_ASSERT_EQUAL_INT(YAN_INVALID_ARGUMENT,
+                          yan_machine_init_with(&first, YAN_TRANSPORT_BASE, 8192));
+    /* A window that starts before a device and reaches into it overlaps too. */
+    TEST_ASSERT_EQUAL_INT(YAN_INVALID_ARGUMENT,
+                          yan_machine_init_with(&first, YAN_UART_BASE - 2048, 4096));
+    /* Nothing was allocated by any of the refused calls. */
+    TEST_ASSERT_TRUE(first.ram.data == NULL);
+    TEST_ASSERT_TRUE(first.bus.ram == NULL);
+
+    /* Ending exactly where a device begins is not an overlap. */
+    TEST_ASSERT_EQUAL_INT(YAN_OK,
+                          yan_machine_init_with(&second, YAN_UART_BASE - 4096, 4096));
+    yan_machine_destroy(&second);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -157,5 +196,6 @@ int main(void)
     RUN_TEST(rejected_and_overlapping_images);
     RUN_TEST(lifecycle_and_independent_machines);
     RUN_TEST(cpu_reset_and_image_loading);
+    RUN_TEST(explicit_geometry_is_validated);
     return UNITY_END();
 }

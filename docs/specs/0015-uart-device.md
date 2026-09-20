@@ -82,6 +82,7 @@ bool      yan_uart_tx_ready(const YanUart *uart);
 - `tx_ready` 是**背压**接口：它让设备在广告 `TX_READY=1` 之前就知道能否接受，从而不必"先答应再拒绝"。`tx_write` 因此被约定为**不得拒绝**——设备只在 `tx_ready` 为真后调用它。
 - `yan_uart_set_terminal(uart, NULL)` 断开。传入缺少任一回调的 backend 返回 `YAN_INVALID_ARGUMENT` 且保留原连接。
 - **断开时清空接收缓冲与 `IRQ_STATUS`**：终端离开就带走了尚未取走的输入。`CONTROL` 保留。
+- **替换（非断开）不清空接收缓冲与 `IRQ_STATUS`**：`yan_uart_set_terminal(uart, &another)` 只是把另一端换人，尚未取走的输入仍然有效，`IRQ_STATUS` 与中断线一并保持；只有断开（`NULL`）或整机复位才清空。区分这两件事，是为了让"终端重连"不悄悄吃掉已经收到的字节。
 - `yan_uart_connected` 与 `yan_uart_tx_ready` 是只读查询，供测试与驱动使用；设备内部的 `STATUS` 读数与 `TXDATA` 写入路径都走同一判定。
 
 ### 行为
@@ -112,7 +113,7 @@ bool      yan_uart_tx_ready(const YanUart *uart);
 3. 控制台上层收到该结果后**允许继续以 headless 方式运行**：输出被丢弃、程序照常推进，不因缺少终端而阻塞或崩溃。
 4. `CONNECTED = 1` 而 `TX_READY = 0` 时，驱动可以在协作式让出点重试，但**重试必须有上限**；上限到达后同样返回 `YAN_UNAVAILABLE`。
 
-这条契约的验收属于控制台规格（`os/` 目录落定后单独成规格）；本规格只要求设备提供足以实现它的状态位。
+这条契约的验收属于[控制台与 `os/` 层规格](0017-console-and-os-layout.md)；本规格只要求设备提供足以实现它的状态位。
 
 ### 与 PLIC 的源编号约定
 
@@ -143,9 +144,9 @@ bool      yan_uart_tx_ready(const YanUart *uart);
 3. 先改 `tests/test_uart.c`：按下方 VERIFY 新增"未连接 / 已连接 / TX 写入被拒"三组用例，并调整受位改名影响的既有断言，确认在实现前失败。
 4. 实现 `src/uart.c`：两个方向共用同一个连接与就绪判定；写路径返回 `YAN_UNAVAILABLE`。
 5. 运行 Debug ASan/UBSan 与 Release 全量 CTest，并重做变异检查。
-6. Host 侧在 `tools/` 中提供一个 terminal backend（`tx_ready` 恒真、`tx_write` 写标准输出），标准输入接到 `push_rx`。
+6. Host 侧在 `tools/` 中提供一个 terminal backend（`tx_ready` 反映标准输出**此刻**能否接受一个字节、`tx_write` 写标准输出），标准输入接到 `push_rx`。`tx_ready` 不是恒真的常量：标准输出写失败后它转为假，设备随之报告 `TX_READY = 0`，这正是上面驱动契约里"`CONNECTED = 1` 而 `TX_READY = 0`"那条的来源。
 
-控制台驱动（行编辑、回显、退格、headless 行为）属于 YanOS 层，不属于本设备的规格。它的外部行为依赖本规格定义的 `STATUS` / `CONNECTED` / `RXDATA` / 中断语义与上面的驱动契约，在 `os/` 目录骨架落定后单独成规格。
+控制台驱动（行编辑、回显、退格、headless 行为）属于 YanOS 层，不属于本设备的规格，见[控制台与 `os/` 层规格](0017-console-and-os-layout.md)。它的外部行为依赖本规格定义的 `STATUS` / `CONNECTED` / `RXDATA` / 中断语义与上面的驱动契约。
 
 ## VERIFY
 
