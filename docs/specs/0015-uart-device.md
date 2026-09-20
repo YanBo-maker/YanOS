@@ -112,7 +112,7 @@ bool      yan_uart_tx_ready(const YanUart *uart);
 3. 控制台上层收到该结果后**允许继续以 headless 方式运行**：输出被丢弃、程序照常推进，不因缺少终端而阻塞或崩溃。
 4. `CONNECTED = 1` 而 `TX_READY = 0` 时，驱动可以在协作式让出点重试，但**重试必须有上限**；上限到达后同样返回 `YAN_UNAVAILABLE`。
 
-这条契约的验收属于控制台规格（`os/` 目录落定后单独成规格）；本规格只要求设备提供足以实现它的状态位。
+这条契约的验收属于[控制台与 `os/` 层规格](0017-console-and-os-layout.md)；本规格只要求设备提供足以实现它的状态位。
 
 ### 与 PLIC 的源编号约定
 
@@ -145,7 +145,7 @@ bool      yan_uart_tx_ready(const YanUart *uart);
 5. 运行 Debug ASan/UBSan 与 Release 全量 CTest，并重做变异检查。
 6. Host 侧在 `tools/` 中提供一个 terminal backend（`tx_ready` 恒真、`tx_write` 写标准输出），标准输入接到 `push_rx`。
 
-控制台驱动（行编辑、回显、退格、headless 行为）属于 YanOS 层，不属于本设备的规格。它的外部行为依赖本规格定义的 `STATUS` / `CONNECTED` / `RXDATA` / 中断语义与上面的驱动契约，在 `os/` 目录骨架落定后单独成规格。
+控制台驱动（行编辑、回显、退格、headless 行为）属于 YanOS 层，不属于本设备的规格，见[控制台与 `os/` 层规格](0017-console-and-os-layout.md)。它的外部行为依赖本规格定义的 `STATUS` / `CONNECTED` / `RXDATA` / 中断语义与上面的驱动契约。
 
 ## VERIFY
 

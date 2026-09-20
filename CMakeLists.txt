@@ -84,9 +84,12 @@ if(BUILD_TESTING)
     endforeach()
 
     # The boot suite compares the Guest-visible platform description with the
-    # Host one, so it needs the Guest headers on its include path.
+    # Host one, so it needs the Guest headers on its include path. It also
+    # compares os/platform.h against include/yan/uart.h, which is why the YanOS
+    # layer is on the path too.
     target_include_directories(test_boot PRIVATE
-                               "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest")
+                               "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest"
+                               "${CMAKE_CURRENT_SOURCE_DIR}/os")
 
     # ---------------------------------------------------------------- external
     set(_yan_gcc_names riscv64-unknown-elf-gcc riscv32-unknown-elf-gcc

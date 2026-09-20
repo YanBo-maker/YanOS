@@ -1,6 +1,6 @@
 # 0017：控制台与 `os/` 层
 
-> 状态：**草案，待项目所有者审核**。审核通过并 Spec Lock 之前，`os/console.c` 保持骨架，不得实现。
+> 状态：**Spec Lock**（2026-09-20 项目所有者审核通过）。实现中如需变更接口、数据结构或行为，走 INTENTION / SPEC / IMPLE 审核，不得直接修改本文件；`os/console.h` 与 `os/platform.h` 是随本规格冻结的接口。
 
 ## INTENTION
 

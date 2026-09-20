@@ -6,7 +6,7 @@ YanOS 是一个用于学习计算机系统的项目，计划实现 RISC-V 模拟
 
 ## 状态
 
-已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位、取指和整数指令单步执行。已实现 RV32I 的整数计算、控制转移、访存、FENCE、FENCE.I、ECALL 和 EBREAK，并提供 CSR 指令，支持 M-mode 同步异常与中断处理及 MRET。RV32M 的八条乘除指令已加入。平台侧实现了单 hart 的 CLINT 与单 context 的 M-mode PLIC，中断线经 Bus 接入 CPU 的 `mie` / `mip`；Guest 侧有最小的启动入口、统一的陷阱处理路径与 CLINT / PLIC 访问封装。验证层已接入逐指令差分测试、官方 `riscv-tests` 套件、官方 `riscv-arch-test`（ACT4）测试语料与 Sail 签名比对。Host 传输通道与 UART 字符设备的规格 v1 已审核通过（Spec Lock），v2 修订待审核；PLIC 网关已按电平语义实现，UART 已实现并有 15 个模块用例通过，传输通道仍在实现中，独立验证尚未出结论。S/U 模式、中断委托、分页与其余设备仍待实现。详细进度见 [STATUS](docs/STATUS.md)。
+已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位、取指和整数指令单步执行。已实现 RV32I 的整数计算、控制转移、访存、FENCE、FENCE.I、ECALL 和 EBREAK，并提供 CSR 指令，支持 M-mode 同步异常与中断处理及 MRET。RV32M 的八条乘除指令已加入。平台侧实现了单 hart 的 CLINT 与单 context 的 M-mode PLIC，中断线经 Bus 接入 CPU 的 `mie` / `mip`；Guest 侧有最小的启动入口、统一的陷阱处理路径与 CLINT / PLIC 访问封装。验证层已接入逐指令差分测试、官方 `riscv-tests` 套件、官方 `riscv-arch-test`（ACT4）测试语料与 Sail 签名比对。此外还接入了 UART 字符设备与 Host 传输通道：PLIC 网关按设备线的电平语义工作并已通过独立验证，UART 与传输通道分别有 19 与 14 个模块用例通过。YanOS 侧建立了 `os/` 层，它的第一个成员控制台驱动目前只有骨架，接口见 [控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)。S/U 模式、中断委托、分页与其余设备仍待实现。详细进度见 [STATUS](docs/STATUS.md)。
 
 ## 构建与测试
 
@@ -55,11 +55,13 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 | YanFS | 持久化存储，具体语义待定 |
 | Yan Knowledge System | 笔记、问题、关系和探索路径的终端交互 |
 
+代码按三层分区：Host 侧的 `src/` 与 `include/`（CPU、Bus、设备与工具）、YanOS 侧的 `os/`（在 Guest 上运行的 YanOS 代码，如控制台驱动）、以及 `tests/guest/` 下的验证程序。依赖方向单向：`os/` 不引用 `tests/`，`tests/` 可以引用 `os/`，见 [控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)。
+
 各组件的完整能力将分阶段实现。浏览器支持计划通过 WebAssembly 和界面适配接入；新增能力的时机由实际使用决定。
 
 ## 开发
 
-参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md) 和 [UART 字符设备规格](docs/specs/0015-uart-device.md)。
+参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)（待审核）和 [控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)。
 
 ## 许可证
 

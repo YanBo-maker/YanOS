@@ -1,6 +1,6 @@
 # 项目状态
 
-当前阶段：PLIC 电平网关、UART 字符设备与 Host 传输通道。[0014](specs/0014-host-transport-channel.md) 与 [0015](specs/0015-uart-device.md) 的 v1 已由项目所有者审核通过并标为 Spec Lock，两者的 v2 修订（设备中断线语义与 PLIC 源映射交给 [0016](specs/0016-plic-gateway-and-irq-lines.md)）仍是待审核状态；按规格自身的要求，v2 通过前这一阶段的实现不得合并到长期分支。PLIC 网关已按 0016 的电平语义实现：平台用 `yan_plic_set_level` 双向驱动设备线，源被 claim 后在 complete 之前不再重新 pending，complete 时线仍 asserted 才重新 pending，旧的 `yan_plic_raise` 已移除。UART 已按 0015 实现，15 个模块用例通过。传输通道的实现与用例仍在补齐，该组在全新构建下仍有失败。独立验证正在进行、尚无结论，因此本文不把这两个设备记为已验证；Guest 侧的控制台集成用例也未做，它依赖尚未建立的 `os/` 目录。上一阶段（Guest 启动与统一 trap 环境）已完成：模块测试、逐指令差分测试、官方 `riscv-tests` 套件与 Sail 签名比对都已接入并在本机通过；ACT4 官方框架尚未接入。M-mode 的 CLINT、PLIC、中断进入 / 返回，以及 Guest 侧的启动入口、陷阱向量与设备访问封装都已实现；中断与陷阱语义仍没有外部参考模型可比较。
+当前阶段：平台设备（PLIC 电平网关、UART、Host 传输通道）与 `os/` 层。[0015](specs/0015-uart-device.md) v3 与 [0017](specs/0017-console-and-os-layout.md) 已由项目所有者审核通过并锁定；[0014](specs/0014-host-transport-channel.md) 的 v2 与 [0016](specs/0016-plic-gateway-and-irq-lines.md) 仍是待审核状态，按规格自身的要求，通过前这些实现不得合并到长期分支——设备实现目前只在 `feat/m1-device-channel` 与待审的 PR #13 上，`main` 不含这些提交。PLIC 网关已按电平语义实现并通过独立验证；UART（19 例）与传输通道（14 例）的模块测试在 Debug ASan/UBSan 与 Release 下全绿。`os/` 层已随 0017 落地：`os/platform.h` 与 `os/console.h` 是冻结接口，`os/console.c` 仍是骨架。控制台驱动、Guest 侧控制台自检与 Host terminal backend 都在实现中，均未验证。上一阶段（Guest 启动与统一 trap 环境）已完成：模块测试、逐指令差分测试、官方 `riscv-tests` 套件与 Sail 签名比对都已接入并在本机通过；ACT4 官方框架尚未接入。M-mode 的 CLINT、PLIC、中断进入 / 返回，以及 Guest 侧的启动入口、陷阱向量与设备访问封装都已实现；中断与陷阱语义仍没有外部参考模型可比较。
 
 ## 已完成
 
@@ -17,10 +17,12 @@
 - 六种 CSR 指令与机器模式 CSR 集合；ECALL、EBREAK，以及 FENCE 与 FENCE.I（单 hart、每次取指重读 RAM，两者都只推进 PC）。
 - 机器模式中断：`mie` / `mip` 的 MSIP、MTIP、MEIP 三位，全局 `mstatus.MIE`，中断进入（mcause 最高位置 1、mepc 指向未执行指令、mtval 为 0）与 MRET 返回，原因码优先级 MEIP > MTIP > MSIP，见 [机器模式中断规格](specs/0012-machine-interrupts.md)。
 - 单 hart CLINT：标准基址 `0x02000000`，msip、mtimecmp、mtime 的 32 位半字读写；mtime 只由 Host 的离散 tick 推进，不读宿主墙上时钟。
-- 单 context M-mode PLIC：标准基址 `0x0c000000`，priority、pending、enable、threshold、claim / complete，source 0 保留，只有 pending、enabled 且 priority 大于 threshold 的源拉高 MEIP。网关按电平语义工作：设备线 asserted 且该源未被 claim 时置 pending，源被 claim 后在 complete 之前不再重新 pending，complete 时线仍 asserted 才重新 pending，线 deassert 则撤销尚未 claim 的请求；平台用 `yan_plic_set_level(plic, source, asserted)` 双向驱动设备线，旧的 `yan_plic_raise` 已移除，见 [PLIC 网关与设备中断线规格](specs/0016-plic-gateway-and-irq-lines.md)（待审核）。
-- UART 字符设备：标准基址 `0x10000000`，`TXDATA`、`RXDATA`、`STATUS`、`CONTROL`、`IRQ_STATUS` 五个寄存器，复位值、`TX_READY` 发送握手（没有接终端时写 `TXDATA` 返回 `YAN_INVALID_STATE`，不静默丢弃）、单字节接收缓冲（读 `RXDATA` 清除 `RX_AVAILABLE`，缓冲满时再 `yan_uart_push_rx` 返回 `YAN_INVALID_STATE` 且不覆盖旧值）、只读寄存器忽略写入，接收中断线经平台映射到 PLIC source 2，见 [UART 字符设备规格](specs/0015-uart-device.md)。Host 侧的发送回调与 `yan_uart_push_rx` 已接好；Guest 侧的控制台集成用例尚未做，它依赖 0015 IMPLE PLAN 里要建立的 `os/` 目录。独立验证仍在进行，此处只记录实现与模块测试状态。
+- 单 context M-mode PLIC：标准基址 `0x0c000000`，priority、pending、enable、threshold、claim / complete，source 0 保留，只有 pending、enabled 且 priority 大于 threshold 的源拉高 MEIP。网关按电平语义工作：设备线 asserted 且该源未被 claim 时置 pending，源被 claim 后在 complete 之前不再重新 pending，complete 时线仍 asserted 才重新 pending，线 deassert 则撤销尚未 claim 的请求；平台用 `yan_plic_set_level(plic, source, asserted)` 双向驱动设备线，旧的 `yan_plic_raise` 已移除，见 [PLIC 网关与设备中断线规格](specs/0016-plic-gateway-and-irq-lines.md)（待审核）。网关另经独立验证：对抗用例加 40000 步随机差分参考模型，唯一存活的变异由新增的边界用例闭合。
+- UART 字符设备（[0015](specs/0015-uart-device.md) v3）：标准基址 `0x10000000`，`TXDATA`、`RXDATA`、`STATUS`、`CONTROL`、`IRQ_STATUS` 五个寄存器。`STATUS` 的三位是 `TX_READY`、`RX_READY`、`CONNECTED`，`TX_READY` 的语义是"此刻写 `TXDATA` 是否会被接受"，与写入路径用的是同一个判据，因此不会出现"报告就绪却拒绝写入"；没有 backend 时三位全 0，两个方向都以 `YAN_UNAVAILABLE` 拒绝（`include/yan/status.h` 为此新增该状态码），驱动据此可以 headless 运行而不是一直空转。单字节接收缓冲，`IRQ_STATUS` 的 `RX_IRQ_PENDING` 写 1 清除，接收线经平台映射到 PLIC source 2。Host 侧 backend 是 `YanUartTerminal`（`tx_ready` / `tx_write` 两个回调），`yan_uart_push_rx` 注入接收字节；Guest 侧的控制台驱动放在 `os/console.c`，目前是骨架。
+- Host 传输通道（[0014](specs/0014-host-transport-channel.md)）：标准基址 `0x10001000`，标识寄存器、两个共享 `RING_BASE` 的字节环、门铃与中断寄存器。`yan_transport_configure` 校验环的大小与落位，`G2H_TAIL` / `H2G_HEAD` 由 Host 驱动；Host 侧 `yan_transport_host_consume` / `host_publish` 在未配置时返回 `YAN_UNAVAILABLE`。越界不由 `DOORBELL` 判定，而由 Host 记账 API 在搬运时判定并置 `STATUS.OVERFLOW_DETECTED`，`DOORBELL` 只做通知。Host→Guest 中断线经平台映射到 PLIC source 1。
+- `os/` 层与控制台骨架：`os/platform.h` 重述 Guest 侧 UART 与 PLIC 源号常量，`os/console.h` 冻结控制台接口（`connected` / `putc` / `puts` / `getline`，没有阻塞入口），`os/console.c` 目前是骨架，所有入口返回 `YAN_OS_UNAVAILABLE`。依赖方向单向：`os/` 不引用 `tests/`（本机核对 `grep -rn '#include' os/` 只命中 `console.h`、`platform.h` 与 `<stdint.h>`）。见 [控制台与 `os/` 层规格](specs/0017-console-and-os-layout.md)。
 - 最小 M-mode Guest 环境：`tests/guest/mtrap_entry.S` 提供入口与 Direct 陷阱向量（固定 20 字帧、保存调用者保存寄存器与被中断的 `sp`），`mtrap.c` 提供统一调度与 CSR 访问，`guest_devices.h` 提供 Guest 可见的 CLINT / PLIC 地址与访问封装，见 [Guest 启动与统一 trap 环境规格](specs/0013-guest-trap-environment.md)。
-- `yan_run` 现在按平台语义连接 CLINT / PLIC 并每条指令推进一次 `mtime`，因此 Guest 程序能真正访问设备并接收中断；`yan_difftest` 保持不连接设备。
+- `yan_run` 现在按平台语义连接四个设备窗口（CLINT、PLIC、UART、transport）并每条指令推进一次 `mtime`，因此 Guest 程序能真正访问设备并接收中断；terminal backend 属于进行中的工作（`tools/host_terminal.*` 尚未进 `CMakeLists.txt`），在它并入之前 UART 报告 `CONNECTED = 0`，Guest 走 headless 路径。`yan_difftest` 保持不连接设备。
 - RV32M 的 MUL、MULH、MULHSU、MULHU、DIV、DIVU、REM、REMU，包含除零和有符号溢出规则。
 - 面向外部验证模型的只读 CPU 架构状态快照接口。
 - RV32 ELF32 镜像加载与符号表解析；`tohost` 与签名区都由符号决定，不依赖固定地址。
@@ -34,7 +36,7 @@
 
 ## 验证
 
-GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建注册 **21 组 CTest**：RAM、Bus、Machine、CPU、Fetch、Step、ALU、Control、Memory、CSR、Trap、M、Snapshot、Image、DiffTest、Interrupt、CLINT、PLIC、Boot、UART、Transport。启用 Guest 工具链与 `yan_run` 时再加一组 `guest_trap_env`（编译并运行 Guest 自检），共 22 组。全新构建下本机实测：除 `transport` 外的 20 组共 **150 个 Unity 用例**在 Debug ASan/UBSan 与 Release 下全部通过（`guest_trap_env` 亦通过）；`transport` 的用例仍在增补与修复，本机最近一次实测仍有失败用例（ASan 下另有两条用例因未释放整机 RAM 泄漏 32 MB × 2），因此 `transport` 不计通过，也不计入上述合计。
+GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建注册 **21 组 CTest**：RAM、Bus、Machine、CPU、Fetch、Step、ALU、Control、Memory、CSR、Trap、M、Snapshot、Image、DiffTest、Interrupt、CLINT、PLIC、Boot、UART、Transport。启用 Guest 工具链与 `yan_run` 时再加一组 `guest_trap_env`（编译并运行 Guest 自检），共 22 组。全新构建下本机实测两轮：Debug ASan/UBSan 与 Release 都是 `100% tests passed, 0 tests failed out of 22`。21 组 Unity 套件共 **169 个用例**（`uart` 19、`plic` 15、`transport` 14，其余为既有分组）。控制台与 Host terminal backend 的测试脚本尚未注册进 CTest，因此 22 组里没有它们。
 
 立即数测试覆盖全部 4096 种编码；移位覆盖 0～31 及寄存器移位量高位屏蔽。十条寄存器运算各覆盖 32768 种 rd / rs1 / rs2 组合。固定向量和边界矩阵检查符号比较、算术回绕、逻辑运算与 AUIPC 当前 PC 语义。
 
@@ -50,11 +52,15 @@ M 扩展测试覆盖四种乘法结果、四种除法和余数结果、零除数
 
 中断测试分三层。CLINT 层覆盖复位值（mtimecmp 复位为 `UINT64_MAX`，避免复位即触发）、msip 位宽、mtimecmp 与 mtime 的高低半字独立写、离散 tick、`UINT64_MAX` 不触发、`mtime == mtimecmp` 恰好触发、deadline 为 `mtime + 1` 不触发、64 位加法回绕、区域边界与未对齐 / 未映射错误。PLIC 层覆盖 priority、pending（只读）、enable、threshold 的 MMIO 往返，source 0 保留，`priority > threshold` 的严格比较，priority 为 0 永不触发，claim 清除 pending 并置 in-service、claim 仲裁（最高优先级、同优先级取最小号）、claim 后 MEIP 撤销、complete 清除 in-service。CPU 层覆盖三种源写入 `mip` 的采样、`mie` 掩码截断、`mstatus.MIE` 与 `mie` 的联合屏蔽、原因码优先级、mcause 最高位、mepc 指向未执行的下一条指令、mtval 为 0、入口 mstatus 与 MRET 按 MPIE 恢复 MIE、中断在取指前判定因而优先于同一条指令的同步异常，并用固定机器码跑完整的设备 → 中断 → 处理程序 → MRET → 继续执行回路。PLIC 层另有电平网关的用例：线在 claim 之后保持 asserted 也不会重新 pending（in-flight 抑制），complete 时线仍 asserted 才重新 pending，线 deassert 则撤销尚未 claim 的请求。Machine 层覆盖设备连接 / 清理、未连接设备时拒绝服务、整机复位同时复位设备、两台机器设备互不影响、每步只推进一 tick；另有一例检查 MMIO 窗口只是数据映射，指令取指仍只认 RAM。
 
-中断测试另做了一轮变异检查：在副本里注入 7 个缺陷——中断原因码优先级改成软件优先、中断的 mtval 填 PC、MTIP 的判据改成严格大于、PLIC 阈值比较改成不小于、claim 不清 pending、source 0 可被驱动电平、`mie` 写入不做掩码截断——`clint` / `plic` / `interrupt` 三组测试对每一个都报告失败，没有存活者。这一轮的 7 个缺陷针对的是旧网关；电平网关那一轮的变异检查（[0016](specs/0016-plic-gateway-and-irq-lines.md) E 节）由独立验证进行中，本文尚无结果可记录。
+中断测试另做了一轮变异检查：在副本里注入 7 个缺陷——中断原因码优先级改成软件优先、中断的 mtval 填 PC、MTIP 的判据改成严格大于、PLIC 阈值比较改成不小于、claim 不清 pending、source 0 可被驱动电平、`mie` 写入不做掩码截断——`clint` / `plic` / `interrupt` 三组测试对每一个都报告失败，没有存活者。这一轮的 7 个缺陷针对的是旧网关；电平网关那一轮的变异检查（[0016](specs/0016-plic-gateway-and-irq-lines.md) E 节）由独立验证完成：对抗用例加 40000 步随机差分参考模型，唯一存活的变异由新增的边界用例闭合（该用例已进入 `plic` 组，见 [0016](specs/0016-plic-gateway-and-irq-lines.md) 测试计划的 A7）。这轮验证在仓库之外执行，仓库里没有对应脚本。
 
-UART 组覆盖 [0015](specs/0015-uart-device.md) 的寄存器表与语义：复位值、保留位读 0、只读寄存器忽略写入、`TXDATA` 只取低 8 位、单字节接收缓冲（读走清 `RX_AVAILABLE`、读空不改变状态、缓冲满时再 `push_rx` 返回 `YAN_INVALID_STATE` 且不覆盖旧值）、`IRQ_STATUS` 写 1 清除、窗口边界与未映射偏移、空指针与参数错误、整机复位保留 Host 配置、两台 Machine 互不影响。另有两条走平台接线：`guest_style_line_output_is_byte_exact` 覆盖逐字节发送，`receive_interrupt_reaches_plic_source_two` 覆盖 `push_rx` → 采样 → PLIC source 2 → MEIP。该组 15 例在 Debug ASan/UBSan 与 Release 下全部通过。执行方另在副本里注入 7 个缺陷（以 0015 的 VERIFY 一节为蓝本）并逐一被检出、没有存活者；这轮检查在树副本里手工执行，仓库里没有对应脚本。以上都是模块测试结果，独立验证尚未出结论。
+UART 组覆盖 [0015](specs/0015-uart-device.md) v3 的寄存器表与语义：复位值、保留位读 0、只读寄存器忽略写入、未连接时设备完全惰性（三位全 0、两个方向都返回 `YAN_UNAVAILABLE`）、已连接时正常收发、`TX_READY` 与写入接受判据一致（含"读到就绪之后 backend 撤销"这条竞态用例）、backend 缺任一回调即被拒、断开连接清接收状态、整机复位保留 backend、单字节接收缓冲（读走清 `RX_READY`、读空不改变状态、缓冲满时不覆盖旧值）、`IRQ_STATUS` 写 1 清除、窗口边界与未映射偏移、空指针与参数错误、两台 Machine 互不影响。另有两条走平台接线：`connected_uart_reports_and_transmits` 覆盖逐字节发送，`receive_interrupt_reaches_plic_source_two` 覆盖 `push_rx` → 采样 → PLIC source 2 → MEIP。该组 19 例在 Debug ASan/UBSan 与 Release 下全部通过。执行方另在副本里注入 7 个缺陷并逐一被检出、没有存活者；这轮检查在树副本里手工执行，仓库里没有对应脚本。
 
-Guest 环境分两层。Host 层（`Boot`，始终运行、不需要交叉工具链）逐条比对 Guest 与 Host 的设备常量、CSR 编号与 `mie` / `mstatus` 位，检查陷阱帧的 17 个槽位互不重叠且帧长为 16 字节倍数，并让 CPU 执行 Guest 的 `sw` / `lw` 真正读写 CLINT 与 PLIC；另有启动契约：复位后无向量、`csrw mtvec` 只保留 31:2 位、`mstatus` 掩码行为与 Guest 启动假设一致。Guest 层（`guest_trap_env`）编译并运行一段自检程序，覆盖启动状态、向量安装、ECALL / EBREAK / 非法指令 / 非对齐访存四种同步异常走同一向量、MSIP 与 MTIP 的中断进入与返回、调用者保存寄存器跨陷阱不变、被中断指令按处理程序的决定重放或跳过，以及 CLINT / PLIC 的 Guest 访问。
+传输通道组覆盖 [0014](specs/0014-host-transport-channel.md)：标识寄存器恒定、`HOST_READY` 由配置推导、只读寄存器忽略写入、配置落位校验（2 的幂、下限、越出 RAM）、空环往返、满 / 空边界、环回绕与字节序、越界在 Host 记账处锁存首个错误、doorbell 通知已注册的 Host、`IRQ_STATUS` 写 1 清除、窗口与 Host 参数错误、中断线驱动 PLIC source 1、整机复位保留 Host 配置、两台 Machine 的通道互不影响。该组 14 例在 Debug ASan/UBSan 与 Release 下全部通过（上一轮 ASan 下两条用例未释放整机 RAM 的泄漏已随用例修复消失）。执行方另在副本里注入 6 个缺陷并逐一被检出、没有存活者；同样没有落成脚本。
+
+控制台与 `os/` 层尚未进入验证：`os/console.c` 是骨架，[0017](specs/0017-console-and-os-layout.md) 测试计划的 B 组（`tests/guest/run_console.sh`）与 C 组变异检查都还没有文件，A1 / A2 两组 Host 侧常量防漂移比对也还没有加进 `tests/test_boot.c`（本机核对该文件当前 4 个用例，`grep -cE 'uart|UART|os/platform' tests/test_boot.c` → 0）。这三项记为计划，不计入任何通过结论。
+
+Guest 环境分两层。Host 层（`Boot`，始终运行、不需要交叉工具链）逐条比对 Guest 与 Host 的 CLINT / PLIC 设备常量、CSR 编号与 `mie` / `mstatus` 位（UART 常量比对属于 [0017](specs/0017-console-and-os-layout.md) 的 A1 / A2，尚未加入），检查陷阱帧的 17 个槽位互不重叠且帧长为 16 字节倍数，并让 CPU 执行 Guest 的 `sw` / `lw` 真正读写 CLINT 与 PLIC；另有启动契约：复位后无向量、`csrw mtvec` 只保留 31:2 位、`mstatus` 掩码行为与 Guest 启动假设一致。Guest 层（`guest_trap_env`）编译并运行一段自检程序，覆盖启动状态、向量安装、ECALL / EBREAK / 非法指令 / 非对齐访存四种同步异常走同一向量、MSIP 与 MTIP 的中断进入与返回、调用者保存寄存器跨陷阱不变、被中断指令按处理程序的决定重放或跳过，以及 CLINT / PLIC 的 Guest 访问。
 
 Guest 层同样做了变异检查：在副本里注入 10 个缺陷（不清 MSIP、不 disarm MTIP、MTIP 未使能、不改 `mepc`、不装 `mtvec`、帧只压 4 字节、帧槽位与 `a4` 重叠、错误 CLINT 基址、错误 PLIC enable 偏移、`mtimecmp` 只写低半字），Guest 自检或 Host 测试对每一个都报告失败，没有存活者。第一轮还暴露出自检自身的漏洞：失败码 1 与「通过」的 `tohost = 1` 撞车，使 `no-mtvec` 变异体存活，修正为失败码最高位置 1 后才被检出。
 
@@ -75,7 +81,7 @@ Guest 层同样做了变异检查：在副本里注入 10 个缺陷（不清 MSI
 - 差分测试比较 PC、32 个通用寄存器与结束时的整段 RAM；NEMU riscv32 参考状态里没有 CSR 字段，因此 `mstatus`、`mtvec`、`mscratch`、`mepc`、`mcause`、`mtval`、`mie`、`mip` 与 trap / MRET / 中断语义**不在差分测试覆盖范围内**，含这些指令的 Guest 不适用于该层。差分执行器不连接 CLINT / PLIC，中断线恒为低。
 - 参考模型由本仓库补全（上游对应文件是留白桩），与 DUT 同作者，证明的是两份实现一致，不等同第三方模型提供的证据；第三方证据来自官方 `riscv-tests` 与 Sail 签名比对，二者都只覆盖用户态 RV32IM。
 - Guest trap 环境由自检程序验证，证据来自本仓库：它证明陷阱路径在**这台**实现上按规格工作，不构成与外部模型的一致性证据。外部中断（MEIP）无法从 Guest 侧驱动——PLIC 没有 Guest 可写的源寄存器，源线只能由平台按设备电平用 `yan_plic_set_level` 驱动，而两条设备线的置位都由 Host 侧动作触发（`yan_uart_push_rx`、Host 写入传输环）——因此 Guest 自检只覆盖 MSIP 与 MTIP 的进入 / 返回。Host 触发的 MEIP 投递由 `Interrupt` 那组 Host 测试覆盖；UART 接收线的整条路径（`push_rx` → 采样 → PLIC source 2 → MEIP）另由 UART 组的 `receive_interrupt_reaches_plic_source_two` 覆盖。
-- `yan_run` 现在按平台语义映射 CLINT / PLIC 并每条指令推进一次 `mtime`，`yan_difftest` 不映射设备、不推进时间。同一镜像在两个执行器下若读取 `mtime` 会得到不同结果，因此含设备访问的 Guest 只适用于 `yan_run`，这一条已在工具注释与规格里写明。
+- `yan_run` 现在按平台语义映射四个设备窗口并每条指令推进一次 `mtime`，`yan_difftest` 不映射设备、不推进时间。同一镜像在两个执行器下若读取 `mtime` 会得到不同结果，因此含设备访问的 Guest 只适用于 `yan_run`，这一条已在工具注释与规格里写明。
 
 Debug 启用 AddressSanitizer 和 UndefinedBehaviorSanitizer。内存分配失败分支尚未通过故障注入验证。
 
@@ -83,13 +89,13 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-完成本阶段：传输通道要补齐到与 [0014](specs/0014-host-transport-channel.md) / [0016](specs/0016-plic-gateway-and-irq-lines.md) 一致——该组尚未全绿，最近一次本机实测仍有失败用例，ASan 下另有两条用例未释放整机 RAM；UART 只差 Guest 侧的控制台集成用例，它依赖 0015 IMPLE PLAN 里要建立的 `os/` 目录。两条都完成后跑通 Debug ASan/UBSan 与 Release 全量 CTest，把实测结果写回 STATUS 与 [CPU 验证规格](specs/0011-cpu-validation.md) 的计数；只有到那时才把 UART 与传输通道移入「已完成」。
+完成本阶段：把 [0017](specs/0017-console-and-os-layout.md) 的控制台落地——实现 `os/console.c` 的行编辑与无终端立即返回，补齐 B 组 `tests/guest/run_console.sh` 与 C 组变异检查，把 A1 / A2 两组常量防漂移比对加进 `tests/test_boot.c`；同时完成 Host terminal backend（`tools/host_terminal.*` 与 `yan_run --terminal`）与 `tests/guest/run_terminal.sh`，并把这两个脚本注册进 CTest。设备侧仍欠一项：`uart` / `transport` / `plic` 的变异检查还没有可复跑的脚本（见「验证」一节的说明）。全部完成后跑通 Debug ASan/UBSan 与 Release 全量 CTest，把实测结果写回 STATUS 与 [CPU 验证规格](specs/0011-cpu-validation.md) 的计数；只有到那时才把控制台与 Host terminal backend 记为已完成。
 
 接入 ACT4 自带的构建系统（`testplans`、UDB 配置与框架的 RVMODEL 生成），让参考模型的期望结果在构建期编译进自检 ELF，从而把当前依赖签名比对与 SKIP 的 7 个异常相关测试也纳入；这需要先补齐 `medeleg` / `mideleg` 与异常委托，或为框架提供一条不经过它们的 M-mode 启动路径。CLINT / PLIC 的寄存器与 Guest 侧陷阱环境已经存在，地址映射也已与框架核对过；剩下的是框架启动路径依赖的委托与 PMP 状态，以及语料中尚不存在的中断用例。
 
 已实现 40 条 RV32I 基础指令的功能路径、八条 RV32M 指令、CSR 指令和 MRET。单步返回 YAN_OK 表示正常完成，YAN_TRAP 表示已进入 Guest 异常或中断；Host 参数和对象状态错误仍直接返回。Bus、RAM 与独立取指接口保留原有错误语义。
 
-中断与陷阱目前只覆盖单 hart、M-mode、直接入口与非抢占的固定优先级：没有 S/U 模式，没有 `medeleg` / `mideleg` 委托，没有 `mtvec` 向量模式，没有中断嵌套，PLIC 只有一个 M-mode context，CLINT 只有 hart 0 的 msip / mtimecmp。Guest 环境是最小运行时，不是操作系统：无系统调用 ABI、无进程、无页表、无调度。也未完成完整 ISA / 特权架构符合性验收。陷阱与中断语义没有参考模型可比较，证据来自本仓库的模块测试与 Guest 自检，属于已知边界而非已验收能力。两个设备（UART、传输通道）同样没有外部参考模型可比，证据只来自本仓库的模块测试。
+中断与陷阱目前只覆盖单 hart、M-mode、直接入口与非抢占的固定优先级：没有 S/U 模式，没有 `medeleg` / `mideleg` 委托，没有 `mtvec` 向量模式，没有中断嵌套，PLIC 只有一个 M-mode context，CLINT 只有 hart 0 的 msip / mtimecmp。Guest 环境是最小运行时，不是操作系统：无系统调用 ABI、无进程、无页表、无调度。也未完成完整 ISA / 特权架构符合性验收。陷阱与中断语义没有参考模型可比较，证据来自本仓库的模块测试与 Guest 自检，属于已知边界而非已验收能力。两个设备（UART、传输通道）同样没有外部参考模型可比，证据只来自本仓库的模块测试；控制台与 `os/` 层目前没有任何验证结果，只有骨架与冻结的接口。
 
 ## 待定设计
 

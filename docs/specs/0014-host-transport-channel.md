@@ -1,7 +1,6 @@
 # 0014：Host 传输通道
 
-> 状态：**Spec Lock v1**（2026-09-20 项目所有者审核通过）。
-> **v2 修订待审核**：设备中断线与 PLIC 源映射改由 [0016：PLIC 网关与设备中断线](0016-plic-gateway-and-irq-lines.md) 定义。v2 通过前本规格对应的实现不得合并到长期分支。
+> 状态：**Spec Lock v1**；**v2**（设备中断线与 PLIC 源映射改由 [0016：PLIC 网关与设备中断线](0016-plic-gateway-and-irq-lines.md) 定义）。**v1 与 v2 均已由项目所有者审核通过并锁定。**
 > 实现中如需变更接口、数据结构或行为，走 INTENTION / SPEC / IMPLE 审核，不得直接修改本文件。
 
 ## INTENTION
