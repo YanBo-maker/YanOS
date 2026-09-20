@@ -20,11 +20,14 @@
 #
 # Neither drive is allowed to weaken an assertion. A scenario that cannot run is
 # reported as PENDING with the reason, never as a pass, and --strict turns any
-# pending scenario into exit 77 so a caller can refuse to call it green.
+# pending scenario into exit 1 so a caller can refuse to call it green.
 #
 # Exit codes: 0 every check that ran passed, 1 a check, scenario or mutation
-# failed, 2 usage, 77 a dependency is missing (no cross toolchain, or nothing
-# that can drive the images).
+# failed - including a requested drive that could not be built and a --strict
+# run with something still pending - 2 usage, 77 this machine has no cross
+# toolchain. 77 means "a dependency that lives outside the repository" and
+# nothing else: the console driver and its Guest check are the thing under test,
+# so a missing one fails instead of skipping.
 #
 # CTest: register it the way tests/guest/run_trap_env.sh is registered
 # (--source/--gcc/--run/--work, SKIP_RETURN_CODE 77, TIMEOUT 300). This script
@@ -73,14 +76,34 @@ guest_dir="$source/tests/guest"
 os_dir="$source/os"
 [ -n "$console_c" ] || console_c="$os_dir/console.c"
 
-# A missing dependency is a skip, not a failure: the convention shared with
-# tests/guest/run_trap_env.sh.
-for required in "$gcc" "$console_c" "$os_dir/console.h" "$os_dir/platform.h" \
+# 77 means "a dependency this machine does not have", and nothing else: the
+# cross toolchain is the only thing outside the repository this check needs.
+# The console driver, its Guest check and the shared Guest sources are the thing
+# under test, so a missing one is a hard failure. Deleting an implementation
+# must never be a way to a green suite: CTest records 77 as a skip, and a skip
+# is not a pass.
+if [ ! -x "$gcc" ] && ! command -v "$gcc" > /dev/null 2>&1; then
+    echo "SKIP: no cross toolchain at '$gcc'"
+    exit 77
+fi
+missing=0
+for required in "$console_c" "$os_dir/console.h" "$os_dir/platform.h" \
                 "$guest_dir/console_check.c" "$guest_dir/mtrap_entry.S" \
                 "$guest_dir/mtrap.c" "$guest_dir/guest_lib.c" \
                 "$guest_dir/link.ld"; do
-    [ -e "$required" ] || { echo "SKIP: missing $required"; exit 77; }
+    if [ ! -e "$required" ]; then
+        echo "FAIL the source under test is missing: $required"
+        missing=1
+    fi
 done
+# An executor that was named but is not there is a build that did not happen,
+# not a missing dependency. An unnamed executor is not this script's business:
+# the scripted drive does not need it, and the yan-run drive says so below.
+if [ -n "$run" ] && [ ! -x "$run" ]; then
+    echo "FAIL the executor under test is not executable: $run"
+    exit 1
+fi
+[ "$missing" -eq 0 ] || exit 1
 
 # A cross toolchain locates `as` and `ld` through its own directory.
 gcc_dir="$(cd "$(dirname "$gcc")" && pwd)"
@@ -585,8 +608,12 @@ if [ "$drive" != "yan-run" ]; then
     fi
 fi
 if [ "$drive" = "scripted" ] && [ "$scripted" -eq 0 ]; then
+    # The scripted drive is built from this repository's own sources, so a
+    # requested drive that cannot be built is a failure, not a missing
+    # dependency: 77 here would let a broken src/ or a broken driver source skip
+    # the test and still show up as green in the CTest summary.
     echo "FAIL the requested scripted drive is unavailable"
-    exit 77
+    exit 1
 fi
 
 if [ "$scripted" -eq 1 ]; then
@@ -651,8 +678,11 @@ fi
 # ---- mutation check ---------------------------------------------------------
 if [ "$mutation" -eq 1 ]; then
     if [ "$scripted" -eq 0 ]; then
-        echo "SKIP mutation check: the scripted drive is unavailable"
-        exit 77
+        # Same reason as above: without the scripted drive the planted defects
+        # cannot be judged at all, and "the check could not run" must not be
+        # reported in a way CTest turns into a pass or a quiet skip.
+        echo "FAIL mutation check: the scripted drive is unavailable, so no defect can be judged"
+        exit 1
     fi
     echo "mutation: planting the section C defects in copies under $work/mutants"
     console_before="$(md5sum < "$console_c")"
@@ -778,8 +808,11 @@ fi
 if [ "$unrunnable" -ne 0 ]; then
     echo "PENDING $unrunnable check(s)/driver(s) could not run (see above)"
     if [ "$strict" -eq 1 ]; then
+        # --strict refuses to call a partial run green. That is a failure, not a
+        # missing dependency: 77 here would turn "the evidence did not run" back
+        # into a skip, which is exactly what strict is meant to refuse.
         echo "FAIL --strict was given and something is still pending"
-        exit 77
+        exit 1
     fi
 fi
 echo "PASS every console check that could run passed"

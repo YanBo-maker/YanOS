@@ -60,7 +60,10 @@
 # into an equivalent.
 #
 # Exit codes: 0 every mutation was caught by an assertion, 1 a mutation survived
-# (survivors are printed separately), 2 usage error, 77 a dependency is missing.
+# (survivors are printed separately) or the work copy could not be copied,
+# configured, built or run green, 2 usage error, 77 this machine lacks a host
+# tool (cmake, python3, tar) or a Unity checkout and the network to fetch one -
+# the dependencies that live outside the repository.
 #
 # Usage:
 #   tests/guest/run_device_mutation.sh --source DIR --work DIR \
@@ -150,14 +153,25 @@ fi
 tools_flag="OFF"
 [ "$tools" -eq 1 ] && tools_flag="ON"
 
+# 77 means "a dependency this machine does not have", and nothing else. cmake,
+# python3 and tar are host tools; the Unity checkout and the network that can
+# fetch it live outside the repository. The device sources and their Unity test
+# suites are the thing under test, so a missing one is a hard failure: CTest
+# records 77 as a skip, and a skip is not a pass.
+command -v cmake >/dev/null 2>&1 || { echo "SKIP: cmake not found"; exit 77; }
+command -v python3 >/dev/null 2>&1 || { echo "SKIP: python3 not found"; exit 77; }
+command -v tar >/dev/null 2>&1 || { echo "SKIP: tar not found"; exit 77; }
+missing=0
 for required in "$source/src/uart.c" "$source/src/transport.c" "$source/src/machine.c" \
                 "$source/src/interrupt.c" \
                 "$source/tests/test_uart.c" "$source/tests/test_transport.c" \
                 "$source/CMakeLists.txt"; do
-    [ -e "$required" ] || { echo "SKIP: missing $required"; exit 77; }
+    if [ ! -e "$required" ]; then
+        echo "FAIL the source under test is missing: $required"
+        missing=1
+    fi
 done
-command -v cmake >/dev/null 2>&1 || { echo "SKIP: cmake not found"; exit 77; }
-command -v python3 >/dev/null 2>&1 || { echo "SKIP: python3 not found"; exit 77; }
+[ "$missing" -eq 0 ] || exit 1
 
 # Reuse a Unity checkout an earlier build already fetched: the pin lives in
 # CMakeLists.txt, so an existing one is the same revision.
@@ -193,10 +207,11 @@ echo "  excluded  : $exclude"
 rm -rf "$tree"
 mkdir -p "$tree"
 # The work copy excludes build/ and .git/: they are large and irrelevant, and
-# nothing below ever writes to $source.
+# nothing below ever writes to $source. Failing to copy the tree is a failure of
+# this run, not a missing dependency.
 tar -C "$source" --exclude=./build --exclude=./.git -cf - . | tar -C "$tree" -xf - \
-    || { echo "SKIP: cannot copy $source into $tree"; exit 77; }
-[ -f "$tree/src/uart.c" ] || { echo "SKIP: the copy has no src/uart.c"; exit 77; }
+    || { echo "FAIL cannot copy $source into $tree"; exit 1; }
+[ -f "$tree/src/uart.c" ] || { echo "FAIL the source under test is missing: $tree/src/uart.c"; exit 1; }
 
 mkdir -p "$run/pristine"
 cp -a "$tree/src/uart.c" "$tree/src/transport.c" "$tree/src/machine.c" \
@@ -955,23 +970,48 @@ drop_mutated_objects() {
     done
 }
 
+# A work copy that cannot be configured, cannot be built or does not pass its own
+# suite would make every verdict below meaningless, so none of the three is a
+# skip. The one exception is a configure failure caused by the missing out-of-tree
+# dependency: when no local Unity checkout was supplied, CMake has to fetch it,
+# and a fetch that cannot happen is what 77 is for. The log decides which of the
+# two this was - a failure with no trace of the fetch is this tree's own problem.
+#
+# This is the only heuristic judgement in this file, and it is biased towards 77
+# on purpose. It fires only when *both* hold: no local Unity checkout was
+# supplied, and the log names the fetch (unity/fetchcontent/download/SSL). A wrong
+# call in that direction can only hide a configure problem on a machine that has
+# neither a Unity checkout nor the network to fetch one - a machine where this
+# check genuinely cannot run; the opposite mistake would report a missing
+# dependency as a failure of this repository. Every other configure failure, and
+# every build or baseline failure, exits 1.
 if ! configure_tree; then
-    echo "SKIP: cannot configure the work copy: $(tail -n 1 "$run/configure.log")"
-    exit 77
+    if [ -n "$unity" ]; then
+        echo "FAIL the work copy does not configure, and Unity was supplied locally:"
+        tail -n 5 "$run/configure.log" | sed 's/^/    /'
+        exit 1
+    fi
+    if grep -qiE 'unity|fetchcontent|download|resolve host|SSL' "$run/configure.log"; then
+        echo "SKIP: cannot configure the work copy (no local Unity checkout): $(tail -n 1 "$run/configure.log")"
+        exit 77
+    fi
+    echo "FAIL the work copy does not configure, and the log shows no missing Unity:"
+    tail -n 5 "$run/configure.log" | sed 's/^/    /'
+    exit 1
 fi
 if ! build_tree; then
-    echo "SKIP: cannot build the work copy:"
-    grep -E 'error|Error' "$run/build.log" | head -n 5
-    exit 77
+    echo "FAIL the work copy does not build:"
+    grep -E 'error|Error' "$run/build.log" | head -n 5 | sed 's/^/    /'
+    exit 1
 fi
 
 # The probe and the standing suites must be green before any mutation is
 # planted, otherwise a failure afterwards proves nothing.
 if ! run_ctest "$run/baseline.log"; then
-    echo "SKIP: the unmutated work copy does not pass its own suite:"
+    echo "FAIL the unmutated work copy does not pass its own suite:"
     sed -n '/The following tests FAILED/,$p' "$run/baseline.log" | head -n 12
     echo "      an unrelated in-flight failure can be excluded with --ignore REGEX"
-    exit 77
+    exit 1
 fi
 
 # ---------------------------------------------------------------- mutations

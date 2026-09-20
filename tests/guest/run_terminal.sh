@@ -29,10 +29,12 @@
 #      checked by hand once.
 #
 # Exit codes: 0 all cases behaved, 1 a run or an assertion failed, 2 a usage
-# error, 77 a dependency is missing so CTest can SKIP. The command-line cases
-# need no cross toolchain and run before the toolchain check: a missing compiler
-# skips the Guest half with 77 but can never hide a command-line regression,
-# which exits 1 first.
+# error, 77 this machine lacks a dependency that lives outside the repository
+# (the cross toolchain or timeout(1)). The command-line cases need no cross
+# toolchain and run before the toolchain check: a missing compiler skips the
+# Guest half with 77 but can never hide a command-line regression, which exits 1
+# first. The sources under test, including the executor built from this tree,
+# are not dependencies: a missing one exits 1.
 set -u
 
 gcc=""
@@ -67,8 +69,14 @@ fi
 mkdir -p "$work"
 # The runs below must not be able to hang the suite, whether a Guest waits for a
 # ready bit that never comes or the executor mis-handles an option.
-[ -e "$run" ] || { echo "SKIP: missing $run"; exit 77; }
+# timeout(1) is a host tool outside the repository: without it the check cannot
+# bound its runs, so that is a dependency and stays a skip. The executor is not:
+# it is built from this tree, so a missing one is a build that did not happen.
 command -v timeout > /dev/null 2>&1 || { echo "SKIP: missing timeout(1)"; exit 77; }
+if [ ! -x "$run" ]; then
+    echo "FAIL the executor under test is not executable: $run"
+    exit 1
+fi
 
 # ------------------------------------------------------------ command line
 # One invocation, recorded: status, standard output and standard error are all
@@ -140,12 +148,21 @@ if [ -z "$gcc" ] || [ ! -e "$gcc" ]; then
 fi
 
 guest_dir="$source/tests/guest"
-for required in "$gcc" "$guest_dir/terminal_check.c" \
+# Everything below is the thing under test: its sources live in this repository,
+# so a missing one is a hard failure. 77 is reserved for a dependency that lives
+# outside the repository (the cross toolchain, checked above): CTest records 77
+# as a skip, and a skip is not a pass.
+missing=0
+for required in "$guest_dir/terminal_check.c" \
                 "$guest_dir/start.S" "$guest_dir/mtrap_entry.S" \
                 "$guest_dir/mtrap.c" "$guest_dir/guest_lib.c" \
                 "$guest_dir/guest_devices.h" "$guest_dir/link.ld"; do
-    [ -e "$required" ] || { echo "SKIP: missing $required"; exit 77; }
+    if [ ! -e "$required" ]; then
+        echo "FAIL the source under test is missing: $required"
+        missing=1
+    fi
 done
+[ "$missing" -eq 0 ] || exit 1
 
 # A cross toolchain locates `as` and `ld` through its own directory.
 gcc_dir="$(cd "$(dirname "$gcc")" && pwd)"

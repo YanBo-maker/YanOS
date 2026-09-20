@@ -20,8 +20,10 @@
 # baselines (and refuses to do so if the probe is not deterministic). See
 # tests/guest/golden/README.md for when that is the right thing to do.
 #
-# Exit codes: 0 the run matched the baseline, 1 it differed or the probe failed,
-# 2 a usage error, 77 a dependency is missing so CTest can SKIP.
+# Exit codes: 0 the run matched the baseline, 1 it differed, the probe failed or
+# a source or baseline this check needs is missing from the repository,
+# 2 a usage error, 77 the machine lacks a host tool that lives outside the
+# repository (the cross toolchain, timeout(1) or its nm).
 set -u
 
 gcc=""
@@ -57,19 +59,42 @@ golden_dir="$guest_dir/golden"
 trace_base="$golden_dir/probe.trace.jsonl"
 signature_base="$golden_dir/probe.signature.hex"
 
-for required in "$gcc" "$run" "$guest_dir/golden_probe.c" "$guest_dir/start.S" \
-                "$guest_dir/guest_lib.c" "$guest_dir/link.ld"; do
-    [ -e "$required" ] || { echo "SKIP: missing $required"; exit 77; }
-done
+# The cross toolchain, timeout(1) and the toolchain's nm are host tools outside
+# the repository: without them the check cannot run at all, so those are the
+# only 77s here. The probe, the executor and the two baselines are not
+# dependencies: the sources are the thing under test, and the baselines are the
+# expected output this check exists to compare against. A missing one is a hard
+# failure, never a skip - CTest records 77 as a skip, and a skip is not a pass.
+missing=0
+if [ ! -x "$gcc" ] && ! command -v "$gcc" > /dev/null 2>&1; then
+    echo "SKIP: no cross toolchain at '$gcc'"
+    exit 77
+fi
 command -v timeout > /dev/null 2>&1 || { echo "SKIP: missing timeout(1)"; exit 77; }
 # The signature range comes from the linked image, so the toolchain's nm is a
 # real dependency of this check.
 nm_tool="${gcc%gcc}nm"
 [ -x "$nm_tool" ] || { echo "SKIP: missing $nm_tool"; exit 77; }
-if [ "$update" -eq 0 ] && { [ ! -e "$trace_base" ] || [ ! -e "$signature_base" ]; }; then
-    echo "SKIP: no golden baseline in $golden_dir (create it with --update)"
-    exit 77
+for required in "$guest_dir/golden_probe.c" "$guest_dir/start.S" \
+                "$guest_dir/guest_lib.c" "$guest_dir/link.ld"; do
+    if [ ! -e "$required" ]; then
+        echo "FAIL the source under test is missing: $required"
+        missing=1
+    fi
+done
+if [ ! -x "$run" ]; then
+    echo "FAIL the executor under test is not executable: $run"
+    missing=1
 fi
+if [ "$update" -eq 0 ]; then
+    for baseline in "$trace_base" "$signature_base"; do
+        if [ ! -e "$baseline" ]; then
+            echo "FAIL the expected output baseline is missing: $baseline"
+            missing=1
+        fi
+    done
+fi
+[ "$missing" -eq 0 ] || exit 1
 
 # A cross toolchain locates `as` and `ld` through its own directory.
 gcc_dir="$(cd "$(dirname "$gcc")" && pwd)"

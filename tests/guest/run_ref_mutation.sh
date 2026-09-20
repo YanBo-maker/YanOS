@@ -10,7 +10,9 @@
 # can only come from the reference.
 #
 # Exit codes: 0 the tester consumed the reference state, 1 it did not, 2 usage,
-# 77 a dependency is missing.
+# 77 this machine has no cross toolchain or no usable NEMU reference tree - the
+# two dependencies that live outside the repository. This repository's own
+# sources fail instead of skipping.
 set -u
 
 source=""
@@ -36,10 +38,31 @@ if [ -z "$source" ] || [ -z "$ref_dir" ] || [ -z "$gcc" ] || [ -z "$work" ]; the
     echo "usage: run_ref_mutation.sh --source DIR --ref-dir NEMU_SOURCE --cc CC --gcc RISCV_GCC --work DIR [--baseline-ref SO]" >&2
     exit 2
 fi
-for required in "$gcc" "$source/src/cpu.c" "$ref_dir/src/isa/riscv32/inst.c" \
-                "$ref_dir/Makefile" "$ref_dir/include/config/auto.conf"; do
-    [ -e "$required" ] || { echo "SKIP: missing $required"; exit 77; }
+# 77 is only for a dependency this machine does not have. The cross toolchain and
+# the whole NEMU reference tree (its sources, its Makefile and its generated
+# auto.conf) live outside the repository, so those stay skips. This repository's
+# own half - the CPU whose defects are planted and the tester and Guest image
+# that have to report them - is the thing under test: a missing source there is a
+# hard failure. CTest records 77 as a skip, and a skip is not a pass.
+if [ ! -x "$gcc" ] && ! command -v "$gcc" > /dev/null 2>&1; then
+    echo "SKIP: no cross toolchain at '$gcc'"
+    exit 77
+fi
+for required in "$ref_dir/src/isa/riscv32/inst.c" "$ref_dir/Makefile" \
+                "$ref_dir/include/config/auto.conf"; do
+    [ -e "$required" ] || { echo "SKIP: no reference model source at $required"; exit 77; }
 done
+missing=0
+for required in "$source/src/cpu.c" "$source/tools/yan_difftest.c" \
+                "$source/tools/host_file.c" "$source/tests/guest/start.S" \
+                "$source/tests/guest/guest_lib.c" "$source/tests/guest/alu.c" \
+                "$source/tests/guest/link.ld"; do
+    if [ ! -e "$required" ]; then
+        echo "FAIL the source under test is missing: $required"
+        missing=1
+    fi
+done
+[ "$missing" -eq 0 ] || exit 1
 
 gcc_dir="$(cd "$(dirname "$gcc")" && pwd)"
 PATH="$gcc_dir:$PATH"
@@ -71,6 +94,20 @@ build_reference() {
 pattern='INSTPAT("0000000 ????? ????? 010 ????? 01100 11", slt    , R, R(rd) = (sword_t)src1 < (sword_t)src2);'
 replacement='INSTPAT("0000000 ????? ????? 010 ????? 01100 11", slt    , R, R(rd) = src1 < src2);'
 
+# Build the reference model out of the external NEMU tree. That tree is the
+# dependency this check cannot supply itself, so a reference that will not build
+# stays a skip; this repository's own sources are checked above and fail instead.
+#
+# Scope of this 77, written down so it is not read as a precedent for a broader
+# one: it covers the whole external reference tree and nothing else. NEMU does
+# not live in this repository, its build is driven by its own Makefile and its
+# generated include/config/auto.conf, and a machine that cannot build a
+# third-party model it does not ship is missing a dependency rather than failing
+# a test of this repository. Every build failure that comes from a file under
+# $source - the tester, the Guest image, the CPU whose defects are planted - is
+# reported by the branches below this one as FAIL with exit 1, and the sources
+# are checked for presence above. There is deliberately no path in this script
+# that turns an in-repository build failure into a skip.
 if ! cp -a "$ref_dir/src/isa/riscv32/inst.c" "$tree/src/isa/riscv32/inst.c" ||
    ! build_reference; then
     echo "SKIP: cannot build the unmutated reference: $(tail -n 1 "$work/nemu-build.log")"
@@ -91,12 +128,14 @@ if ! build_reference; then
 fi
 mutated="$tree/build/riscv32-nemu-interpreter-so"
 
-# Build the tester and one Guest image out of the tree under test.
+# Build the tester and one Guest image out of the tree under test. Both halves
+# live in this repository, so neither build is a missing dependency: a failure
+# here is a failure of the thing under test.
 if ! "$cc" -O1 -std=c17 -I "$source/include" -o "$work/yan_difftest" \
         "$source/tools/yan_difftest.c" "$source/tools/host_file.c" \
         "$source"/src/*.c -ldl > "$work/tester-build.log" 2>&1; then
-    echo "SKIP: cannot build the tester: $(tail -n 1 "$work/tester-build.log")"
-    exit 77
+    echo "FAIL the tester under test does not build: $(tail -n 1 "$work/tester-build.log")"
+    exit 1
 fi
 elf="$work/alu.elf"
 if ! "$gcc" -march=rv32im -mabi=ilp32 -mcmodel=medany -static -nostdlib \
@@ -104,8 +143,8 @@ if ! "$gcc" -march=rv32im -mabi=ilp32 -mcmodel=medany -static -nostdlib \
         -T "$source/tests/guest/link.ld" "$source/tests/guest/start.S" \
         "$source/tests/guest/guest_lib.c" "$source/tests/guest/alu.c" \
         -Wl,--build-id=none -o "$elf" > "$work/guest-build.log" 2>&1; then
-    echo "SKIP: cannot build the Guest image"
-    exit 77
+    echo "FAIL the Guest image under test does not build: $(tail -n 1 "$work/guest-build.log")"
+    exit 1
 fi
 
 # Baseline: the same image against the unmutated reference must pass.
