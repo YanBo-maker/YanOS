@@ -46,7 +46,8 @@ target_include_directories(yan_machine PUBLIC include)
 target_compile_options(yan_machine PRIVATE ${YAN_WARNINGS})
 
 if(YAN_BUILD_TOOLS)
-    add_executable(yan_run tools/yan_run.c tools/host_file.c tools/host_terminal.c)
+    add_executable(yan_run tools/yan_run.c tools/host_file.c tools/host_terminal.c
+                            tools/host_block.c)
     target_link_libraries(yan_run PRIVATE yan_machine)
     target_compile_options(yan_run PRIVATE ${YAN_WARNINGS})
 
@@ -198,6 +199,19 @@ if(BUILD_TESTING)
                     --jobs 8)
         set_tests_properties(device_mutation PROPERTIES SKIP_RETURN_CODE 77
                                                         TIMEOUT 1800)
+
+        # Planted-defect run for the cooperative runtime. The six defects are the
+        # ones docs/specs/0019 names; the seventh the specification offers -
+        # "restore an unconditional 1" - is an equivalent mutant under the
+        # precondition the same specification requires, and is recorded as such
+        # rather than counted as a survivor.
+        # Planted-defect run for the block protocol: eight on the host side, five
+        # in the guest frame layer. The gate counts only assertion failures - a
+        # hang, a crash or a sanitizer report is a harness error, not a detection.
+        # Planted-defect run for the combined case. fake-wait replaces the
+        # runtime's wait with yield plus busy-wait polling and passes every
+        # functional check - only the blocked-window assertion separates it from
+        # the real thing, which is why that assertion is the one under test here.
     endif()
 
     if(YAN_BUILD_TOOLS AND UNIX AND EXISTS "${YAN_NEMU_REF_SO}" AND YAN_RISCV_GCC)

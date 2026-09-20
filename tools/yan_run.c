@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "host_block.h"
 #include "host_file.h"
 #include "host_terminal.h"
 #include "yan/cpu.h"
@@ -22,6 +23,31 @@
  * syscall, and a byte handed to the device waits there until the Guest reads
  * RXDATA, so a short interval costs nothing. */
 #define TERMINAL_POLL_INTERVAL UINT64_C(256)
+
+/* The channel rings live in guest RAM, and the host addresses them by absolute
+ * address. 0018 sets the floor: a one-block write request is 16 + 4096 bytes and
+ * a ring holds RING_SIZE - 1 of them, so 8192 is the smallest power of two that
+ * can carry one block. The two rings are adjacent and need twice that. */
+#define DISK_RING_SIZE UINT32_C(8192)
+#define DISK_RING_BYTES (2U * DISK_RING_SIZE)
+/* Room left below the rings for the image, its stack and its .bss. A Guest that
+ * wants the last 16 KiB of the RAM window cannot run with --disk; the
+ * alternative is a Guest quietly overrunning the rings. */
+#define DISK_RAM_MARGIN (UINT32_C(64) * 1024U)
+
+/* A doorbell write is the guest saying "there is a request". The callback only
+ * records that: serving from inside a device access would run the whole protocol
+ * in the middle of a Guest store. The service runs between instructions instead,
+ * like the terminal's receive poll.
+ *
+ * Registering a callback is also what makes HOST_READY true. 0014 defines that
+ * bit as "a ring is configured and a notify callback is registered", so without
+ * this the Guest would see HOST_READY=0 and correctly refuse to touch the
+ * rings. */
+static void disk_notify(void *context)
+{
+    *(int *)context = 1;
+}
 
 /* Exit codes are shared with yan_difftest and documented in
  * docs/specs/0011-cpu-validation.md. A harness must not read "nonzero" as a
@@ -50,6 +76,8 @@ typedef struct {
     uint32_t signature_start;
     uint32_t signature_end;
     int terminal;
+    uint64_t disk_blocks;
+    int disk;
     int help;
 } Options;
 
@@ -60,7 +88,7 @@ static void usage(FILE *stream, const char *program)
 {
     fprintf(stream, "usage: %s --image FILE [--base ADDR] [--ram BYTES] "
             "[--max-steps N] [--tohost ADDR] [--ignore-tohost] [--terminal] "
-            "[--trace FILE] [--signature FILE START END]\n"
+            "[--disk BLOCKS] [--trace FILE] [--signature FILE START END]\n"
             "  -h, --help      print this message and exit\n"
             "  --tohost ADDR   stop when the word at ADDR becomes nonzero\n"
             "  --ignore-tohost run to the step limit; use when a Guest writes\n"
@@ -69,6 +97,10 @@ static void usage(FILE *stream, const char *program)
             "                  standard output and standard input feeds the\n"
             "                  UART receiver; without it the UART stays\n"
             "                  unconnected and the Guest sees CONNECTED=0\n"
+            "  --disk BLOCKS   attach a memory block device of BLOCKS 4096-byte\n"
+            "                  blocks to the host transport channel and serve\n"
+            "                  the block protocol on it; the top 16 KiB of the\n"
+            "                  RAM window is reserved for the two rings\n"
             "exit: 0 tohost PASS, 2 usage, 4 no termination, 5 Host error, "
             "6 Guest failure, 7 signature exported\n", program);
 }
@@ -106,6 +138,16 @@ static int parse_options(int argc, char **argv, Options *options)
             options->ignore_tohost = 1;
         } else if (strcmp(argv[i], "--terminal") == 0) {
             options->terminal = 1;
+        } else if (strcmp(argv[i], "--disk") == 0 && i + 1 < argc) {
+            /* A device of zero blocks answers every request as out of range,
+             * which is a test of the error path and never a useful disk, so the
+             * command line rejects it rather than passing it through. */
+            if (!number(argv[++i], &options->disk_blocks) ||
+                options->disk_blocks == 0 ||
+                options->disk_blocks > SIZE_MAX / YAN_HOST_BLOCK_BLOCK_SIZE) {
+                return 0;
+            }
+            options->disk = 1;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             options->help = 1;
         } else if (strcmp(argv[i], "--tohost") == 0 && i + 1 < argc) {
@@ -175,10 +217,14 @@ int main(int argc, char **argv)
      * options are passed in instead of being copied out of a hand-built Bus. */
     YanMachine machine = {0};
     YanHostTerminal terminal = {0};
+    YanHostBlock block = {0};
     YanImageInfo info = {0};
     uint8_t *image = NULL;
+    uint8_t *disk_storage = NULL;
     size_t image_size = 0;
     FILE *trace = NULL;
+    int doorbell_rung = 0;
+    int disk_attached = 0;
     int result = EXIT_HOST_ERROR;
     int stopped = 0;
 
@@ -188,6 +234,33 @@ int main(int argc, char **argv)
      * CSR state. */
     if (yan_machine_init_with(&machine, options.base, options.ram_size) != YAN_OK) {
         goto done;
+    }
+    /* The device is attached before the image is loaded, so the Guest never runs
+     * in a window where the channel is mapped but unconfigured. */
+    if (options.disk) {
+        if (options.ram_size < DISK_RING_BYTES + DISK_RAM_MARGIN) {
+            fprintf(stderr, "yan_run: --disk reserves the top %u bytes of the RAM "
+                    "window for the channel rings and needs at least %u\n",
+                    (unsigned)DISK_RING_BYTES,
+                    (unsigned)(DISK_RING_BYTES + DISK_RAM_MARGIN));
+            goto done;
+        }
+        const uint32_t ring_base = options.base + options.ram_size - DISK_RING_BYTES;
+        if (yan_transport_configure(&machine.transport, ring_base, DISK_RING_SIZE,
+                                    options.base, options.ram_size) != YAN_OK) {
+            fprintf(stderr, "yan_run: cannot place the channel rings at %08" PRIx32
+                    "\n", ring_base);
+            goto done;
+        }
+        yan_transport_set_notify(&machine.transport, disk_notify, &doorbell_rung);
+        disk_storage = calloc((size_t)options.disk_blocks, YAN_HOST_BLOCK_BLOCK_SIZE);
+        if (disk_storage == NULL ||
+            yan_host_block_init(&block, disk_storage, options.disk_blocks) != YAN_OK) {
+            fprintf(stderr, "yan_run: cannot allocate %" PRIu64
+                    " blocks of backing store\n", options.disk_blocks);
+            goto done;
+        }
+        disk_attached = 1;
     }
     /* A backend is host configuration; without one the UART reports CONNECTED=0
      * and refuses both directions with YAN_UNAVAILABLE, which is the headless
@@ -239,6 +312,14 @@ int main(int argc, char **argv)
          * standard input is answered without blocking or a diagnostic. */
         if (options.terminal && step % TERMINAL_POLL_INTERVAL == 0) {
             (void)yan_host_terminal_poll_rx(&terminal, &machine.uart);
+        }
+        /* Served before the step, not after: publishing a response asserts the
+         * channel's interrupt line, and the step that samples the device lines
+         * is the step that can deliver it. */
+        if (disk_attached && doorbell_rung) {
+            doorbell_rung = 0;
+            (void)yan_host_block_service(&block, &machine.transport, &machine.ram,
+                                         options.base);
         }
         /* Read the word this step will execute, before the step runs it. The
          * read is a plain bus read with no side effects, and it keeps both the
@@ -292,6 +373,7 @@ done:
         fclose(trace);
     }
     free(image);
+    free(disk_storage);
     yan_machine_destroy(&machine);
     return result;
 }
