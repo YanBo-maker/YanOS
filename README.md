@@ -20,6 +20,8 @@ cmake --build build --config Debug --parallel
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
+`build` 只是构建目录的名字，可以换成任意路径；同一份工作树里并行开发时，各自用独立目录（例如 `build/<任务名>`）可以避免互相覆盖缓存——直接对一个没有缓存的目录运行 `cmake --build` 会报 `could not load cache`。
+
 测试采用 Unity 2.6.1，由 CTest 运行。首次配置会下载固定版本并校验 SHA-256；仅构建核心库可添加 `-DBUILD_TESTING=OFF`。
 
 GCC / Clang 的 Unix 构建可在配置时添加 `-DYAN_ENABLE_SANITIZERS=ON`，启用地址与未定义行为检测。
@@ -65,7 +67,7 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 
 ## 开发
 
-参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md) 和 [控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)。
+参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)、[控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)、[块请求协议规格](docs/specs/0018-block-protocol.md) 和 [协作式运行时规格](docs/specs/0019-cooperative-runtime.md)。
 
 ## 许可证
 
