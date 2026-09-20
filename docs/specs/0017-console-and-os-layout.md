@@ -21,6 +21,8 @@
 
 依赖方向是单向的：`os/` 不得包含 `tests/` 下的任何头；`tests/` 可以包含 `os/`。
 
+上表只列本规格定义的成员；`os/` 的后续成员在各自的规格里定义——[0018：块请求协议](0018-block-protocol.md) 新增帧层（`os/block.h`、`os/block.c`），[0019：协作式运行时](0019-cooperative-runtime.md) 新增任务、上下文切换与运行时的陷阱入口（`os/task.h`、`os/task.c`、`os/task_switch.S`、`os/trap_entry.S`），后者还记录"树里暂时有两份陷阱入口"这笔债的成因与合并条件。
+
 ### Guest 侧平台视图与防漂移
 
 `os/platform.h` 重述 UART 的地址、偏移与位定义，并给出四个访问器：`yan_os_uart_status`、`yan_os_uart_connected`、`yan_os_uart_tx_ready`、`yan_os_uart_put`、`yan_os_uart_get`。
