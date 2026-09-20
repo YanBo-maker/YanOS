@@ -1,5 +1,7 @@
 # 0012：机器模式中断
 
+> 更新说明：[0016：PLIC 网关与设备中断线](0016-plic-gateway-and-irq-lines.md) 取代了本规格中 PLIC 网关的"简化"约定与 `yan_plic_raise` 接口（见下文"PLIC"一节的标注）。本规格的其余部分——中断状态、中断进入与返回、CLINT、PLIC 寄存器布局与仲裁规则——继续有效。
+
 ## INTENTION
 
 上一阶段只实现了 M-mode 同步异常：`yan_cpu_step` 在取指前不观察任何设备状态，`mie` / `mip` 固定读零，平台没有计时器和外部中断控制器。这样 Guest 无法用中断驱动 I/O，也无法把 sleep 一类的等待写成一次 WFI 或一次定时唤醒。
@@ -55,19 +57,19 @@
 
 ### PLIC
 
-单 M-mode context，标准基址 `0x0c000000`，大小 `0x400000`。支持 32 个源编号，其中 **source 0 保留**（不可 raise、enable 位与 priority 恒为 0），实际可用 1～31。
+单 M-mode context，标准基址 `0x0c000000`，大小 `0x400000`。支持 32 个源编号，其中 **source 0 保留**（不可驱动电平、enable 位与 priority 恒为 0），实际可用 1～31。
 
 | 偏移 | 寄存器 | 读写 |
 | --- | --- | --- |
 | 0x0000 + 4*i | priority[i] | 读写，source 0 忽略写入；复位 0 |
-| 0x1000 | pending | 只读；由 raise 置位、由 claim 清除 |
+| 0x1000 | pending | 只读；由网关按源线电平置位、由 claim 清除 |
 | 0x2000 | enable（M-mode） | 读写，bit0 固定 0 |
 | 0x200000 | threshold（M-mode） | 读写 |
 | 0x200004 | claim / complete | 读=claim，写=complete |
 
 仲裁规则：在所有 `pending & enabled` 且 `priority > threshold` 的源里选优先级最高者，同优先级取编号最小者；没有满足条件的源时 claim 返回 0。claim 读会清除该源的 pending 并把它记为 in-service；complete 写清除 in-service。只要存在满足三条件的源，`mip.MEIP` 就为高。
 
-简化（与完整 PLIC 的差异，必须在验证中声明）：没有实现 gateway 的电平/边沿锁存，in-service 期间的再次 raise 仍会立刻置 pending 并再次拉起 MEIP；complete 不重新采样源电平。Host 的 `yan_plic_raise(plic, source)` 是唯一的外部源接口。
+**本节已被 [0016：PLIC 网关与设备中断线](0016-plic-gateway-and-irq-lines.md) 取代。** 原文记录的是当时的简化实现：没有 gateway 的电平/边沿锁存，in-service 期间的再次 raise 会立刻重新置 pending 并再次拉起 MEIP，complete 不重新采样源电平，且 `yan_plic_raise(plic, source)` 是唯一的外部源接口。0016 改为电平网关——source 被 claim 后到 complete 之前不得重新 pending，complete 后按设备线电平重新采样——接口改为 `yan_plic_set_level(plic, source, asserted)`。保留原文是为了记录该阶段的实现状态。上一段仲裁规则中的"满足三条件的源"在 0016 之下仍然成立，因为 in-service 的源其 pending 位已为 0。
 
 ### Bus 与 Machine
 
