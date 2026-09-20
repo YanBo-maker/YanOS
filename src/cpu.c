@@ -44,6 +44,16 @@ YanStatus yan_cpu_write_reg(YanCpu *cpu, uint32_t index, uint32_t value)
     return YAN_OK;
 }
 
+YanStatus yan_cpu_snapshot(const YanCpu *cpu, YanCpuState *state)
+{
+    if (cpu == NULL || state == NULL) {
+        return YAN_INVALID_ARGUMENT;
+    }
+    *state = *cpu;
+    state->regs[0] = 0;
+    return YAN_OK;
+}
+
 YanBusResult yan_cpu_fetch(const YanCpu *cpu, const YanBus *bus,
                            uint32_t *instruction)
 {
@@ -53,6 +63,16 @@ YanBusResult yan_cpu_fetch(const YanCpu *cpu, const YanBus *bus,
     }
     /* Fetch observes PC. Instruction execution will decide the next PC. */
     return yan_bus_fetch32(bus, cpu->pc, instruction);
+}
+
+YanStatus yan_cpu_poll_interrupts(YanCpu *cpu, const YanBus *bus)
+{
+    if (cpu == NULL || bus == NULL) {
+        return YAN_INVALID_ARGUMENT;
+    }
+    /* mip is not storage: every instruction boundary re-reads the devices. */
+    cpu->csr.mip = yan_bus_pending_interrupts(bus) & YAN_MIE_MASK;
+    return YAN_OK;
 }
 
 static uint32_t arithmetic_shift_right(uint32_t value, uint32_t amount)
@@ -85,6 +105,31 @@ static uint32_t integer_operation(uint32_t funct3, uint32_t left,
     }
 }
 
+static uint32_t m_extension_operation(uint32_t funct3, uint32_t left,
+                                       uint32_t right)
+{
+    const int64_t signed_left = left <= INT32_MAX ? (int64_t)left :
+        (int64_t)left - INT64_C(4294967296);
+    const int64_t signed_right = right <= INT32_MAX ? (int64_t)right :
+        (int64_t)right - INT64_C(4294967296);
+    switch (funct3) {
+    case 0: return (uint32_t)((uint64_t)left * right);
+    case 1: return (uint32_t)(((uint64_t)(signed_left * signed_right)) >> 32);
+    case 2: return (uint32_t)(((uint64_t)(signed_left * (int64_t)(uint64_t)right)) >> 32);
+    case 3: return (uint32_t)(((uint64_t)left * right) >> 32);
+    case 4:
+        if (right == 0) return UINT32_MAX;
+        if (left == UINT32_C(0x80000000) && right == UINT32_MAX) return left;
+        return (uint32_t)(signed_left / signed_right);
+    case 5: return right == 0 ? UINT32_MAX : left / right;
+    case 6:
+        if (right == 0) return left;
+        if (left == UINT32_C(0x80000000) && right == UINT32_MAX) return 0;
+        return (uint32_t)(signed_left % signed_right);
+    default: return right == 0 ? left : left % right;
+    }
+}
+
 static YanStatus compute_integer_result(const YanCpu *cpu, uint32_t instruction,
                                         uint32_t *value)
 {
@@ -100,6 +145,15 @@ static YanStatus compute_integer_result(const YanCpu *cpu, uint32_t instruction,
     }
     const uint32_t upper = instruction >> 25;
     const int register_op = opcode == UINT32_C(0x33);
+    if (register_op && upper == UINT32_C(0x01)) {
+        const uint32_t rs1 = (instruction >> 15) & UINT32_C(31);
+        const uint32_t rs2 = (instruction >> 20) & UINT32_C(31);
+        uint32_t left = 0, right = 0;
+        (void)yan_cpu_read_reg(cpu, rs1, &left);
+        (void)yan_cpu_read_reg(cpu, rs2, &right);
+        *value = m_extension_operation(funct3, left, right);
+        return YAN_OK;
+    }
     if (register_op && upper != 0 &&
         !(upper == UINT32_C(0x20) && (funct3 == 0 || funct3 == 5))) {
         return YAN_UNSUPPORTED_INSTRUCTION;
@@ -247,6 +301,27 @@ static YanStatus enter_trap(YanCpu *cpu, uint32_t cause, uint32_t value)
     return YAN_TRAP;
 }
 
+/* Machine-level interrupts are ordered by privilege of the source, not by
+ * arrival: external (11) outranks timer (7), which outranks software (3). */
+static uint32_t interrupt_cause(uint32_t pending_and_enabled)
+{
+    if ((pending_and_enabled & YAN_INTERRUPT_MEIP) != 0) {
+        return YAN_MCAUSE_MEIP;
+    }
+    if ((pending_and_enabled & YAN_INTERRUPT_MTIP) != 0) {
+        return YAN_MCAUSE_MTIP;
+    }
+    return YAN_MCAUSE_MSIP;
+}
+
+/* An interrupt differs from a synchronous exception: no instruction faulted, so
+ * mtval is zero and mepc names the instruction that has not run yet. */
+static YanStatus enter_interrupt(YanCpu *cpu)
+{
+    const uint32_t cause = interrupt_cause(cpu->csr.mip & cpu->csr.mie);
+    return enter_trap(cpu, YAN_MCAUSE_INTERRUPT | cause, 0);
+}
+
 static YanStatus access_fault(YanCpu *cpu, YanStatus status, uint32_t cause, uint32_t address)
 {
     if (status == YAN_UNALIGNED) {
@@ -260,6 +335,17 @@ static YanStatus access_fault(YanCpu *cpu, YanStatus status, uint32_t cause, uin
 
 YanStatus yan_cpu_step(YanCpu *cpu, YanBus *bus)
 {
+    /* Interrupts are sampled at the instruction boundary and take precedence
+     * over any exception of the instruction that would have been fetched. A
+     * handler entered this way has MIE cleared, so this step cannot nest. */
+    YanStatus polled = yan_cpu_poll_interrupts(cpu, bus);
+    if (polled != YAN_OK) {
+        return polled;
+    }
+    if ((cpu->csr.mstatus & YAN_MSTATUS_MIE) != 0 &&
+        (cpu->csr.mip & cpu->csr.mie & YAN_MIE_MASK) != 0) {
+        return enter_interrupt(cpu);
+    }
     uint32_t instruction = 0;
     YanBusResult fetch = yan_cpu_fetch(cpu, bus, &instruction);
     if (fetch.status != YAN_OK) {
@@ -271,7 +357,10 @@ YanStatus yan_cpu_step(YanCpu *cpu, YanBus *bus)
     const uint32_t opcode = instruction & UINT32_C(0x7f);
     const int branch = opcode == UINT32_C(0x63);
     const int store = opcode == UINT32_C(0x23);
-    const int fence = opcode == UINT32_C(0x0f) && ((instruction >> 12) & UINT32_C(7)) == 0;
+    /* Zifencei: FENCE (funct3=0) and FENCE.I (funct3=1) only advance the PC.
+     * A store may overwrite the instruction already fetched and every step
+     * re-reads RAM, so no instruction stream synchronisation is needed. */
+    const int fence = opcode == UINT32_C(0x0f) && ((instruction >> 12) & UINT32_C(7)) <= 1;
     const int mret = instruction == UINT32_C(0x30200073);
     YanStatus status = YAN_OK;
     if (instruction == UINT32_C(0x00000073)) {

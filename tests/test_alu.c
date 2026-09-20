@@ -247,7 +247,8 @@ static void invalid_register_encodings(void)
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_reg(&cpu, 6, UINT32_MAX));
     for (uint32_t funct7 = 0; funct7 < 128; ++funct7) {
         for (uint32_t funct3 = 0; funct3 < 8; ++funct3) {
-            if (funct7 == 0 || (funct7 == 0x20 && (funct3 == 0 || funct3 == 5))) {
+            if (funct7 == 0 || funct7 == 0x01 ||
+                (funct7 == 0x20 && (funct3 == 0 || funct3 == 5))) {
                 continue;
             }
             check_rejected((funct7 << 25) | (funct3 << 12) | UINT32_C(0x007302b3));

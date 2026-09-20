@@ -37,8 +37,11 @@ static void fixed_and_readonly_csrs(void)
 {
     YanCpu cpu = {0};
     uint32_t value = 1;
-    const uint32_t fixed[] = {0x301, 0x304, 0x310, 0x344};
-    for (size_t i = 0; i < 4; ++i) {
+    /* mie (0x304) and mip (0x344) left this list when the machine-level
+     * interrupt spec implemented them; their stronger constraints live in
+     * test_interrupt. */
+    const uint32_t fixed[] = {0x301, 0x310};
+    for (size_t i = 0; i < 2; ++i) {
         TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_write_csr(&cpu, fixed[i], UINT32_MAX));
         TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_read_csr(&cpu, fixed[i], &value));
         TEST_ASSERT_EQUAL_HEX32(0, value);
@@ -81,7 +84,7 @@ static void machine_reset_and_independent_csrs(void)
     TEST_ASSERT_EQUAL_HEX32(11, first.cpu.csr.mcause);
     TEST_ASSERT_EQUAL_HEX32(0, second.cpu.csr.mcause);
     TEST_ASSERT_EQUAL_INT(YAN_OK, yan_machine_reset(&first));
-    const YanCsr reset = {YAN_MSTATUS_MPP, 0, 0, 0, 0, 0};
+    const YanCsr reset = {YAN_MSTATUS_MPP, 0, 0, 0, 0, 0, 0, 0};
     TEST_ASSERT_EQUAL_MEMORY(&reset, &first.cpu.csr, sizeof reset);
     TEST_ASSERT_EQUAL_HEX32(42, second.cpu.csr.mscratch);
     yan_machine_destroy(&first);

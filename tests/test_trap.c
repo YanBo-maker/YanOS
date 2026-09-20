@@ -203,8 +203,10 @@ static void guest_handler_resumes_execution(void)
 
 static void fence_and_unsupported_extensions(void)
 {
-    const uint32_t fences[] = {0x0000000f, 0x0ff0000f, 0x8330000f, 0xffff8f8f};
-    for (size_t i = 0; i < 4; ++i) {
+    /* funct3=0 is FENCE and funct3=1 is FENCE.I; both only advance the PC. */
+    const uint32_t fences[] = {0x0000000f, 0x0ff0000f, 0x8330000f, 0xffff8f8f,
+                               0x0000100f, 0x0ff0100f};
+    for (size_t i = 0; i < sizeof fences / sizeof fences[0]; ++i) {
         instruction(fences[i]);
         YanCpu before = cpu;
         TEST_ASSERT_EQUAL_INT(YAN_OK, yan_cpu_step(&cpu, &bus));
@@ -212,8 +214,9 @@ static void fence_and_unsupported_extensions(void)
         TEST_ASSERT_EQUAL_HEX32_ARRAY(before.regs, cpu.regs, 32);
         TEST_ASSERT_EQUAL_MEMORY(&before.csr, &cpu.csr, sizeof cpu.csr);
     }
-    instruction(0x0000100f); check_trap(2, 0x0000100f);
-    instruction(0x027302b3); check_trap(2, 0x027302b3); /* M extension not implemented. */
+    /* Other encodings of opcode 0x0f stay illegal instructions. */
+    instruction(0x0000200f); check_trap(2, 0x0000200f);
+    instruction(0x047302b3); check_trap(2, 0x047302b3);
 }
 
 int main(void)

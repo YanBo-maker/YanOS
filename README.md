@@ -6,7 +6,7 @@ YanOS 是一个用于学习计算机系统的项目，计划实现 RISC-V 模拟
 
 ## 状态
 
-已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位、取指和整数指令单步执行。已实现 RV32I 的整数计算、控制转移、访存、FENCE、ECALL 和 EBREAK，并提供六种 CSR 指令及 MRET，支持 M-mode 同步异常处理。中断、分页和 M 扩展仍待实现。详细进度见 [STATUS](docs/STATUS.md)。
+已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位、取指和整数指令单步执行。已实现 RV32I 的整数计算、控制转移、访存、FENCE、FENCE.I、ECALL 和 EBREAK，并提供 CSR 指令，支持 M-mode 同步异常与中断处理及 MRET。RV32M 的八条乘除指令已加入。平台侧实现了单 hart 的 CLINT 与单 context 的 M-mode PLIC，中断线经 Bus 接入 CPU 的 `mie` / `mip`；Guest 侧有最小的启动入口、统一的陷阱处理路径与 CLINT / PLIC 访问封装。验证层已接入逐指令差分测试、官方 `riscv-tests` 套件、官方 `riscv-arch-test`（ACT4）测试语料与 Sail 签名比对。S/U 模式、中断委托、分页与其它设备仍待实现。详细进度见 [STATUS](docs/STATUS.md)。
 
 ## 构建与测试
 
@@ -23,6 +23,23 @@ ctest --test-dir build -C Debug --output-on-failure
 测试采用 Unity 2.6.1，由 CTest 运行。首次配置会下载固定版本并校验 SHA-256；仅构建核心库可添加 `-DBUILD_TESTING=OFF`。
 
 GCC / Clang 的 Unix 构建可在配置时添加 `-DYAN_ENABLE_SANITIZERS=ON`，启用地址与未定义行为检测。
+
+构建 Guest 验证工具可添加 `-DYAN_BUILD_TOOLS=ON`。`yan_run` 支持 RV32 ELF、最大步数、`tohost` 退出、签名区导出和逐条架构状态记录；`yan_difftest` 让 YanCPU 与外部参考模型逐条比较架构状态；`yan_gen` 生成随机 RV32IM 指令流。
+
+外部验证层是可选依赖，缺失时对应的 CTest 不注册或报 SKIP，从不显示为通过：
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DYAN_BUILD_TOOLS=ON \
+  -DYAN_NEMU_REF_SO=/path/to/riscv32-nemu-interpreter-so \
+  -DYAN_NEMU_REF_DIR=/path/to/nemu-source \
+  -DYAN_RISCV_TESTS_DIR=/path/to/riscv-tests \
+  -DYAN_RISCV_ARCH_TEST_DIR=/path/to/riscv-arch-test \
+  -DYAN_SAIL_BIN=/path/to/sail_riscv_sim
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+分层、覆盖边界与退出码见 [CPU 验证规格](docs/specs/0011-cpu-validation.md)。
 
 ## 设计
 
@@ -42,7 +59,7 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 
 ## 开发
 
-参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md) 和 [Guest 异常规格](docs/specs/0009-guest-traps.md)。
+参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md) 和 [Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)。
 
 ## 许可证
 

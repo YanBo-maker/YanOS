@@ -1,0 +1,239 @@
+#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "host_file.h"
+#include "yan/cpu.h"
+#include "yan/image.h"
+#include "yan/interrupt.h"
+
+/* Exit codes are shared with yan_difftest and documented in
+ * docs/specs/0011-cpu-validation.md. A harness must not read "nonzero" as a
+ * single failure: 4 (never terminated), 5 (Host failure), 6 (the Guest
+ * reported a failure) and 7 (a signature region was exported) mean different
+ * things. */
+enum {
+    EXIT_PASS = 0,
+    EXIT_USAGE = 2,
+    EXIT_NO_TERMINATION = 4,
+    EXIT_HOST_ERROR = 5,
+    EXIT_GUEST_FAILURE = 6,
+    EXIT_SIGNATURE = 7
+};
+
+typedef struct {
+    const char *image;
+    const char *trace;
+    const char *signature;
+    uint32_t base;
+    uint32_t ram_size;
+    uint64_t max_steps;
+    uint32_t tohost;
+    int tohost_given;
+    int ignore_tohost;
+    uint32_t signature_start;
+    uint32_t signature_end;
+} Options;
+
+static void usage(const char *program)
+{
+    fprintf(stderr, "usage: %s --image FILE [--base ADDR] [--ram BYTES] "
+            "[--max-steps N] [--tohost ADDR] [--ignore-tohost] [--trace FILE] "
+            "[--signature FILE START END]\n"
+            "  --tohost ADDR   stop when the word at ADDR becomes nonzero\n"
+            "  --ignore-tohost run to the step limit; use when a Guest writes\n"
+            "                  to `tohost` for something other than halting\n"
+            "exit: 0 tohost PASS, 2 usage, 4 no termination, 5 Host error, "
+            "6 Guest failure, 7 signature exported\n", program);
+}
+
+static int number(const char *text, uint64_t *value)
+{
+    char *end = NULL;
+    *value = strtoull(text, &end, 0);
+    return end != text && *end == '\0';
+}
+
+static int parse_options(int argc, char **argv, Options *options)
+{
+    *options = (Options){.base = UINT32_C(0x80000000), .ram_size = 16U * 1024U * 1024U,
+        .max_steps = UINT64_C(1000000)};
+    for (int i = 1; i < argc; ++i) {
+        uint64_t value = 0;
+        if (strcmp(argv[i], "--image") == 0 && i + 1 < argc) options->image = argv[++i];
+        else if (strcmp(argv[i], "--trace") == 0 && i + 1 < argc) options->trace = argv[++i];
+        else if (strcmp(argv[i], "--signature") == 0 && i + 3 < argc) {
+            options->signature = argv[++i];
+            if (!number(argv[++i], &value)) return 0;
+            options->signature_start = (uint32_t)value;
+            if (!number(argv[++i], &value)) return 0;
+            options->signature_end = (uint32_t)value;
+        } else if (strcmp(argv[i], "--base") == 0 && i + 1 < argc) {
+            if (!number(argv[++i], &value)) return 0;
+            options->base = (uint32_t)value;
+        } else if (strcmp(argv[i], "--ram") == 0 && i + 1 < argc) {
+            if (!number(argv[++i], &value) || value > SIZE_MAX) return 0;
+            options->ram_size = (uint32_t)value;
+        } else if (strcmp(argv[i], "--max-steps") == 0 && i + 1 < argc) {
+            if (!number(argv[++i], &options->max_steps)) return 0;
+        } else if (strcmp(argv[i], "--ignore-tohost") == 0) {
+            options->ignore_tohost = 1;
+        } else if (strcmp(argv[i], "--tohost") == 0 && i + 1 < argc) {
+            if (!number(argv[++i], &value)) return 0;
+            options->tohost = (uint32_t)value;
+            options->tohost_given = 1;
+        } else return 0;
+    }
+    return options->image != NULL && options->ram_size != 0;
+}
+
+static int dump_signature(const Options *options, const YanRam *ram)
+{
+    if (options->signature == NULL) {
+        return 1;
+    }
+    if (options->signature_start < options->base ||
+        options->signature_end < options->signature_start ||
+        (uint64_t)(options->signature_end - options->base) > ram->size ||
+        options->signature_end - options->base >
+            ram->size - (options->signature_start - options->base)) {
+        return 0;
+    }
+    FILE *file = fopen(options->signature, "wb");
+    if (file == NULL) {
+        return 0;
+    }
+    const size_t offset = options->signature_start - options->base;
+    const size_t length = options->signature_end - options->signature_start;
+    const int result = fwrite(ram->data + offset, 1, length, file) == length;
+    fclose(file);
+    return result;
+}
+
+static void write_trace(FILE *trace, uint64_t step, const YanCpuState *before,
+                        uint32_t instruction, const YanCpuState *after,
+                        YanStatus status)
+{
+    fprintf(trace, "{\"step\":%" PRIu64 ",\"pc\":%" PRIu32 ",\"insn\":%" PRIu32
+            ",\"next_pc\":%" PRIu32 ",\"status\":%d,\"regs\":[",
+            step, before->pc, instruction, after->pc, (int)status);
+    for (size_t i = 0; i < YAN_REGISTER_COUNT; ++i) {
+        fprintf(trace, "%s%" PRIu32, i == 0 ? "" : ",", after->regs[i]);
+    }
+    fprintf(trace, "],\"mstatus\":%" PRIu32 ",\"mepc\":%" PRIu32
+            ",\"mcause\":%" PRIu32 ",\"mtval\":%" PRIu32 "}\n",
+            after->csr.mstatus, after->csr.mepc, after->csr.mcause, after->csr.mtval);
+}
+
+int main(int argc, char **argv)
+{
+    Options options;
+    if (!parse_options(argc, argv, &options)) {
+        usage(argv[0]);
+        return EXIT_USAGE;
+    }
+    YanRam ram = {0};
+    YanBus bus = {0};
+    YanCpu cpu = {0};
+    YanClint clint = {0};
+    YanPlic plic = {0};
+    YanImageInfo info = {0};
+    uint8_t *image = NULL;
+    size_t image_size = 0;
+    FILE *trace = NULL;
+    int result = EXIT_HOST_ERROR;
+    int stopped = 0;
+
+    if (yan_ram_init(&ram, options.ram_size) != YAN_OK ||
+        yan_bus_init(&bus, &ram, options.base) != YAN_OK) {
+        goto done;
+    }
+    /* This executor models the Yan platform, so the CLINT and PLIC windows are
+     * mapped and mtime advances one tick per executed instruction, matching
+     * yan_machine_step(). The differential tester deliberately does not do
+     * either: its reference model carries no device or CSR state. */
+    yan_clint_reset(&clint);
+    yan_plic_reset(&plic);
+    bus.clint = &clint;
+    bus.plic = &plic;
+    image = yan_host_read_file(options.image, &image_size);
+    if (image == NULL) {
+        fprintf(stderr, "yan_run: cannot read '%s'\n", options.image);
+        goto done;
+    }
+    if (yan_image_load_elf(&ram, options.base, image, image_size, &info) != YAN_OK) {
+        fprintf(stderr, "yan_run: '%s' is not a loadable RV32 ELF image\n",
+                options.image);
+        goto done;
+    }
+    if (yan_cpu_reset(&cpu, info.entry) != YAN_OK) {
+        goto done;
+    }
+    /* An explicit address wins; otherwise the symbol decides, because test
+     * linkers do not place `tohost` at a fixed address. `--ignore-tohost`
+     * skips this entirely: some frameworks use that same word as a console
+     * register, so its first nonzero value is not a halt request. */
+    if (!options.ignore_tohost && !options.tohost_given &&
+        yan_image_find_symbol(image, image_size, "tohost", &options.tohost) == YAN_OK) {
+        options.tohost_given = 1;
+    }
+    if (options.trace != NULL) {
+        trace = fopen(options.trace, "w");
+        if (trace == NULL) {
+            goto done;
+        }
+    }
+    for (uint64_t step = 0; step < options.max_steps; ++step) {
+        uint32_t instruction = 0;
+        YanCpuState before = {0}, after = {0};
+        /* One cycle: advance the timer, then execute. An interrupt raised by
+         * this tick is visible to this same step, as in yan_machine_step. */
+        yan_clint_tick(&clint, 1);
+        if (yan_cpu_snapshot(&cpu, &before) != YAN_OK ||
+            yan_cpu_fetch(&cpu, &bus, &instruction).status != YAN_OK) {
+            fprintf(stderr, "yan_run: cannot fetch at pc = %08" PRIx32 "\n", cpu.pc);
+            goto done;
+        }
+        const YanStatus status = yan_cpu_step(&cpu, &bus);
+        (void)yan_cpu_snapshot(&cpu, &after);
+        if (trace != NULL) {
+            write_trace(trace, step, &before, instruction, &after, status);
+        }
+        if (!options.ignore_tohost && options.tohost_given) {
+            uint32_t value = 0;
+            if (yan_bus_read(&bus, options.tohost, 4, &value).status == YAN_OK &&
+                value != 0) {
+                if (value != 1) {
+                    fprintf(stderr, "yan_run: the Guest reported failure code"
+                            " %" PRIu32 " after %" PRIu64 " instructions\n",
+                            value, step + 1);
+                }
+                result = value == 1 ? EXIT_PASS : EXIT_GUEST_FAILURE;
+                stopped = 1;
+                break;
+            }
+        }
+    }
+    if (!stopped && result == EXIT_HOST_ERROR) {
+        result = options.signature != NULL ? EXIT_SIGNATURE : EXIT_NO_TERMINATION;
+        if (options.ignore_tohost) {
+            fprintf(stderr, "yan_run: ran the full %" PRIu64
+                    " steps with tohost polling disabled\n", options.max_steps);
+        } else {
+            fprintf(stderr, "yan_run: stopped after %" PRIu64
+                    " steps without reaching tohost\n", options.max_steps);
+        }
+    }
+    if (!dump_signature(&options, &ram)) {
+        fprintf(stderr, "yan_run: cannot export the signature region\n");
+        result = EXIT_HOST_ERROR;
+    }
+done:
+    if (trace != NULL) {
+        fclose(trace);
+    }
+    free(image);
+    yan_ram_destroy(&ram);
+    return result;
+}
