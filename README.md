@@ -6,7 +6,7 @@ YanOS 是一个用于学习计算机系统的项目，计划实现 RISC-V 模拟
 
 ## 状态
 
-已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位、取指和整数指令单步执行。已实现 RV32I 的整数计算、控制转移、访存、FENCE、FENCE.I、ECALL 和 EBREAK，并提供 CSR 指令，支持 M-mode 同步异常与中断处理及 MRET。RV32M 的八条乘除指令已加入。平台侧实现了单 hart 的 CLINT 与单 context 的 M-mode PLIC，中断线经 Bus 接入 CPU 的 `mie` / `mip`；Guest 侧有最小的启动入口、统一的陷阱处理路径与 CLINT / PLIC 访问封装。验证层已接入逐指令差分测试、官方 `riscv-tests` 套件、官方 `riscv-arch-test`（ACT4）测试语料与 Sail 签名比对。此外还接入了 UART 字符设备与 Host 传输通道：PLIC 网关按设备线的电平语义工作并已通过独立验证，UART 与传输通道分别有 19 与 14 个模块用例通过。YanOS 侧建立了 `os/` 层，它的第一个成员控制台驱动已实现（尚未提交），接口见 [控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)。S/U 模式、中断委托、分页与其余设备仍待实现。详细进度见 [STATUS](docs/STATUS.md)。
+已实现 Machine、Bus、RAM，以及 CPU 寄存器状态、复位、取指和整数指令单步执行。已实现 RV32I 的整数计算、控制转移、访存、FENCE、FENCE.I、ECALL 和 EBREAK，并提供 CSR 指令，支持 M-mode 同步异常与中断处理及 MRET。RV32M 的八条乘除指令已加入。平台侧实现了单 hart 的 CLINT 与单 context 的 M-mode PLIC，中断线经 Bus 接入 CPU 的 `mie` / `mip`；Guest 侧有最小的启动入口、统一的陷阱处理路径与 CLINT / PLIC 访问封装。验证层已接入逐指令差分测试、官方 `riscv-tests` 套件、官方 `riscv-arch-test`（ACT4）测试语料与 Sail 签名比对。此外还接入了 UART 字符设备与 Host 传输通道：PLIC 网关按设备线的电平语义工作并已通过独立验证，UART 与传输通道分别有 19 与 14 个模块用例通过。YanOS 侧建立了 `os/` 层，它的第一个成员控制台驱动已实现并提交在 `feat/m1-device-channel`（尚未合入 `main`），接口见 [控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)。S/U 模式、中断委托、分页与其余设备仍待实现。详细进度见 [STATUS](docs/STATUS.md)。
 
 ## 构建与测试
 
