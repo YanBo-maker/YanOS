@@ -18,6 +18,8 @@ YanStatus yan_bus_init(YanBus *bus, YanRam *ram, uint32_t base)
     /* Devices are wired by the owner after this call; NULL means "not mapped". */
     bus->clint = NULL;
     bus->plic = NULL;
+    bus->uart = NULL;
+    bus->transport = NULL;
     return YAN_OK;
 }
 
@@ -99,6 +101,13 @@ YanBusResult yan_bus_read(const YanBus *bus, uint32_t address, size_t width,
     } else if (bus != NULL && width == 4 && bus->plic != NULL &&
                device_offset(address, YAN_PLIC_BASE, YAN_PLIC_SIZE, &offset)) {
         result.status = yan_plic_read(bus->plic, offset, value);
+    } else if (bus != NULL && width == 4 && bus->uart != NULL &&
+               device_offset(address, YAN_UART_BASE, YAN_UART_SIZE, &offset)) {
+        result.status = yan_uart_read(bus->uart, offset, value);
+    } else if (bus != NULL && width == 4 && bus->transport != NULL &&
+               device_offset(address, YAN_TRANSPORT_BASE, YAN_TRANSPORT_SIZE,
+                             &offset)) {
+        result.status = yan_transport_read(bus->transport, offset, value);
     } else {
         result.status = ram_read(bus, address, width, value);
     }
@@ -116,6 +125,13 @@ YanBusResult yan_bus_write(YanBus *bus, uint32_t address, size_t width,
     } else if (bus != NULL && width == 4 && bus->plic != NULL &&
                device_offset(address, YAN_PLIC_BASE, YAN_PLIC_SIZE, &offset)) {
         status = yan_plic_write(bus->plic, offset, value);
+    } else if (bus != NULL && width == 4 && bus->uart != NULL &&
+               device_offset(address, YAN_UART_BASE, YAN_UART_SIZE, &offset)) {
+        status = yan_uart_write(bus->uart, offset, value);
+    } else if (bus != NULL && width == 4 && bus->transport != NULL &&
+               device_offset(address, YAN_TRANSPORT_BASE, YAN_TRANSPORT_SIZE,
+                             &offset)) {
+        status = yan_transport_write(bus->transport, offset, value);
     } else {
         status = ram_write(bus, address, width, value);
     }
@@ -123,7 +139,9 @@ YanBusResult yan_bus_write(YanBus *bus, uint32_t address, size_t width,
     return result;
 }
 
-/* One summary line per machine-level interrupt class. */
+/* One summary line per machine-level interrupt class. External device lines
+ * reach mip through the PLIC, not through this summary: the arbitration on
+ * enable and threshold belongs to the interrupt controller. */
 uint32_t yan_bus_pending_interrupts(const YanBus *bus)
 {
     if (bus == NULL) {

@@ -77,12 +77,13 @@
 ##### UNSUPPORTED CAPABILITIES #####
 
 # External interrupts have no Guest-visible source: YanOS's PLIC has no raise
-# register, and only the Host can assert a source line through
-# yan_plic_raise(). The framework's own RVMODEL_SET_MEXT_INT writes to a Sail
-# test-interrupt-generator device (SAIL_SIG_ADDRESS) that this platform does not
-# have, and adding a device for it is out of scope. These macros must exist for
-# the framework's checks; see the note at the top of this file about which guard
-# is actually in effect.
+# register, and only the platform can drive a source line through
+# yan_plic_set_level(). A device reports a line level and the PLIC decides
+# whether that becomes MEIP. The framework's own RVMODEL_SET_MEXT_INT writes to
+# a Sail test-interrupt-generator device (SAIL_SIG_ADDRESS) that this platform
+# does not have, and adding a device for it is out of scope. These macros must
+# exist for the framework's checks; see the note at the top of this file about
+# which guard is actually in effect.
 #define RVMODEL_SET_MEXT_INT(_R1, _R2) .error "YanOS has no external interrupt source register"
 #define RVMODEL_CLR_MEXT_INT(_R1, _R2) .error "YanOS has no external interrupt source register"
 
