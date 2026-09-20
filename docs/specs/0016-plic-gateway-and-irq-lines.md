@@ -34,7 +34,7 @@ bool yan_transport_pending(const YanTransport *transport); /* Host→Guest 线 *
 - 返回值：`true` = 该线当前 asserted（设备正在请求服务），`false` = deasserted。
 - **纯函数、无副作用**：调用它不得改变任何设备状态，因此可以每步调用。
 - 含义由各设备规格定义：
-  - UART：`RX_AVAILABLE && CONTROL.RX_IRQ_ENABLE`
+  - UART：`RX_READY && CONTROL.RX_IRQ_ENABLE`
   - Transport：`IRQ_STATUS.H2G_DATA && IRQ_ENABLE.H2G_DATA`
 - 设备**不返回 mip 位**，也不接触 PLIC。这一点修订的是设备头文件与 Machine 骨架在 v1 时期的约定（`include/yan/uart.h` 曾要求返回 `YAN_INTERRUPT_MEIP`），不是 0012 的约定——0012 从未规定设备返回 mip 位。
 
@@ -78,12 +78,12 @@ bool yan_transport_pending(const YanTransport *transport); /* Host→Guest 线 *
 
 以 UART 接收为例，`RX_IRQ_ENABLE=1`、PLIC 中 source 2 已 enable 且 `priority > threshold`：
 
-1. 设备收到一个字节 → `RX_AVAILABLE=1`，线 asserted。
+1. 设备收到一个字节 → `RX_READY=1`，线 asserted。
 2. 采样 → `set_level(2, true)`；`in_service[2]=0` → `pending[2]=1`。
 3. 仲裁命中 → `mip.MEIP=1` → CPU 在指令边界进入中断。
 4. 处理程序读 claim → 返回 2；`pending[2]=0`、`in_service[2]=1` → **MEIP 撤销**。
 5. **in-flight**：处理程序运行期间每一步都继续 `set_level(2, true)`（设备仍在请求），但 `in_service[2]=1` → `pending[2]` 保持 0，**不会重新 pending**（I1）。
-6. 处理程序读走 `RXDATA` → `RX_AVAILABLE=0`；下一步采样 `set_level(2, false)` → `level[2]=0`。
+6. 处理程序读走 `RXDATA` → `RX_READY=0`；下一步采样 `set_level(2, false)` → `level[2]=0`。
 7. 处理程序写 complete = 2 → `in_service[2]=0`；`level[2]==0` → **不重新 pending**。中断结束，无风暴。
 8. **反例（正确行为）**：若处理程序 claim 之后**没有**读走数据，第 6 步不发生，`level[2]` 仍为 1；第 7 步 complete 之后 `level[2]==1` → `pending[2]=1` → MEIP 再次拉高，处理程序被再次进入。请求尚未被满足，这是电平语义的正确表现。
 9. **另一个反例（刻意保留的后果）**：若处理程序 claim 之后**从不 complete**，`in_service[2]` 永远为 1，该源从此不再 pending，中断停止。这是刻意的：旧模型会用风暴掩盖"忘记 complete"，新模型让这个 bug 表现为该源静默停摆，而不是淹没系统。
@@ -172,7 +172,7 @@ void yan_plic_set_level(YanPlic *plic, uint32_t source, bool asserted);
 
 | # | 用例 | 断言 |
 | --- | --- | --- |
-| C1 | UART 线的真值表 | 仅当 `RX_AVAILABLE && RX_IRQ_ENABLE` 时为 `true`；读走 `RXDATA` 或清 `CONTROL` 后为 `false` |
+| C1 | UART 线的真值表 | 仅当 `RX_READY && RX_IRQ_ENABLE` 时为 `true`；读走 `RXDATA` 或清 `CONTROL` 后为 `false` |
 | C2 | Transport 线的真值表 | 仅当 `IRQ_STATUS.H2G_DATA && IRQ_ENABLE.H2G_DATA` 时为 `true`；清 `IRQ_STATUS` 或清使能后为 `false` |
 | C3 | 纯函数 | 连续调用 `pending()` 不改变任何设备状态（前后逐字段比较） |
 | C4 | 端到端 | `push_rx` → 采样 → MEIP → claim/complete 且数据仍在 → 重新 pending；随后读走数据 → 线 deassert → 不再 re-pend |
