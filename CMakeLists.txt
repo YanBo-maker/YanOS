@@ -191,6 +191,29 @@ if(BUILD_TESTING)
                                                     TIMEOUT 300)
     endif()
 
+    # The M2a acceptance: block I/O issued by a task and awaited through the
+    # cooperative runtime, on the production path (yan_run --disk), with the
+    # device served by the host pump and the wake delivered as a real interrupt.
+    #
+    # Its central assertion is not "the read worked" - that also passes when the
+    # runtime is replaced by yield plus busy-wait polling, which 0019 forbids.
+    # The assertion is that the waiting task's predicate is asked exactly once
+    # while another task makes progress: with a real block the waiter does not
+    # run at all, and with polling it runs once per round. The suite also stands
+    # in for the fix to yan_run's doorbell handling: it frees the response ring
+    # from a second task and never rings, so an edge-triggered pump strands the
+    # request and the run reaches no verdict.
+    if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
+        add_test(NAME guest_m2a_combined
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_m2a_combined.sh"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${CMAKE_BINARY_DIR}/m2a-combined")
+        set_tests_properties(guest_m2a_combined PROPERTIES SKIP_RETURN_CODE 77
+                                                           TIMEOUT 300)
+    endif()
+
     # Mutation checks live behind one switch, not one switch per component. Both
     # suites plant defects in a private copy, rebuild and run the tests there,
     # and count a defect as detected only when an assertion fails; crashes and
@@ -263,6 +286,16 @@ if(BUILD_TESTING)
         # runtime's wait with yield plus busy-wait polling and passes every
         # functional check - only the blocked-window assertion separates it from
         # the real thing, which is why that assertion is the one under test here.
+        add_test(NAME guest_m2a_combined_mutation
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_m2a_combined.sh"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${CMAKE_BINARY_DIR}/m2a-combined-mutation"
+                    --mutation)
+        set_tests_properties(guest_m2a_combined_mutation PROPERTIES
+                                                                SKIP_RETURN_CODE 77
+                                                                TIMEOUT 300)
     endif()
 
     if(YAN_BUILD_TOOLS AND UNIX AND EXISTS "${YAN_NEMU_REF_SO}" AND YAN_RISCV_GCC)
