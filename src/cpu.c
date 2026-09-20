@@ -65,6 +65,16 @@ YanBusResult yan_cpu_fetch(const YanCpu *cpu, const YanBus *bus,
     return yan_bus_fetch32(bus, cpu->pc, instruction);
 }
 
+YanStatus yan_cpu_poll_interrupts(YanCpu *cpu, const YanBus *bus)
+{
+    if (cpu == NULL || bus == NULL) {
+        return YAN_INVALID_ARGUMENT;
+    }
+    /* mip is not storage: every instruction boundary re-reads the devices. */
+    cpu->csr.mip = yan_bus_pending_interrupts(bus) & YAN_MIE_MASK;
+    return YAN_OK;
+}
+
 static uint32_t arithmetic_shift_right(uint32_t value, uint32_t amount)
 {
     if (amount == 0) {
@@ -291,6 +301,27 @@ static YanStatus enter_trap(YanCpu *cpu, uint32_t cause, uint32_t value)
     return YAN_TRAP;
 }
 
+/* Machine-level interrupts are ordered by privilege of the source, not by
+ * arrival: external (11) outranks timer (7), which outranks software (3). */
+static uint32_t interrupt_cause(uint32_t pending_and_enabled)
+{
+    if ((pending_and_enabled & YAN_INTERRUPT_MEIP) != 0) {
+        return YAN_MCAUSE_MEIP;
+    }
+    if ((pending_and_enabled & YAN_INTERRUPT_MTIP) != 0) {
+        return YAN_MCAUSE_MTIP;
+    }
+    return YAN_MCAUSE_MSIP;
+}
+
+/* An interrupt differs from a synchronous exception: no instruction faulted, so
+ * mtval is zero and mepc names the instruction that has not run yet. */
+static YanStatus enter_interrupt(YanCpu *cpu)
+{
+    const uint32_t cause = interrupt_cause(cpu->csr.mip & cpu->csr.mie);
+    return enter_trap(cpu, YAN_MCAUSE_INTERRUPT | cause, 0);
+}
+
 static YanStatus access_fault(YanCpu *cpu, YanStatus status, uint32_t cause, uint32_t address)
 {
     if (status == YAN_UNALIGNED) {
@@ -304,6 +335,17 @@ static YanStatus access_fault(YanCpu *cpu, YanStatus status, uint32_t cause, uin
 
 YanStatus yan_cpu_step(YanCpu *cpu, YanBus *bus)
 {
+    /* Interrupts are sampled at the instruction boundary and take precedence
+     * over any exception of the instruction that would have been fetched. A
+     * handler entered this way has MIE cleared, so this step cannot nest. */
+    YanStatus polled = yan_cpu_poll_interrupts(cpu, bus);
+    if (polled != YAN_OK) {
+        return polled;
+    }
+    if ((cpu->csr.mstatus & YAN_MSTATUS_MIE) != 0 &&
+        (cpu->csr.mip & cpu->csr.mie & YAN_MIE_MASK) != 0) {
+        return enter_interrupt(cpu);
+    }
     uint32_t instruction = 0;
     YanBusResult fetch = yan_cpu_fetch(cpu, bus, &instruction);
     if (fetch.status != YAN_OK) {

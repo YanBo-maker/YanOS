@@ -40,7 +40,7 @@ set(YAN_SAIL_BIN "" CACHE FILEPATH
     "sail_riscv_sim used as the reference model for signature comparison")
 
 add_library(yan_machine STATIC src/ram.c src/bus.c src/machine.c src/cpu.c src/csr.c
-                              src/image.c src/difftest.c)
+                              src/interrupt.c src/image.c src/difftest.c)
 target_include_directories(yan_machine PUBLIC include)
 target_compile_options(yan_machine PRIVATE ${YAN_WARNINGS})
 
@@ -74,7 +74,7 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(unity)
 
     foreach(suite ram bus machine cpu fetch step alu control memory csr trap m snapshot
-                  image difftest)
+                  image difftest interrupt clint plic)
         add_executable(test_${suite} tests/test_${suite}.c)
         target_link_libraries(test_${suite} PRIVATE yan_machine unity::framework)
         target_compile_options(test_${suite} PRIVATE ${YAN_WARNINGS})

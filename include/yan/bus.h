@@ -2,11 +2,15 @@
 #define YAN_BUS_H
 
 #include "yan/ram.h"
+#include "yan/interrupt.h"
 
-/* Borrowed mapping: the RAM must outlive the Bus and keep its capacity. */
+/* Borrowed mappings: the RAM, CLINT and PLIC must outlive the Bus. A device
+ * pointer left NULL means that MMIO window is not mapped on this Bus. */
 typedef struct {
     YanRam *ram;
     uint32_t ram_base;
+    YanClint *clint;
+    YanPlic *plic;
 } YanBus;
 
 typedef enum {
@@ -27,8 +31,12 @@ YanBusResult yan_bus_read(const YanBus *bus, uint32_t address, size_t width,
                           uint32_t *value);
 YanBusResult yan_bus_write(YanBus *bus, uint32_t address, size_t width,
                            uint32_t value);
-/* Stage 1 maps executable RAM only. Fetch always reads four bytes. */
+/* Data reads and writes decode the CLINT and PLIC windows before RAM; both
+ * answer 32-bit word accesses only. Instruction fetch stays RAM only: the MMIO
+ * windows are data mappings. Fetch always reads four bytes. */
 YanBusResult yan_bus_fetch32(const YanBus *bus, uint32_t address,
                              uint32_t *instruction);
+/* Machine-level interrupt lines as mip/mie bit positions: MSIP, MTIP, MEIP. */
+uint32_t yan_bus_pending_interrupts(const YanBus *bus);
 
 #endif

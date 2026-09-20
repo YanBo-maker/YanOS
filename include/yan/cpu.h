@@ -9,9 +9,16 @@
 #define YAN_MSTATUS_MIE UINT32_C(0x8)
 #define YAN_MSTATUS_MPIE UINT32_C(0x80)
 #define YAN_MSTATUS_MPP UINT32_C(0x1800)
+/* mie and mip implement the same three machine-level interrupt bits. */
+#define YAN_MIE_MASK (YAN_INTERRUPT_MSIP | YAN_INTERRUPT_MTIP | YAN_INTERRUPT_MEIP)
+/* An interrupt cause carries the highest bit set; see the privileged spec. */
+#define YAN_MCAUSE_INTERRUPT UINT32_C(0x80000000)
+#define YAN_MCAUSE_MSIP UINT32_C(3)
+#define YAN_MCAUSE_MTIP UINT32_C(7)
+#define YAN_MCAUSE_MEIP UINT32_C(11)
 
 typedef struct {
-    uint32_t mstatus, mtvec, mscratch, mepc, mcause, mtval;
+    uint32_t mstatus, mtvec, mscratch, mepc, mcause, mtval, mie, mip;
 } YanCsr;
 
 /* Observe fields directly; use register accessors to preserve x0 semantics. */
@@ -30,6 +37,10 @@ YanStatus yan_cpu_write_reg(YanCpu *cpu, uint32_t index, uint32_t value);
 YanStatus yan_cpu_read_csr(const YanCpu *cpu, uint32_t address, uint32_t *value);
 YanStatus yan_cpu_write_csr(YanCpu *cpu, uint32_t address, uint32_t value);
 YanStatus yan_cpu_snapshot(const YanCpu *cpu, YanCpuState *state);
+/* Latches the device interrupt lines into mip without touching PC or mstatus.
+ * yan_cpu_step samples at every instruction boundary; the host uses this to
+ * observe the same value outside a step. */
+YanStatus yan_cpu_poll_interrupts(YanCpu *cpu, const YanBus *bus);
 /* Reads the word at PC; preserves CPU state, RAM, and outputs on failure. */
 YanBusResult yan_cpu_fetch(const YanCpu *cpu, const YanBus *bus,
                            uint32_t *instruction);
