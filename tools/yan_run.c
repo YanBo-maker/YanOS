@@ -6,6 +6,7 @@
 #include "host_file.h"
 #include "yan/cpu.h"
 #include "yan/image.h"
+#include "yan/interrupt.h"
 
 /* Exit codes are shared with yan_difftest and documented in
  * docs/specs/0011-cpu-validation.md. A harness must not read "nonzero" as a
@@ -135,6 +136,8 @@ int main(int argc, char **argv)
     YanRam ram = {0};
     YanBus bus = {0};
     YanCpu cpu = {0};
+    YanClint clint = {0};
+    YanPlic plic = {0};
     YanImageInfo info = {0};
     uint8_t *image = NULL;
     size_t image_size = 0;
@@ -146,6 +149,14 @@ int main(int argc, char **argv)
         yan_bus_init(&bus, &ram, options.base) != YAN_OK) {
         goto done;
     }
+    /* This executor models the Yan platform, so the CLINT and PLIC windows are
+     * mapped and mtime advances one tick per executed instruction, matching
+     * yan_machine_step(). The differential tester deliberately does not do
+     * either: its reference model carries no device or CSR state. */
+    yan_clint_reset(&clint);
+    yan_plic_reset(&plic);
+    bus.clint = &clint;
+    bus.plic = &plic;
     image = yan_host_read_file(options.image, &image_size);
     if (image == NULL) {
         fprintf(stderr, "yan_run: cannot read '%s'\n", options.image);
@@ -176,6 +187,9 @@ int main(int argc, char **argv)
     for (uint64_t step = 0; step < options.max_steps; ++step) {
         uint32_t instruction = 0;
         YanCpuState before = {0}, after = {0};
+        /* One cycle: advance the timer, then execute. An interrupt raised by
+         * this tick is visible to this same step, as in yan_machine_step. */
+        yan_clint_tick(&clint, 1);
         if (yan_cpu_snapshot(&cpu, &before) != YAN_OK ||
             yan_cpu_fetch(&cpu, &bus, &instruction).status != YAN_OK) {
             fprintf(stderr, "yan_run: cannot fetch at pc = %08" PRIx32 "\n", cpu.pc);

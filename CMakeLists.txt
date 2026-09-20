@@ -74,13 +74,18 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(unity)
 
     foreach(suite ram bus machine cpu fetch step alu control memory csr trap m snapshot
-                  image difftest interrupt clint plic)
+                  image difftest interrupt clint plic boot)
         add_executable(test_${suite} tests/test_${suite}.c)
         target_link_libraries(test_${suite} PRIVATE yan_machine unity::framework)
         target_compile_options(test_${suite} PRIVATE ${YAN_WARNINGS})
         add_test(NAME ${suite} COMMAND test_${suite})
         set_tests_properties(${suite} PROPERTIES TIMEOUT 10)
     endforeach()
+
+    # The boot suite compares the Guest-visible platform description with the
+    # Host one, so it needs the Guest headers on its include path.
+    target_include_directories(test_boot PRIVATE
+                               "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest")
 
     # ---------------------------------------------------------------- external
     set(_yan_gcc_names riscv64-unknown-elf-gcc riscv32-unknown-elf-gcc
@@ -90,6 +95,20 @@ if(BUILD_TESTING)
     endif()
     unset(YAN_RISCV_GCC CACHE)
     find_program(YAN_RISCV_GCC NAMES ${_yan_gcc_names})
+
+    # The Guest trap environment needs a RISC-V toolchain and the DUT executor,
+    # but no reference model: it exercises CSR and interrupt semantics that
+    # NEMU cannot mirror.
+    if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
+        add_test(NAME guest_trap_env
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_trap_env.sh"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${CMAKE_BINARY_DIR}/trap-env")
+        set_tests_properties(guest_trap_env PROPERTIES SKIP_RETURN_CODE 77
+                                                     TIMEOUT 300)
+    endif()
 
     if(YAN_BUILD_TOOLS AND UNIX AND EXISTS "${YAN_NEMU_REF_SO}" AND YAN_RISCV_GCC)
         add_test(NAME difftest_corpus
