@@ -4,7 +4,7 @@
 
 ## 开发流程
 
-任务按 INTENTION → SPEC → IMPLE → VERIFY 推进。小任务可以简写在同一份记录中。
+任务按 INTENTION → SPEC → IMPLE → VERIFY 推进。小任务可以简写在同一份记录中。文档与规格的修改分工见 `AGENTS.md` 的「文档与规格的修改权」：`README.md`、`docs/STATUS.md` 与 `docs/specs/*` 只由总审核角色落笔，其他人提交变更请求。
 
 ### INTENTION
 
@@ -46,6 +46,15 @@ ISA 行为遵循 Spec → Test → Implementation：先写用例并确认预期�
 功能合并前由项目维护者审查。`main` 保持已验证状态，默认以 merge commit 合并，保留有助于理解实现过程的提交。
 
 已发布历史保持稳定，后续修正使用新提交；撤销已共享的变化使用 `git revert`。未发布的个人提交可在审查前整理。处理冲突时保留已有工作。
+
+### 合并前检查清单
+
+1. 默认套件全绿：`cmake --build build --parallel && ctest --test-dir build --output-on-failure`。
+2. 变异检查显式跑一次：`cmake -S . -B build -DYAN_BUILD_TOOLS=ON -DYAN_ENABLE_MUTATION_TESTS=ON …` 后运行 `ctest --test-dir build -R 'mutation'`，两组（`guest_console_mutation`、`device_mutation`）都必须 0 存活。**这一步不能省**：变异检查是"测试真的有检测力"的唯一证据，默认不注册只是因为它慢。
+3. 文档自洽核对：由总审核角色核对状态行、规格索引、计数与链接。
+4. **新增或改动被忽略扩展名的工件时，确认它真的能进提交**：判据是 `git add --dry-run <路径>` 是否列出该文件，**不是** `git check-ignore` 的返回码——命中取反规则时它也返回 0。仓库已经踩过一次：golden 基准的 `.jsonl` / `.hex` 被"验证产物不提交"的规则吃掉，基准进不了仓库，测试会在别的机器上静默 SKIP。
+
+变异检查默认关闭，是为了不让默认套件被它们主导：本机实测默认 25 组约 14～19 秒，打开开关后 27 组约 1.5～7 分钟（`device_mutation` 要为 28 个植入缺陷各重建一次并跑一遍被测组，耗时随机器负载与并行构建波动）。把开关写进配置命令而不是默认值，是让"慢证据"在需要它的场合（合并前、收口时）出现，而不是让每次改一行代码都等它。
 
 ## 提交粒度
 
