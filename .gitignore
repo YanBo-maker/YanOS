@@ -21,6 +21,19 @@
 *.dump
 *.map
 
+# Deliberate exception to the two rules above: the frozen golden baseline IS a
+# committed artifact. It shares their extensions, so the two files are
+# re-included explicitly. Without this the baseline cannot be committed and the
+# regression silently reports SKIP everywhere except the machine that generated
+# it -- a check that guards nothing while looking present.
+!tests/guest/golden/probe.trace.jsonl
+!tests/guest/golden/probe.signature.hex
+
+# External monitoring channel. The authorised monitor overwrites this file
+# periodically, so it is working state rather than project documentation; the
+# conclusions worth keeping go into STATUS and commit messages.
+/MONITOR_REPORT.md
+
 # Credentials and machine-local configuration
 .env
 .env.*

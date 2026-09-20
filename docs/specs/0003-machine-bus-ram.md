@@ -48,6 +48,9 @@ Guest 地址小于映射起点或位于区域之外时返回未映射。起始�
 ### Machine
 
 - `yan_machine_init` 创建并映射默认 32 MiB RAM。
+- `yan_machine_init_with(machine, ram_base, ram_size)` 按显式几何组装，供需要选择 RAM 窗口的工具使用（例如 `yan_run --base/--ram`）；几何记录在 `YanMachine` 内，供完整性检查与复位使用。
+- 几何在组装时校验，且校验先于分配：`ram_size` 为 0，或窗口与任一设备窗口（CLINT `0x02000000`、PLIC `0x0c000000`、UART `0x10000000`、transport `0x10001000`）重叠，都返回 `YAN_INVALID_ARGUMENT`；窗口越过 32 位地址空间返回 `YAN_OUT_OF_BOUNDS`（由 `yan_bus_init` 判定）。被拒的调用不分配内存，也不改变对象。之所以拒绝重叠：Bus 的解码顺序让设备优先，重叠会让该段 RAM 不可见。
+- 几何一旦组装即视为该机器的不变量：`yan_machine_reset` 把 CPU 复位到这台机器自己的 `ram_base`，不使用编译期常量。完整性检查因此只能校验"记录的几何与活字段是否一致"，查不出把记录与字段一并改掉的自洽篡改。
 - `yan_machine_reset` 清零 RAM，保留映射和已分配的缓冲区。本阶段没有 CPU。
 - `yan_machine_load_image` 将调用者提供的 Host 字节缓冲区复制到 RAM 起点，保留镜像之后的原内容。
 - 空镜像是有效操作，可使用空指针。非空镜像要求有效源缓冲区；超长镜像在复制前拒绝。

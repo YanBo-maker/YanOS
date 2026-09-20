@@ -7,8 +7,9 @@
 # the offending pc and instruction. Every mutation is verified to have actually
 # changed the source, so a stale pattern cannot make the check vacuous.
 #
-# Exit codes: 0 every mutation was detected, 1 a mutation survived, 2 usage,
-# 77 a dependency is missing.
+# Exit codes: 0 every mutation was detected, 1 a mutation survived or a source
+# this check compiles is missing or does not build, 2 usage, 77 this machine has
+# no cross toolchain or no reference model.
 set -u
 
 source=""
@@ -32,9 +33,33 @@ if [ -z "$source" ] || [ -z "$gcc" ] || [ -z "$ref" ] || [ -z "$work" ]; then
     echo "usage: run_mutation.sh --source DIR --cc CC --gcc RISCV_GCC --ref REF_SO --work DIR" >&2
     exit 2
 fi
-for required in "$gcc" "$ref" "$source/src/cpu.c"; do
-    [ -e "$required" ] || { echo "SKIP: missing $required"; exit 77; }
+# 77 is only for a dependency this machine does not have: the cross toolchain and
+# the NEMU reference shared object live outside the repository, so a missing one
+# stays a skip. Everything else this script compiles is the thing under test -
+# the CPU whose defects are planted, and the tester and generator that report
+# them - so a missing source is a hard failure. CTest records 77 as a skip, and a
+# skip is not a pass.
+if [ ! -x "$gcc" ] && ! command -v "$gcc" > /dev/null 2>&1; then
+    echo "SKIP: no cross toolchain at '$gcc'"
+    exit 77
+fi
+if [ ! -e "$ref" ]; then
+    echo "SKIP: no reference model at '$ref'"
+    exit 77
+fi
+missing=0
+for required in "$source/src/cpu.c" "$source/tools/yan_difftest.c" \
+                "$source/tools/host_file.c" "$source/tools/yan_gen.c" \
+                "$source/tests/guest/start.S" "$source/tests/guest/guest_lib.c" \
+                "$source/tests/guest/alu.c" "$source/tests/guest/memory.c" \
+                "$source/tests/guest/control.c" "$source/tests/guest/muldiv.c" \
+                "$source/tests/guest/link.ld"; do
+    if [ ! -e "$required" ]; then
+        echo "FAIL the source under test is missing: $required"
+        missing=1
+    fi
 done
+[ "$missing" -eq 0 ] || exit 1
 
 gcc_dir="$(cd "$(dirname "$gcc")" && pwd)"
 PATH="$gcc_dir:$PATH"
@@ -65,13 +90,15 @@ apply_mutation() {
 }
 
 if ! build_tester; then
-    echo "SKIP: cannot build the tester: $(tail -n 1 "$work/build.log")"
-    exit 77
+    echo "FAIL the tester under test does not build: $(tail -n 1 "$work/build.log")"
+    exit 1
 fi
 "$cc" -O1 -std=c17 -I "$tree/include" -o "$tree/yan_gen" "$tree/tools/yan_gen.c" \
-    > "$work/gen.log" 2>&1 || { echo "SKIP: cannot build the generator"; exit 77; }
+    > "$work/gen.log" 2>&1 ||
+    { echo "FAIL the generator under test does not build: $(tail -n 1 "$work/gen.log")"; exit 1; }
 for seed in 1 2 3 4; do
-    "$tree/yan_gen" --seed "$seed" --ops 96 --output "$work/generated$seed.S" || exit 77
+    "$tree/yan_gen" --seed "$seed" --ops 96 --output "$work/generated$seed.S" ||
+        { echo "FAIL the generator under test failed to generate seed $seed"; exit 1; }
 done
 
 survivors=0

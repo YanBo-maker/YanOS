@@ -1,4 +1,6 @@
 #include "yan/machine.h"
+#include "yan/transport.h"
+#include "yan/uart.h"
 #include "unity.h"
 
 /* The Guest platform views are included on purpose. Host and Guest are compiled
@@ -8,6 +10,11 @@
 #include "guest_devices.h"
 #include "mtrap.h"
 #include "mtrap_frame.h"
+/* os/platform.h is YanOS's own restatement of the UART map, the transport
+ * channel and the PLIC. It is a Guest header for the same reason as the two
+ * above: a freestanding build cannot include include/yan, so the restatement is
+ * compared here, in the one translation unit that can see both descriptions. */
+#include "platform.h"
 
 static YanMachine machine;
 
@@ -74,6 +81,169 @@ static void guest_device_view_matches_the_host(void)
         TEST_ASSERT_EQUAL_INT(YAN_UNSUPPORTED_INSTRUCTION,
                               yan_cpu_read_csr(&cpu, address, &value));
     }
+}
+
+/* YanOS restates the UART map in os/platform.h exactly as the Guest headers
+ * above restate CLINT and PLIC, and for the same reason. Every restated
+ * constant is compared against the Host header it mirrors, including the one
+ * pair whose names differ: the receive latch is YAN_UART_IRQ_RX_PENDING on the
+ * Host side and YAN_OS_UART_IRQ_RX_PENDING on the Guest side. */
+static void guest_uart_view_matches_the_host(void)
+{
+    TEST_ASSERT_EQUAL_HEX32(YAN_UART_BASE, YAN_OS_UART_BASE);
+    TEST_ASSERT_EQUAL_HEX32(YAN_UART_SIZE, YAN_OS_UART_SIZE);
+
+    TEST_ASSERT_EQUAL_HEX32(YAN_UART_TXDATA, YAN_OS_UART_TXDATA);
+    TEST_ASSERT_EQUAL_HEX32(YAN_UART_RXDATA, YAN_OS_UART_RXDATA);
+    TEST_ASSERT_EQUAL_HEX32(YAN_UART_STATUS, YAN_OS_UART_STATUS);
+    TEST_ASSERT_EQUAL_HEX32(YAN_UART_CONTROL, YAN_OS_UART_CONTROL);
+    TEST_ASSERT_EQUAL_HEX32(YAN_UART_IRQ_STATUS, YAN_OS_UART_IRQ_STATUS);
+
+    TEST_ASSERT_EQUAL_HEX32(YAN_UART_STATUS_TX_READY,
+                            YAN_OS_UART_STATUS_TX_READY);
+    TEST_ASSERT_EQUAL_HEX32(YAN_UART_STATUS_RX_READY,
+                            YAN_OS_UART_STATUS_RX_READY);
+    TEST_ASSERT_EQUAL_HEX32(YAN_UART_STATUS_CONNECTED,
+                            YAN_OS_UART_STATUS_CONNECTED);
+    TEST_ASSERT_EQUAL_HEX32(YAN_UART_CONTROL_RX_IRQ_ENABLE,
+                            YAN_OS_UART_CONTROL_RX_IRQ_ENABLE);
+    TEST_ASSERT_EQUAL_HEX32(YAN_UART_IRQ_RX_PENDING,
+                            YAN_OS_UART_IRQ_RX_PENDING);
+
+    /* The Guest driver accesses whole words only, because the devices answer no
+     * other width, so the restated offsets must stay word-aligned and distinct:
+     * two registers sharing an offset would make one access answer for both. */
+    const uint32_t offsets[] = {
+        YAN_OS_UART_TXDATA, YAN_OS_UART_RXDATA, YAN_OS_UART_STATUS,
+        YAN_OS_UART_CONTROL, YAN_OS_UART_IRQ_STATUS
+    };
+    const size_t count = sizeof offsets / sizeof offsets[0];
+    for (size_t i = 0; i < count; ++i) {
+        TEST_ASSERT_EQUAL_HEX32(0, offsets[i] % 4);
+        for (size_t j = i + 1; j < count; ++j) {
+            TEST_ASSERT_TRUE(offsets[i] != offsets[j]);
+        }
+    }
+    /* Every restated register must land inside the restated window, and that
+     * window must stay clear of RAM the way the CLINT and PLIC windows do. */
+    TEST_ASSERT_TRUE(YAN_OS_UART_IRQ_STATUS + 4 <= YAN_OS_UART_SIZE);
+    TEST_ASSERT_TRUE(YAN_OS_UART_BASE + YAN_OS_UART_SIZE <= YAN_RAM_BASE);
+}
+
+/* The platform header is where the transport and the UART are mapped onto PLIC
+ * source numbers. The Guest restates those numbers and enables them in its own
+ * copy of the PLIC; a drifted number would make the Guest unmask a source that
+ * belongs to another device. */
+static void guest_plic_sources_match_the_host(void)
+{
+    TEST_ASSERT_EQUAL_HEX32(YAN_MACHINE_PLIC_SOURCE_TRANSPORT,
+                            YAN_OS_PLIC_SOURCE_TRANSPORT);
+    TEST_ASSERT_EQUAL_HEX32(YAN_MACHINE_PLIC_SOURCE_UART,
+                            YAN_OS_PLIC_SOURCE_UART);
+
+    /* Source 0 is reserved, the two named sources are distinct, and both must
+     * be numbers this PLIC can decode: a Guest that enables one of them must
+     * not thereby unmask the other, nor write past the source window. */
+    TEST_ASSERT_TRUE(YAN_OS_PLIC_SOURCE_TRANSPORT != 0);
+    TEST_ASSERT_TRUE(YAN_OS_PLIC_SOURCE_UART != 0);
+    TEST_ASSERT_TRUE(YAN_OS_PLIC_SOURCE_TRANSPORT != YAN_OS_PLIC_SOURCE_UART);
+    TEST_ASSERT_TRUE(YAN_OS_PLIC_SOURCE_TRANSPORT <=
+                    (uint32_t)YAN_PLIC_SOURCE_MAX);
+    TEST_ASSERT_TRUE(YAN_OS_PLIC_SOURCE_UART <= (uint32_t)YAN_PLIC_SOURCE_MAX);
+}
+
+/* The transport is the second device the Guest drives, and every constant of
+ * its map is held against include/yan/transport.h. The two names carrying a
+ * _REG suffix do so on both sides: MAGIC and VERSION also name values. */
+static void guest_transport_view_matches_the_host(void)
+{
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_BASE, YAN_OS_TRANSPORT_BASE);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_SIZE, YAN_OS_TRANSPORT_SIZE);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_MAGIC, YAN_OS_TRANSPORT_MAGIC);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_VERSION, YAN_OS_TRANSPORT_VERSION);
+
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_MAGIC_REG,
+                            YAN_OS_TRANSPORT_MAGIC_REG);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_VERSION_REG,
+                            YAN_OS_TRANSPORT_VERSION_REG);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_STATUS, YAN_OS_TRANSPORT_STATUS);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_RING_BASE, YAN_OS_TRANSPORT_RING_BASE);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_RING_SIZE, YAN_OS_TRANSPORT_RING_SIZE);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_G2H_HEAD, YAN_OS_TRANSPORT_G2H_HEAD);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_G2H_TAIL, YAN_OS_TRANSPORT_G2H_TAIL);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_H2G_HEAD, YAN_OS_TRANSPORT_H2G_HEAD);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_H2G_TAIL, YAN_OS_TRANSPORT_H2G_TAIL);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_DOORBELL, YAN_OS_TRANSPORT_DOORBELL);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_IRQ_STATUS,
+                            YAN_OS_TRANSPORT_IRQ_STATUS);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_IRQ_ENABLE,
+                            YAN_OS_TRANSPORT_IRQ_ENABLE);
+
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_STATUS_HOST_READY,
+                            YAN_OS_TRANSPORT_STATUS_HOST_READY);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_STATUS_G2H_FULL,
+                            YAN_OS_TRANSPORT_STATUS_G2H_FULL);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_STATUS_H2G_EMPTY,
+                            YAN_OS_TRANSPORT_STATUS_H2G_EMPTY);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_STATUS_OVERFLOW_DETECTED,
+                            YAN_OS_TRANSPORT_STATUS_OVERFLOW_DETECTED);
+    TEST_ASSERT_EQUAL_HEX32(YAN_TRANSPORT_IRQ_H2G_DATA,
+                            YAN_OS_TRANSPORT_IRQ_H2G_DATA);
+
+    /* Word alignment and distinctness matter more here than at the UART: the
+     * twelve registers are one contiguous block, so a mis-typed offset lands on
+     * a neighbour instead of in an unmapped hole, and two registers sharing an
+     * offset would make one access answer for both. */
+    const uint32_t offsets[] = {
+        YAN_OS_TRANSPORT_MAGIC_REG,   YAN_OS_TRANSPORT_VERSION_REG,
+        YAN_OS_TRANSPORT_STATUS,      YAN_OS_TRANSPORT_RING_BASE,
+        YAN_OS_TRANSPORT_RING_SIZE,   YAN_OS_TRANSPORT_G2H_HEAD,
+        YAN_OS_TRANSPORT_G2H_TAIL,    YAN_OS_TRANSPORT_H2G_HEAD,
+        YAN_OS_TRANSPORT_H2G_TAIL,    YAN_OS_TRANSPORT_DOORBELL,
+        YAN_OS_TRANSPORT_IRQ_STATUS,  YAN_OS_TRANSPORT_IRQ_ENABLE
+    };
+    const size_t count = sizeof offsets / sizeof offsets[0];
+    for (size_t i = 0; i < count; ++i) {
+        TEST_ASSERT_EQUAL_HEX32(0, offsets[i] % 4);
+        for (size_t j = i + 1; j < count; ++j) {
+            TEST_ASSERT_TRUE(offsets[i] != offsets[j]);
+        }
+    }
+    TEST_ASSERT_TRUE(YAN_OS_TRANSPORT_IRQ_ENABLE + 4 <= YAN_OS_TRANSPORT_SIZE);
+    TEST_ASSERT_TRUE(YAN_OS_TRANSPORT_BASE + YAN_OS_TRANSPORT_SIZE <=
+                     YAN_RAM_BASE);
+    /* The UART and the transport are neighbours in the same low window. One
+     * address answering for two devices would make a Guest access depend on
+     * which device the bus consulted first. */
+    TEST_ASSERT_TRUE(YAN_OS_UART_BASE + YAN_OS_UART_SIZE <=
+                         YAN_OS_TRANSPORT_BASE ||
+                     YAN_OS_TRANSPORT_BASE + YAN_OS_TRANSPORT_SIZE <=
+                         YAN_OS_UART_BASE);
+}
+
+/* The controller now has three descriptions of one map: the Host header, the
+ * verification Guest's own copy, and the runtime's copy in os/platform.h. The
+ * first two are compared above; this holds the third against the Host. */
+static void guest_plic_map_matches_the_host(void)
+{
+    TEST_ASSERT_EQUAL_HEX32(YAN_PLIC_BASE, YAN_OS_PLIC_BASE);
+    TEST_ASSERT_EQUAL_HEX32(YAN_PLIC_SIZE, YAN_OS_PLIC_SIZE);
+    TEST_ASSERT_EQUAL_HEX32(YAN_PLIC_PRIORITY, YAN_OS_PLIC_PRIORITY);
+    TEST_ASSERT_EQUAL_HEX32(YAN_PLIC_PENDING, YAN_OS_PLIC_PENDING);
+    TEST_ASSERT_EQUAL_HEX32(YAN_PLIC_ENABLE_M, YAN_OS_PLIC_ENABLE_M);
+    TEST_ASSERT_EQUAL_HEX32(YAN_PLIC_THRESHOLD_M, YAN_OS_PLIC_THRESHOLD_M);
+    TEST_ASSERT_EQUAL_HEX32(YAN_PLIC_CLAIM_M, YAN_OS_PLIC_CLAIM_M);
+    TEST_ASSERT_EQUAL_HEX32(YAN_PLIC_SOURCE_COUNT, YAN_OS_PLIC_SOURCE_COUNT);
+    TEST_ASSERT_EQUAL_HEX32(YAN_PLIC_SOURCE_MAX, YAN_OS_PLIC_SOURCE_MAX);
+
+    /* The per-source priority array is indexed by source number and must end
+     * before the pending word begins, or a Guest setting the priority of the
+     * highest source would write into a different register. */
+    TEST_ASSERT_TRUE(YAN_OS_PLIC_PRIORITY +
+                         4 * (uint32_t)YAN_OS_PLIC_SOURCE_MAX <
+                     YAN_OS_PLIC_PENDING);
+    TEST_ASSERT_TRUE(YAN_OS_PLIC_CLAIM_M + 4 <= YAN_OS_PLIC_SIZE);
+    TEST_ASSERT_TRUE(YAN_OS_PLIC_BASE + YAN_OS_PLIC_SIZE <= YAN_RAM_BASE);
 }
 
 /* The trap vector's frame is an ABI: the assembly writes it and the C
@@ -221,6 +391,10 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(guest_device_view_matches_the_host);
+    RUN_TEST(guest_uart_view_matches_the_host);
+    RUN_TEST(guest_plic_sources_match_the_host);
+    RUN_TEST(guest_transport_view_matches_the_host);
+    RUN_TEST(guest_plic_map_matches_the_host);
     RUN_TEST(trap_frame_is_a_consistent_abi);
     RUN_TEST(guest_instructions_reach_clint_and_plic);
     RUN_TEST(boot_contract_installs_the_vector);
