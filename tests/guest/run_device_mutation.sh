@@ -68,9 +68,9 @@
 #       [--ignore REGEX] [--sanitizers] [--keep]
 #
 #   --source DIR   repository to copy; it is never modified
-#   --work DIR     scratch directory for the copy, its build and its logs; it
-#                  is rewritten on every run (only its tree/ subdirectory is
-#                  removed), and two concurrent runs must not share one
+#   --work DIR     scratch root; each run creates and rewrites its own
+#                  run.<pid> directory inside it, so a shared root (which the
+#                  CMake registration uses) is safe for concurrent runs
 #   --target NAME  uart, transport, platform, plic or all (default: all)
 #   --unity DIR    Unity source tree; without it an existing
 #                  $source/build/*/_deps/unity-src is reused, otherwise CMake
@@ -172,7 +172,13 @@ if [ -n "$unity" ]; then
     unity_arg="-DFETCHCONTENT_SOURCE_DIR_UNITY=$unity"
 fi
 
-tree="$work/tree"
+# One private directory per run: $work is shared by design (the CMake
+# registration points every mutation check at one root), so the tree, the build
+# and the logs live under run.<pid>. Two concurrent runs then cannot delete each
+# other's sources, which is exactly what happened once with a fixed path.
+run="$work/run.$$"
+mkdir -p "$run"
+tree="$run/tree"
 build="$tree/build/device-mutation"
 
 echo "device mutation check"
@@ -185,16 +191,16 @@ echo "  tools     : $tools_flag"
 echo "  excluded  : $exclude"
 
 rm -rf "$tree"
-mkdir -p "$work" "$tree"
+mkdir -p "$tree"
 # The work copy excludes build/ and .git/: they are large and irrelevant, and
 # nothing below ever writes to $source.
 tar -C "$source" --exclude=./build --exclude=./.git -cf - . | tar -C "$tree" -xf - \
     || { echo "SKIP: cannot copy $source into $tree"; exit 77; }
 [ -f "$tree/src/uart.c" ] || { echo "SKIP: the copy has no src/uart.c"; exit 77; }
 
-mkdir -p "$work/pristine"
+mkdir -p "$run/pristine"
 cp -a "$tree/src/uart.c" "$tree/src/transport.c" "$tree/src/machine.c" \
-      "$tree/src/interrupt.c" "$work/pristine/"
+      "$tree/src/interrupt.c" "$run/pristine/"
 
 # --------------------------------------------------------------- probe suite
 
@@ -929,11 +935,11 @@ configure_tree() {
     # shellcheck disable=SC2086
     cmake -S "$tree" -B "$build" -DCMAKE_BUILD_TYPE=Debug \
         -DYAN_BUILD_TOOLS=$tools_flag $sanitizer_flag $unity_arg \
-        > "$work/configure.log" 2>&1
+        > "$run/configure.log" 2>&1
 }
 
 build_tree() {
-    cmake --build "$build" -j "$jobs" > "$work/build.log" 2>&1
+    cmake --build "$build" -j "$jobs" > "$run/build.log" 2>&1
 }
 
 # The four translation units this script mutates. Their objects are deleted
@@ -950,20 +956,20 @@ drop_mutated_objects() {
 }
 
 if ! configure_tree; then
-    echo "SKIP: cannot configure the work copy: $(tail -n 1 "$work/configure.log")"
+    echo "SKIP: cannot configure the work copy: $(tail -n 1 "$run/configure.log")"
     exit 77
 fi
 if ! build_tree; then
     echo "SKIP: cannot build the work copy:"
-    grep -E 'error|Error' "$work/build.log" | head -n 5
+    grep -E 'error|Error' "$run/build.log" | head -n 5
     exit 77
 fi
 
 # The probe and the standing suites must be green before any mutation is
 # planted, otherwise a failure afterwards proves nothing.
-if ! run_ctest "$work/baseline.log"; then
+if ! run_ctest "$run/baseline.log"; then
     echo "SKIP: the unmutated work copy does not pass its own suite:"
-    sed -n '/The following tests FAILED/,$p' "$work/baseline.log" | head -n 12
+    sed -n '/The following tests FAILED/,$p' "$run/baseline.log" | head -n 12
     echo "      an unrelated in-flight failure can be excluded with --ignore REGEX"
     exit 77
 fi
@@ -1157,7 +1163,7 @@ total=0
 # rebuild and keep testing the mutant.
 restore_sources() {
     for file in uart.c transport.c machine.c interrupt.c; do
-        cp "$work/pristine/$file" "$tree/src/$file"
+        cp "$run/pristine/$file" "$tree/src/$file"
         touch "$tree/src/$file"
     done
 }
@@ -1172,7 +1178,7 @@ failure_kind() {
     # stdbuf keeps the assertion lines that precede a crash: a mutant that
     # fails an assertion and then segfaults would otherwise lose its buffered
     # output and look like a pure crash. The crash is still reported below.
-    local name="$1" out="$work/out-$1.log"
+    local name="$1" out="$run/out-$1.log"
     local unbuffered=""
     command -v stdbuf >/dev/null 2>&1 && unbuffered="stdbuf -o0 -e0"
     # stdbuf uses LD_PRELOAD, which makes ASan refuse to start unless the link
@@ -1214,13 +1220,13 @@ for name in $list; do
     drop_mutated_objects
     if ! build_tree; then
         echo "FAIL mutant $name did not build (not an assertion failure):"
-        grep -E ' error|Error' "$work/build.log" | head -n 3 | sed 's/^/    /'
+        grep -E ' error|Error' "$run/build.log" | head -n 3 | sed 's/^/    /'
         survivors=$((survivors + 1)); survivor_names="$survivor_names $name"
         nonassert_names="$nonassert_names $name"
         continue
     fi
 
-    run_ctest "$work/mutant-$name.log"
+    run_ctest "$run/mutant-$name.log"
     suite_status=$?
     if [ "$suite_status" -eq 0 ]; then
         echo "SURVIVED mutant $name: the whole suite still passed"
@@ -1239,7 +1245,7 @@ for name in $list; do
                 sub(/.*: /, "", token)
                 print token
             }
-        }' "$work/mutant-$name.log" | sort -u)"
+        }' "$run/mutant-$name.log" | sort -u)"
 
     hits=""
     pseudo=""
@@ -1248,7 +1254,7 @@ for name in $list; do
         if [ "$(failure_kind "$test_name")" = "assertion" ]; then
             hits="$hits $test_name"
             [ -z "$first_assert" ] && \
-                first_assert="$(grep -m 1 ':FAIL:' "$work/out-$test_name.log")"
+                first_assert="$(grep -m 1 ':FAIL:' "$run/out-$test_name.log")"
         else
             pseudo="$pseudo $test_name"
         fi
@@ -1265,8 +1271,8 @@ for name in $list; do
     if [ -n "$pseudo" ]; then
         echo "    NOTE non-assertion failures in:$pseudo (crash/sanitizer/timeout - not counted)"
         for pseudo_name in $pseudo; do
-            [ -s "$work/out-$pseudo_name.log" ] && \
-                echo "      $pseudo_name: $(tail -n 1 "$work/out-$pseudo_name.log")"
+            [ -s "$run/out-$pseudo_name.log" ] && \
+                echo "      $pseudo_name: $(tail -n 1 "$run/out-$pseudo_name.log")"
         done
         nonassert_names="$nonassert_names $name"
     fi
@@ -1276,17 +1282,17 @@ done
 # copy must pass its own suite again.
 restore_sources
 for file in uart.c transport.c machine.c interrupt.c; do
-    if [ "$(md5sum < "$tree/src/$file")" != "$(md5sum < "$work/pristine/$file")" ]; then
+    if [ "$(md5sum < "$tree/src/$file")" != "$(md5sum < "$run/pristine/$file")" ]; then
         echo "FAIL the work copy was not restored: src/$file differs from the original"
         survivors=$((survivors + 1))
     fi
 done
 bash_restore_fail=0
-if ! cmake --build "$build" -j "$jobs" --clean-first > "$work/build.log" 2>&1; then
+if ! cmake --build "$build" -j "$jobs" --clean-first > "$run/build.log" 2>&1; then
     echo "FAIL the restored work copy does not build again"
     bash_restore_fail=1
-elif ! run_ctest "$work/restored.log"; then
-    echo "FAIL the restored work copy does not pass its own suite (see $work/restored.log)"
+elif ! run_ctest "$run/restored.log"; then
+    echo "FAIL the restored work copy does not pass its own suite (see $run/restored.log)"
     bash_restore_fail=1
 fi
 
@@ -1309,8 +1315,9 @@ if [ "$survivors" -ne 0 ]; then
 fi
 if [ "$keep" -eq 1 ]; then
     echo "  work tree kept: $tree"
+    echo "  run directory : $run"
 else
     rm -rf "$tree"
-    echo "  work tree removed (use --keep to inspect it); logs: $work/mutant-*.log"
+    echo "  work tree removed (use --keep to inspect it); logs: $run/mutant-*.log"
 fi
 exit 0
