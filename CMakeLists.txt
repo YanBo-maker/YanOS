@@ -159,6 +159,22 @@ if(BUILD_TESTING)
                                                       TIMEOUT 300)
     endif()
 
+    # The block request protocol runs on the channel, so this suite has three
+    # faces and the script drives all of them: a host-only unit face that can
+    # place chosen bytes in a ring (which no guest can be asked to do), a guest
+    # face that speaks the protocol end to end, and a pass through yan_run
+    # --disk for the production path.
+    if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
+        add_test(NAME guest_block
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_block.sh"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${CMAKE_BINARY_DIR}/block")
+        set_tests_properties(guest_block PROPERTIES SKIP_RETURN_CODE 77
+                                                    TIMEOUT 300)
+    endif()
+
     # Mutation checks live behind one switch, not one switch per component. Both
     # suites plant defects in a private copy, rebuild and run the tests there,
     # and count a defect as detected only when an assertion fails; crashes and
@@ -208,6 +224,16 @@ if(BUILD_TESTING)
         # Planted-defect run for the block protocol: eight on the host side, five
         # in the guest frame layer. The gate counts only assertion failures - a
         # hang, a crash or a sanitizer report is a harness error, not a detection.
+        add_test(NAME guest_block_mutation
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_block_mutation.sh"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${YAN_MUTATION_WORK_ROOT}/block"
+                    --cc "${CMAKE_C_COMPILER}")
+        set_tests_properties(guest_block_mutation PROPERTIES SKIP_RETURN_CODE 77
+                                                           TIMEOUT 900)
+
         # Planted-defect run for the combined case. fake-wait replaces the
         # runtime's wait with yield plus busy-wait polling and passes every
         # functional check - only the blocked-window assertion separates it from
