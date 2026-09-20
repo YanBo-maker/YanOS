@@ -315,8 +315,19 @@ int main(int argc, char **argv)
         }
         /* Served before the step, not after: publishing a response asserts the
          * channel's interrupt line, and the step that samples the device lines
-         * is the step that can deliver it. */
-        if (disk_attached && doorbell_rung) {
+         * is the step that can deliver it.
+         *
+         * The condition is the ring's readable count as well as the bell. The
+         * bell is an edge, but "there is a request I could not answer" is a
+         * level: the service declines to answer while the reply does not fit in
+         * the host-to-guest ring, and the request stays in the other ring. A
+         * guest that is blocked waiting for that reply will never ring again, so
+         * serving only on the edge strands an accepted request forever. Retrying
+         * while request bytes remain is what closes that window; it stops as
+         * soon as the guest drains a reply and the answer fits. */
+        if (disk_attached &&
+            (doorbell_rung ||
+             yan_transport_host_readable(&machine.transport) > 0)) {
             doorbell_rung = 0;
             (void)yan_host_block_service(&block, &machine.transport, &machine.ram,
                                          options.base);
