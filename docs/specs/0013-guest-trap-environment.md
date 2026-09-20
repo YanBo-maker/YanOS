@@ -76,7 +76,7 @@ Host 与 Guest 分别编译，Guest 不能包含 Host 的 `include/yan/interrupt
 
 **一、CLINT 地址宏：已实现。** `tests/act4/rvmodel_macros.h` 现在声明 `RVMODEL_MSIP_ADDRESS`、`RVMODEL_MTIMECMP_ADDRESS`、`RVMODEL_MTIME_ADDRESS`，基址 `YANOS_CLINT_BASE_ADDRESS = 0x02000000`，偏移与 Host 的 `include/yan/interrupt.h` 一致。注意框架在 `sail_macros.h` 里 `#undef` 并以 `SAIL_*` 值替换这些宏，所以声明**不改变生成代码**；它改变的是可检测性：`run_act4.sh` 现在汇编一段探针，若框架的有效地址与 DUT 声明的地址不一致（含宏未定义）就直接失败，不再是静默指向别的寄存器。
 
-**二、外部中断：不可实现，保留显式 SKIP。** 框架的 `RVMODEL_SET_MEXT_INT` 写的是 Sail 的测试中断发生器设备（`SAIL_SIG_ADDRESS`），而 YanOS 的 PLIC 没有 raise 寄存器，只有 Host 能通过 `yan_plic_raise()` 拉起一条源线。要让 Guest 自己拉起外部源就得新增一个设备，属于本阶段明确排除的范围。因此这两个宏保持 `.error`，语料检查继续拒绝调用它们的用例。
+**二、外部中断：不可实现，保留显式 SKIP。** 框架的 `RVMODEL_SET_MEXT_INT` 写的是 Sail 的测试中断发生器设备（`SAIL_SIG_ADDRESS`），而 YanOS 的 PLIC 没有 Guest 可写的源寄存器，源线只能由平台按设备电平用 `yan_plic_set_level()` 驱动（本阶段早期该接口名为 `yan_plic_raise()`，已由 [0016](0016-plic-gateway-and-irq-lines.md) 取代）。要让 Guest 自己拉起外部源就得新增一个设备，属于本阶段明确排除的范围。因此这两个宏保持 `.error`，语料检查继续拒绝调用它们的用例。
 
 **三、陷阱处理器与中断助手：仍被 `STANDARD_SM_SUPPORTED` 挡住。** 框架把陷阱处理器的实例化与整套 M-mode 中断助手（`rvtest_set_mtime_int_m`、`rvtest_set_msw_int_m` 等）都放在 `#ifdef STANDARD_SM_SUPPORTED` 之内，而该开关的前提是 `medeleg` / `mideleg` 委托、PMP 与 S-mode。`mie` / `mip` / CLINT 现在已经存在，但不是它需要的东西。结论：`tests/rv32i/I` 与 `tests/rv32i/M` 中依赖陷阱处理器的 7 个分支 / 跳转用例继续报 SKIP，并在 `run_act4.sh` 的输出里写明原因，绝不报成通过。
 
