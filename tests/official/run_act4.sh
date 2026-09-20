@@ -10,15 +10,18 @@
 # and the comparison is a byte-for-byte `cmp`, not a pass/fail word.
 #
 # Scope and known boundaries:
-#   * Only `tests/rv32i/I` and `tests/rv32i/M` are selected. YanOS has no
-#     interrupt controller, no timer, no S/U mode and no PMP, so rv32i/Zicsr,
-#     rv32i/priv and everything above go unrun.
+#   * Only `tests/rv32i/I` and `tests/rv32i/M` are selected. YanOS has a
+#     single-hart CLINT and a single-context M-mode PLIC, but no S/U mode, no
+#     interrupt delegation and no PMP, and this path does not adapt the
+#     framework's interrupt flow, so rv32i/Zicsr, rv32i/priv and everything
+#     above go unrun.
 #   * `UNROLLSZ=0` is required: the framework pads the entry with 2-byte
 #     compressed instructions, which a hart without the C extension cannot
 #     execute.
 #   * Tests that need a trap handler (misaligned branch and jump targets) are
-#     reported as SKIP: the framework's M-mode boot path needs CSR state
-#     (mie/mip/medeleg/mideleg) that YanOS does not implement.
+#     reported as SKIP: the framework's M-mode boot path needs delegation CSR
+#     state (`medeleg`/`mideleg`) that YanOS does not implement. `mie`/`mip`
+#     themselves now exist.
 #   * The tests' own pass/fail word is not used as the verdict here. The ACT4
 #     framework normally runs the reference model during the build and compiles
 #     the expected results into the image; this script compares signatures
@@ -114,7 +117,7 @@ for source in "$suite"/tests/rv32i/I/*.S "$suite"/tests/rv32i/M/*.S; do
     # macro is refused before it runs.
     if grep -qE 'RVMODEL_(SET|CLR)_(MEXT|MSW)_INT|RVMODEL_MSIP_ADDRESS|RVMODEL_MTIME_ADDRESS' "$source"; then
         skipped=$((skipped + 1))
-        skip_reasons+=("$name: invokes an interrupt or timer macro, which YanOS does not implement")
+        skip_reasons+=("$name: invokes an interrupt or timer macro, which this ACT4 path does not wire to the YanOS CLINT/PLIC")
         continue
     fi
 

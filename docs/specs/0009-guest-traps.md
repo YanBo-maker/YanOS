@@ -2,7 +2,7 @@
 
 ## INTENTION
 
-把 CPU 的指令与访存故障交给 Guest 处理，完成异常进入、CSR 访问和异常返回。当前仅支持 M-mode，采用直接异常入口，不实现中断、U/S 模式、分页或委托。
+把 CPU 的指令与访存故障交给 Guest 处理，完成异常进入、CSR 访问和异常返回。当前仅支持 M-mode，采用直接异常入口，不实现 U/S 模式、分页或委托。中断（`mie` / `mip`、CLINT、PLIC）由[机器模式中断规格](0012-machine-interrupts.md)定义。
 
 ## SPEC
 
@@ -36,7 +36,8 @@ mepc 保存故障指令 PC，低两位清零。跳转目标错误记录跳转指
 | 0x341 | mepc | 32 位读写，低两位固定零，复位 0 |
 | 0x342 | mcause | 保存 32 位写入值，复位 0；硬件仅产生表中同步异常码 |
 | 0x343 | mtval | 32 位读写，复位 0 |
-| 0x301 / 0x304 / 0x310 / 0x344 | misa / mie / mstatush / mip | 固定读零，写入忽略；misa 暂不提供 ISA 探测值 |
+| 0x301 / 0x310 | misa / mstatush | 固定读零，写入忽略；misa 暂不提供 ISA 探测值 |
+| 0x304 / 0x344 | mie / mip | 由[机器模式中断规格](0012-machine-interrupts.md)定义，本表不再固定读零 |
 | 0xf11～0xf14 | mvendorid / marchid / mimpid / mhartid | 只读零 |
 
 其余 CSR 未实现，Guest 访问产生非法指令异常。提供 Host 的 `yan_cpu_read_csr` / `yan_cpu_write_csr` 用于状态检查和配置；Host 调用失败不触发 Guest 异常。结构体用于观察，CSR 写入经过接口。

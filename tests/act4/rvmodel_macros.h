@@ -1,9 +1,10 @@
 # rvmodel_macros.h
 # YanOS DUT-specific macro definitions for the RISC-V ACT4 framework.
 #
-# YanOS implements RV32IM, Zicsr for a six-register M-mode set (mstatus, mtvec,
-# mscratch, mepc, mcause, mtval) and Zifencei. It has no interrupt controller,
-# no timer, no S/U mode and no PMP.
+# YanOS implements RV32IM, Zicsr for the M-mode CSR set (mstatus, mtvec,
+# mscratch, mepc, mcause, mtval, mie, mip) and Zifencei. The platform has a
+# single-hart CLINT and a single-context M-mode PLIC. It has no S/U mode, no
+# interrupt delegation, no interrupt nesting and no PMP.
 #
 # Note on the interrupt macros below. They are defined to a hard assembler
 # failure, but that guard does NOT take effect in this framework: the
@@ -13,6 +14,13 @@
 # any test whose source invokes an interrupt macro. The bodies here are kept
 # only so a hand-built test that includes this header without the framework
 # still fails loudly instead of writing to an address that does not exist.
+#
+# The registers behind those macros now exist, but this ACT4 path still does not
+# adapt the framework's interrupt flow (no RVMODEL_MSIP_ADDRESS /
+# RVMODEL_MTIME_ADDRESS plumbing, and the framework's standard M-mode startup
+# still writes delegation CSRs YanOS does not have), so the corpus check keeps
+# refusing every interrupt case instead of reporting a result it cannot stand
+# behind.
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
@@ -52,9 +60,9 @@
 
 ##### UNSUPPORTED CAPABILITIES #####
 
-# YanOS has no PLIC and no CLINT. These macros must exist for the framework's
-# checks. See the note at the top of this file: the framework replaces them, so
-# the effective guard is the corpus check in tests/official/run_act4.sh.
+# These macros must exist for the framework's checks. See the note at the top of
+# this file: the framework replaces them, so the effective guard is the corpus
+# check in tests/official/run_act4.sh.
 #define RVMODEL_SET_MEXT_INT(_R1, _R2) .error "YanOS has no external interrupt controller"
 #define RVMODEL_CLR_MEXT_INT(_R1, _R2) .error "YanOS has no external interrupt controller"
 #define RVMODEL_SET_MSW_INT(_R1, _R2)  .error "YanOS has no software interrupt register"
@@ -65,8 +73,8 @@
 #define RVMODEL_TIMER_INT_SOON_DELAY 1
 #define RVMODEL_MAX_CYCLES_PER_TIMER_TICK 1
 
-# The standard M-mode CSR bank the framework assumes (mie, mip, delegation,
-# PMP) does not exist on YanOS, so STANDARD_SM_SUPPORTED is deliberately left
-# unset and that initialisation block is skipped.
+# The framework's standard M-mode CSR bank also assumes delegation and PMP,
+# which YanOS does not implement, so STANDARD_SM_SUPPORTED stays unset and that
+# initialisation block is skipped even though mie and mip now exist.
 
 #endif // _RVMODEL_MACROS_H
