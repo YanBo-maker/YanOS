@@ -45,7 +45,18 @@ add_library(yan_machine STATIC src/ram.c src/bus.c src/machine.c src/cpu.c src/c
 target_include_directories(yan_machine PUBLIC include)
 target_compile_options(yan_machine PRIVATE ${YAN_WARNINGS})
 
+# The same freestanding filesystem core is used by Guest builds and native
+# tests/tools; Host files and the transport adapter stay outside this library.
+add_library(yan_fs STATIC os/yanfs.c)
+target_include_directories(yan_fs PUBLIC os)
+target_compile_options(yan_fs PRIVATE ${YAN_WARNINGS})
+
 if(YAN_BUILD_TOOLS)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_executable(yan_mkfs tools/yan_mkfs.c)
+        target_link_libraries(yan_mkfs PRIVATE yan_fs)
+        target_compile_options(yan_mkfs PRIVATE ${YAN_WARNINGS})
+    endif()
     add_executable(yan_run tools/yan_run.c tools/host_file.c tools/host_terminal.c
                             tools/host_block.c tools/host_disk.c)
     target_link_libraries(yan_run PRIVATE yan_machine)
@@ -75,7 +86,29 @@ if(BUILD_TESTING)
         URL_HASH SHA256=a197ea06556f524e378861e503fcfe2fe040447c7b90540ad86b653b13245ae4)
     FetchContent_MakeAvailable(unity)
 
+    add_executable(test_yanfs tests/test_yanfs.c)
+    target_link_libraries(test_yanfs PRIVATE yan_fs unity::framework)
+    target_compile_options(test_yanfs PRIVATE ${YAN_WARNINGS})
+    add_test(NAME yanfs COMMAND test_yanfs)
+    set_tests_properties(yanfs PROPERTIES TIMEOUT 30)
+
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Native platform/framing doubles exercise the actual adapter source;
+        # real cooperative runtime integration is covered by guest_yanfs.
+        add_executable(test_yanfs_adapter tests/test_yanfs_adapter.c)
+        target_link_libraries(test_yanfs_adapter PRIVATE yan_fs unity::framework)
+        target_compile_options(test_yanfs_adapter PRIVATE ${YAN_WARNINGS})
+        add_test(NAME yanfs_adapter COMMAND test_yanfs_adapter)
+        set_tests_properties(yanfs_adapter PROPERTIES TIMEOUT 30)
+    endif()
+
     if(YAN_BUILD_TOOLS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_executable(yan_mkfs_fault tools/yan_mkfs.c tests/yanfs_mkfs_fault.c)
+        target_link_libraries(yan_mkfs_fault PRIVATE yan_fs)
+        target_compile_options(yan_mkfs_fault PRIVATE ${YAN_WARNINGS})
+        target_link_options(yan_mkfs_fault PRIVATE
+                            -Wl,--wrap=fwrite -Wl,--wrap=fflush -Wl,--wrap=fclose
+                            -Wl,--wrap=fseeko)
         # Test-only executor: inject a close error for one fixture image after
         # the real fclose, to exercise the final Host exit status after PASS.
         add_executable(yan_run_disk_close_fault tools/yan_run.c tools/host_file.c
@@ -120,6 +153,19 @@ if(BUILD_TESTING)
     # builds anything; registering it here puts it in the default suite as well.
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
+        add_test(NAME yanfs_mutation_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_yanfs_mutation_gate.py")
+        set_tests_properties(yanfs_mutation_gate PROPERTIES TIMEOUT 120)
+        if(TARGET yan_mkfs_fault)
+            add_test(NAME yanfs_mkfs
+                COMMAND "${Python3_EXECUTABLE}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_yanfs_mkfs.py"
+                        --mkfs "$<TARGET_FILE:yan_mkfs>"
+                        --fault-mkfs "$<TARGET_FILE:yan_mkfs_fault>"
+                        --work "${CMAKE_BINARY_DIR}/yanfs-mkfs")
+            set_tests_properties(yanfs_mkfs PROPERTIES TIMEOUT 120)
+        endif()
         add_test(NAME persistent_combined_gate
             COMMAND "${Python3_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/test_persistent_combined_gate.py")
@@ -140,6 +186,17 @@ if(BUILD_TESTING)
     # NEMU cannot mirror.
     if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        if(TARGET yan_mkfs)
+            add_test(NAME guest_yanfs
+                COMMAND "${Python3_EXECUTABLE}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_yanfs.py"
+                        --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                        --gcc "${YAN_RISCV_GCC}"
+                        --run "$<TARGET_FILE:yan_run>"
+                        --mkfs "$<TARGET_FILE:yan_mkfs>"
+                        --work "${CMAKE_BINARY_DIR}/guest-yanfs")
+            set_tests_properties(guest_yanfs PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+        endif()
         set(_yan_close_fault_args)
         if(TARGET yan_run_disk_close_fault)
             list(APPEND _yan_close_fault_args --run-close-fault
@@ -301,6 +358,14 @@ if(BUILD_TESTING)
            "Register the mutation checks with CTest (slow)" OFF)
     if(YAN_BUILD_TOOLS AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND YAN_ENABLE_MUTATION_TESTS)
         find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        add_test(NAME yanfs_mutation
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_yanfs_mutation.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --cc "${CMAKE_C_COMPILER}"
+                    --unity "${unity_SOURCE_DIR}"
+                    --work "${YAN_MUTATION_WORK_ROOT}/yanfs")
+        set_tests_properties(yanfs_mutation PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
         add_test(NAME persistent_block_mutation
             COMMAND "${Python3_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_persistent_mutation.py"

@@ -1,11 +1,11 @@
 # 项目状态
 
-当前阶段：持久化块镜像契约与交付收口。[0020](specs/0020-persistent-block-image.md) 已于 2026-10-03 由项目所有者批准并锁定；[0018](specs/0018-block-protocol.md) 的错误响应格式保持不变，新增解释明确其不保证介质回滚。当前分支为 `codex/persistent-block-image`，实现与验证已完成，交付待用户审查。
+当前阶段：YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0021-yanfs.md) 于 2026-10-03 经项目所有者批准并锁定；格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收按同一格式交付。当前分支为 `codex/yanfs`，持久化后端已交付在 `d2efd72`。
 
-- 规格批准：成功前完整写入并刷新；失败后停用；失败写不承诺回滚或断电持久性。关闭重开只恢复后端可用性。
-- 实现：已有文件后端、协议适配与 CLI 已核对；新增失败后读写拒绝及重开内容边界测试已完成。
-- 验证：2026-10-03 补强后 Release 默认 32/32、Debug ASan/UBSan 默认 32/32、全部变异 7/7 通过；独立审查未发现阻塞项。
-- 用户审查：契约已批准，实现交付与理解程度仍待项目所有者审查。
+- 规格批准：单根目录最多 63 文件，连续 extent 分配，覆盖先写新数据再发布目录；唯一元数据块写失败可能导致拒挂，不承诺断电一致性。
+- 实现：FS 核心、Linux mkfs、Guest 块适配与整体用例已完成；名称与输出边界、失败后的缓存发布、完整响应消费等审查项已修复。
+- 验证：最终 Release 默认 37/37（34.67 s）、ASan/UBSan 默认 37/37（56.59 s）；八组实际变异分别通过，详细命令与证据见本页「验证」。下文 0020 和早期阶段的结果保留为历史，不混作本轮文件系统证据。
+- 用户审查：整体方案已认可，实现交付与理解程度待项目所有者审查。
 
 ## 已完成
 
@@ -37,11 +37,36 @@
 - `yan_gen` 随机 RV32IM 指令流生成器（给定种子确定输出），以及 5 个手写 Guest 用例。
 - C17 / CMake 构建、Unity 单元测试、CTest 及 GitHub Actions。
 
-详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）；**2026-10-03 配置注册默认 32 组、开变异开关 39 组**，见本页「验证」一节。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；各组的通过情况以本页「验证」一节为准。
+详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）；**0020 于 2026-10-03 的配置注册默认 32 组、开变异开关 39 组**，见本页「验证」一节。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；各组的通过情况以本页「验证」一节为准。
 
 ## 验证
 
-### 本轮验证：2026-10-03
+### YanFS 初版（2026-10-03）
+
+WSL Linux、GCC 11.4、C17 严格警告，启用 `YAN_BUILD_TOOLS`，具备 Python、Unity 与 RISC-V 交叉工具链，未配置外部参考模型。当前默认注册 37 组；Release 开启变异后共 45 组，包含八组实际变异。默认的 `yanfs_mutation_gate` 是分类器负控，不能被宽泛的 `-E mutation` 排除。
+
+- Release 默认：`ctest --test-dir build/yanfs-release -E '_mutation$' --output-on-failure`，37/37，34.67 s。
+- Debug ASan/UBSan 默认（变异关闭）：`ctest --test-dir build/yanfs-asan --output-on-failure`，37/37，56.59 s。
+- 原有七组变异：`ctest --test-dir build/yanfs-release -R mutation -E '^yanfs' --output-on-failure`，7/7，165.16 s。
+- YanFS 变异：`ctest --test-dir build/yanfs-release -R '^yanfs_mutation$' --output-on-failure`，1/1，7.18 s；十个非等价缺陷全部命中指定 owner 断言，0 存活、0 错误归因、0 harness error。
+
+以上均 0 失败、0 SKIP。八组变异分两次运行，不合成为一次八组的耗时。最终默认汇总与完整输出分别保存为两个目录的 `final-default.log`、`final-default-detail.log`；变异为 Release 的 `existing-mutations.log` 和 `final-yanfs-mutation.log`、`final-yanfs-mutation-detail.log`。两个配置均完成 clean-first verbose 构建；构建与验证前后 127 个源码文件的 SHA-256 相同，总审核再算当前文件也无差异。
+
+FS 核心 72 个 Unity 用例、adapter 25 个用例均通过。核心覆盖 CRC、规范名称与填充、保留字节、extent 越界/重叠、碎片与覆盖峰值空间、五个名称接口读前边界检查、输出别名、读失败前缀、BUSY、FAULTED 与缓存发布。adapter 覆盖 16 字节设备错误即时退出、半帧与分段载荷、非法头不等待、完整 wrong-op/tag 响应消费、提交 AGAIN 停用及标签回绕。mkfs 独立 Python oracle 与数据短写、metadata 短写、seek、flush、close 五类 Host 故障均通过。
+
+Guest 整体用例在真实块层与协作式运行时执行创建 5 字节、覆盖 5000 字节、删除和再分配，最终 writer 3175487 步；两个新 reader 进程各 577282 步，镜像逐字节不变。Host 独立构造并核对整个 4096 字节元数据及全部 65536 字节镜像，decoder 自测拒绝 CRC 重封后的名称填充变化、尾零与邻块变化；CRC 损坏、有效 CRC 的 extent 重叠、版本错误分别拒挂。reader-before-writer 负控绑定精确 NOT_FOUND 结果、断言码和阶段；Guest 32 位地址范围越界输入返回 INVALID、不执行 I/O。
+
+分类器的 26 项负控与跨套件异常优先级控制通过；完整 Unity footer、逐项 PASS/FAIL/IGNORE 计数及退出码必须一致。真实 no-effect 对照存活，wrong-owner 不计检出，崩溃、挂起、sanitizer、构建错误归 harness。九条源码/依赖探针通过：仓内源、测试或执行器缺失硬失败 1，只有缺外部编译器或 Unity 才返回 77；检查仅改临时副本。
+
+独立只读源码审查与复审提出的名称扫描、合法响应消费、状态输出与检测力缺口已修复并验收；只读审查不代替执行验证。初版仍限制单根 63 文件与连续 extent，碎片和覆盖峰值空间可能导致 NOSPACE；唯一元数据块失败写可能拒挂，无数据 CRC、断电一致性、自动修复或响应 deadline。生产故障恢复需停止当前 `yan_run`，由新进程重开镜像并挂载；Guest 卸载/重挂不清除 Host 故障。实现与验证完成，交付审查与理解程度由项目所有者判断。
+
+### YanFS 阶段验证与修复记录
+
+task02 首次核心执行为 64 个用例、3 个失败、0 个忽略（`task02.log`）；task03 核心 68 个用例通过，核心与 mkfs 两组 CTest 2/2、0.21 s。task04 核心与 mkfs 通过，adapter 因严格编译后无可执行文件记为 Not Run；task05 核心 Release/ASan 专项通过，adapter 的 empty-ring 夹具未复位导致 24 例中 1 例失败，修正后通过。
+
+task06 Guest 专项 1/1、12.62 s，首次八项变异有 owner 失败记录，但分类器仍错误接受空成功输出及不自洽 footer；task07 完整 footer/计数与异常优先级修复后复验通过。task08 补充合法 CAPACITY 帧回答 WRITE 的完整消费、未挂载 read 字数清零，以及越界/覆盖借旧 extent 两项变异，再运行上述最终默认与专项。修复前默认 Release 37/37、32.89 s，ASan 37/37、55.87 s 保存为 `before-task08-default.log`，属于修复前树，不代替最终结果。
+
+### 历史测量：0020 持久化块镜像（2026-10-03）
 
 WSL Linux、GCC 11.4、`YAN_BUILD_TOOLS=ON`，具备 Python 与 RISC-V 交叉工具链，未配置外部参考模型。默认注册 32 组：22 组 Host/Unity、9 组 Guest 验证及 1 组 Python 门禁负控；Release 开启 `YAN_ENABLE_MUTATION_TESTS=ON` 后注册 39 组。总审核独立核对配置、注册表与本轮保存的命令日志。
 
@@ -131,7 +156,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-按 0020 收口本轮验证、独立审核与提交。随后进入 YanFS 最小磁盘格式设计，由项目所有者审核范围和不变量后实现。
+按 0021 完成文件系统整体实现、验证与独立审核，随后交项目所有者审查。
 
 ### 历史推进记录（M1a / M2a）
 
@@ -184,9 +209,13 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 2026-10-03：0018 原文“v1 的失败是全有全无”保留；补充响应语义与介质状态的边界及 0020 链接。依据为项目所有者在本会话对“成功前刷新、失败后停用、失败写不承诺回滚”方案的“可以”批准；由总审核角色落笔。0018 未改变帧格式或 status 值，文件后端的恢复规则在 0020 定义。
 
+2026-10-03：0021 锁定后补充 read/list 双输出不得彼此重叠，属于经批准的接口语义修正。原文“所有输入、输出缓冲与输出参数不得与 YanFs context（包括 metadata/scratch）重叠”保留，但它没有约束两个输出彼此重叠；原有 read 前缀计数与 list 文件信息、下一槽要求也保留。实际冲突输入是 read_bytes 指向 out：读取四字节 `ABCD` 时，同一地址无法同时保存 `ABCD` 和数值 4；list 的 cursor 指向 info.size_bytes 时，大小 5 的文件位于槽 0，同一字段无法同时保存大小 5 和下一槽 1。总审核发现并报告这两项规格遗漏，主 Agent 向项目所有者提出补充裁定。
+
+新条款禁止 read 的 length 字节内容输出与四字节字数输出重叠，以及整个 YanFsInfo 与四字节 cursor 输出重叠；可检测重叠返回 INVALID，不进行 I/O。read 的有效且非 context 别名字数输出清零，list 两输出保持不变；既定状态检查优先级不变。批准依据为项目所有者本轮明确回复：“read 的内容与字节数输出、list 的文件信息与下一项位置输出，均不得彼此重叠；可检测重叠返回 INVALID，不进行 I/O。read 的有效字节数输出清零，list 的输出保持不变。”由总审核角色落笔，VERIFY 已增加完全/部分重叠和不重叠边界验收计划。实现修正与执行验证仍待完成，此次规格修正不表示 YanFS 已通过。
+
 ## 待定设计
 
 - 后续 RISC-V 指令、特权机制与设备的分阶段支持范围。
 - ACT4 的 DUT 配置与 RVMODEL 宏的落地方式。
-- YanFS 的数据语义。
+- YanFS 后续格式演进、事务恢复与层次目录；初版语义已由 0021 锁定。
 - 项目许可证。

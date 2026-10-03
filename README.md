@@ -6,7 +6,11 @@ YanOS 是一个用于学习计算机系统的项目，计划实现 RISC-V 模拟
 
 ## 状态
 
-YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包含 RAM、CLINT、PLIC、UART 和 Host 传输通道。`os/` 已有控制台驱动、块请求协议与协作式任务运行时。当前工作树的 `yan_run --disk-image FILE` 可挂载已有块镜像，已验证 Guest 写入、正常退出后由新进程读回；失败语义已由项目所有者批准并锁定在 [持久化块镜像规格](docs/specs/0020-persistent-block-image.md)：成功前刷新，失败后停用，失败写不保证回滚；本轮交付验证已通过，实现与验证已完成，交付待用户审查。S/U 模式、分页、抢占式调度和 YanFS 尚未实现。覆盖边界、实现与审查状态见 [STATUS](docs/STATUS.md)。
+YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包含 RAM、CLINT、PLIC、UART 和 Host 传输通道。`os/` 已有控制台驱动、块请求协议与协作式任务运行时。`yan_run --disk-image FILE` 接入已有块镜像，持久化后端已验证 Guest 写入与新进程读回；[0020](docs/specs/0020-persistent-block-image.md) 锁定成功前刷新、失败后停用、失败写不保证回滚的契约。
+
+[YanFS](docs/specs/0021-yanfs.md) 已实现并验证格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收。初版采用单根目录、最多 63 文件和连续 extent；覆盖需要新旧内容同时容纳，碎片可能导致 NOSPACE。元数据写失败可能拒挂，不保证断电一致性，不自动修复。实现与验证已完成，交付待用户审查。
+
+S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
 ## 构建与测试
 
@@ -28,7 +32,18 @@ GCC / Clang 的 Unix 构建可在配置时添加 `-DYAN_ENABLE_SANITIZERS=ON`，
 
 构建 Guest 验证工具可添加 `-DYAN_BUILD_TOOLS=ON`。`yan_run` 支持 RV32 ELF、最大步数、`tohost` 退出、签名区导出和逐条架构状态记录；`yan_difftest` 让 YanCPU 与外部参考模型逐条比较架构状态；`yan_gen` 生成随机 RV32IM 指令流。
 
-变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 可注册七组：`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
+Linux 工具配置另提供 `yan_mkfs`，排他创建新 YanFS 镜像，已有文件或链接会被拒绝：
+
+```sh
+cmake -S . -B build/yanfs -DYAN_BUILD_TOOLS=ON
+cmake --build build/yanfs --parallel
+build/yanfs/yan_mkfs --image new.img --blocks 16
+build/yanfs/yan_run --image guest.elf --disk-image new.img
+```
+
+`guest.elf` 是调用文件系统接口的 Guest 程序；公开接口见 [os/yanfs.h](os/yanfs.h)，Guest 块适配见 [os/yanfs_block.h](os/yanfs_block.h)，可运行的整体例子见 [Guest 验收程序](tests/guest/yanfs_check.c) 与 [验收脚本](tests/guest/run_yanfs.py)。mkfs 与当前工具验证使用 Linux/WSL 路径；Guest 不自动格式化镜像。
+
+变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 可注册八组：`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `yanfs_mutation_gate` 检查分类器判据，随默认回归运行。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
 
 `yan_run` 的默认执行路径由 `guest_golden` 用基准工件逐字节守住：改动默认行为会让它失败，先读差异再决定是否有意为之。生成与重生成见 [`tests/guest/golden/README.md`](tests/guest/golden/README.md)。
 
@@ -58,7 +73,7 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 | YanCPU | 指令执行、寄存器、CSR、异常和中断 |
 | Yan Machine Platform | Bus、RAM、终端、计时器与块设备 |
 | YanOS | 启动、驱动、内存管理和系统接口 |
-| YanFS | 持久化存储，具体语义待定 |
+| YanFS | 单根目录文件系统，格式与失败边界见 [0021](docs/specs/0021-yanfs.md) |
 | Yan Knowledge System | 笔记、问题、关系和探索路径的终端交互 |
 
 代码按三层分区：Host 侧的 `src/` 与 `include/`（CPU、Bus、设备与工具）、YanOS 侧的 `os/`（在 Guest 上运行的 YanOS 代码，如控制台驱动）、以及 `tests/guest/` 下的验证程序。依赖方向单向：`os/` 不引用 `tests/`，`tests/` 可以引用 `os/`，见 [控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)。
@@ -67,7 +82,7 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 
 ## 开发
 
-参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)、[控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)、[块请求协议规格](docs/specs/0018-block-protocol.md)、 [协作式运行时规格](docs/specs/0019-cooperative-runtime.md) 和 [持久化块镜像规格](docs/specs/0020-persistent-block-image.md)。
+参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)、[控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)、[块请求协议规格](docs/specs/0018-block-protocol.md)、 [协作式运行时规格](docs/specs/0019-cooperative-runtime.md) 和 [持久化块镜像规格](docs/specs/0020-persistent-block-image.md) 和 [YanFS 规格](docs/specs/0021-yanfs.md)。
 
 ## 许可证
 

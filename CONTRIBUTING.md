@@ -4,7 +4,7 @@
 
 ## 开发流程
 
-任务按 INTENTION → SPEC → IMPLE → VERIFY 推进。小任务可以简写在同一份记录中。文档与规格的修改分工见 `AGENTS.md` 的「文档与规格的修改权」：`README.md`、`docs/STATUS.md` 与 `docs/specs/*` 只由总审核角色落笔，其他人提交变更请求。
+任务按 INTENTION → SPEC → IMPLE PLAN → IMPLE → VERIFY 推进。小任务可以简写在同一份记录中。文档与规格的修改分工见 `AGENTS.md` 的「文档与规格的修改权」：`README.md`、`docs/STATUS.md` 与 `docs/specs/*` 只由总审核角色落笔，其他人提交变更请求。
 
 ### INTENTION
 
@@ -16,9 +16,11 @@
 
 RISC-V 行为以官方规范为依据。首次实现前记录规范版本、章节和链接，支持范围随实现进度更新。
 
-### IMPLE
+### IMPLE PLAN
 
 先列出修改文件、受影响模块、最小实现和测试计划，再开始编码。
+
+### IMPLE
 
 ISA 行为遵循 Spec → Test → Implementation：先写用例并确认预期失败，再实现功能，让测试通过。配套代码与测试组成完整提交。
 
@@ -49,12 +51,14 @@ ISA 行为遵循 Spec → Test → Implementation：先写用例并确认预期�
 
 ### 合并前检查清单
 
-1. 默认套件全绿：`cmake --build build --parallel && ctest --test-dir build --output-on-failure`。这里的 `build` 指**你自己的构建目录**：本机上 `build/` 是各构建目录的容器（`build/agent-*` 等，没有统一的根配置），所以要先 `cmake -S . -B build/<你的目录>` 配置它，否则 `cmake --build build` 会直接报 `Error: could not load cache`（exit 1）。
-2. 变异检查显式跑一次：`cmake -S . -B build -DYAN_BUILD_TOOLS=ON -DYAN_ENABLE_MUTATION_TESTS=ON …` 后运行 `ctest --test-dir build -R 'mutation'`。开关下注册的 `*mutation*` 套件在 Linux、工具与依赖齐备时是**七组**：`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`；另有两组 `difftest_mutation` / `difftest_ref_mutation` **只在检出 NEMU 参考模型时注册**，本地缺参考模型时不在名单里。每一组都必须 **0 存活**，而且**检出只认断言失败**：timeout、信号死亡（139 等）、sanitizer 报告、fixture abort、构建失败**一律归 harness error，不计检出**（这两条判据是 2026-09-20 两次门禁缺陷换来的：一次是只加一行 `fputs` 的零行为变化变异体被判成检出，一次是纯崩溃与 fixture abort 被计成检出）。**这一步不能省**：变异检查是"测试真的有检测力"的唯一证据，默认不注册只是因为它慢。
+1. 默认套件全绿：`cmake --build build --parallel && ctest --test-dir build --output-on-failure`。若配置已开启变异，用 `ctest --test-dir build -E '_mutation$' --output-on-failure` 运行默认套件，保留默认的 `yanfs_mutation_gate` 判据负控。这里的 `build` 指**你自己的构建目录**：本机上 `build/` 是各构建目录的容器（`build/agent-*` 等，没有统一的根配置），所以要先 `cmake -S . -B build/<你的目录>` 配置它，否则 `cmake --build build` 会直接报 `Error: could not load cache`（exit 1）。
+2. 变异检查显式跑一次：`cmake -S . -B build -DYAN_BUILD_TOOLS=ON -DYAN_ENABLE_MUTATION_TESTS=ON …` 后运行 `ctest --test-dir build -R '_mutation$'`。开关下实际变异套件在 Linux、工具与依赖齐备时是**八组**：`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`；默认 `yanfs_mutation_gate` 检查分类器，不算实际变异组。另有两组 `difftest_mutation` / `difftest_ref_mutation` **只在检出 NEMU 参考模型时注册**，本地缺参考模型时不在名单里。每一组都必须 **0 存活**，而且**检出只认断言失败**：timeout、信号死亡（139 等）、sanitizer 报告、fixture abort、构建失败**一律归 harness error，不计检出**（这两条判据是 2026-09-20 两次门禁缺陷换来的：一次是只加一行 `fputs` 的零行为变化变异体被判成检出，一次是纯崩溃与 fixture abort 被计成检出）。**这一步不能省**：变异检查是"测试真的有检测力"的唯一证据，默认不注册只是因为它慢。
 3. 文档自洽核对：由总审核角色核对状态行、规格索引、计数与链接。
 4. **新增或改动被忽略扩展名的工件时，确认它真的能进提交**：判据是 `git add --dry-run <路径>` 是否列出该文件，**不是** `git check-ignore` 的返回码——命中取反规则时它也返回 0。仓库已经踩过一次：golden 基准的 `.jsonl` / `.hex` 被"验证产物不提交"的规则吃掉，基准进不了仓库，测试会在别的机器上静默 SKIP。
 
-变异检查默认关闭，合并前显式运行。2026-10-03 的 Linux 工具配置注册默认 **32 组**、开启变异后 **39 组**；Release 默认 **32/32（21.10 s）**、Debug ASan/UBSan 默认 **32/32（22.99 s）**、全部七组变异 **7/7（157.64 s）**，均无失败、无 SKIP。配置、证据与历史测量见 [STATUS](docs/STATUS.md)。每次提交前重新测量并记录配置、命令、通过与跳过数量，历史耗时仅作参考。
+变异检查默认关闭，合并前显式运行。YanFS 于 2026-10-03 的 Linux 工具配置注册默认 **37 组**、开启变异后 **45 组**；Release 默认 **37/37（34.67 s）**、Debug ASan/UBSan 默认 **37/37（56.59 s）**。八组实际变异分开执行：原七组 **7/7（165.16 s）**，YanFS 一组 **1/1（7.18 s）**，十个非等价缺陷全部命中 owner 断言；均无失败、无 SKIP，不拼接为一次八组的耗时。
+
+同日 0020 的历史配置为默认 **32 组**、开启变异后 **39 组**；Release **32/32（21.10 s）**、ASan/UBSan **32/32（22.99 s）**、七组变异 **7/7（157.64 s）**。配置、证据与历史测量见 [STATUS](docs/STATUS.md)。每次提交前重新测量并记录配置、命令、通过与跳过数量，历史耗时仅作参考。
 
 ### 提交前总审核检查清单
 
