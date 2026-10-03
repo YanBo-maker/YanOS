@@ -10,7 +10,7 @@
 #include "yan/transport.h"
 
 /* Host side of the block request protocol in
- * docs/specs/0018-block-protocol.md: a memory-backed block device plus the
+ * docs/specs/0018-block-protocol.md: a block backend plus the
  * codec for the request and response frames.
  *
  * This is a host program, not a device. Nothing under src/ knows it exists: the
@@ -22,6 +22,15 @@
 /* The protocol counts blocks, not bytes, and the block size is the one YanFS
  * will use, so no repacking is needed between the two layers. */
 #define YAN_HOST_BLOCK_BLOCK_SIZE UINT32_C(4096)
+
+/* Backend callbacks return true only for a complete transfer. A failed read
+ * is never published; failed writes may have modified the backing medium.
+ * The file backend flushes before returning write success. */
+typedef struct {
+    void *context;
+    bool (*read)(void *context, uint64_t offset, uint8_t *data, size_t length);
+    bool (*write)(void *context, uint64_t offset, const uint8_t *data, size_t length);
+} YanHostBlockBackend;
 
 typedef struct {
     /* Backing store: capacity_blocks * YAN_HOST_BLOCK_BLOCK_SIZE bytes. It stays
@@ -38,6 +47,7 @@ typedef struct {
      * to be observable, and a memory device never fails on its own, so the
      * failure has to be reachable on demand. */
     bool fail_next;
+    YanHostBlockBackend backend;
 } YanHostBlock;
 
 /* storage must hold capacity_blocks * YAN_HOST_BLOCK_BLOCK_SIZE bytes; the
@@ -48,14 +58,21 @@ typedef struct {
 YanStatus yan_host_block_init(YanHostBlock *block, uint8_t *storage,
                               uint64_t capacity_blocks);
 
+/* The backend and its context remain owned by the caller. Memory-backed users
+ * keep using yan_host_block_init(); no file I/O enters the machine library. */
+YanStatus yan_host_block_init_backend(YanHostBlock *block,
+                                      YanHostBlockBackend backend,
+                                      uint64_t capacity_blocks);
+
 /* Answer every complete request the guest has published, in arrival order, and
  * return how many were answered. A frame that has not fully arrived is left in
  * the ring untouched: 0018 requires the whole header before a byte of it is
  * interpreted, and requires a frame that fails validation to be consumed by its
  * full length so the stream does not lose its alignment.
  *
- * The service never blocks and never waits for a request: it answers what is
- * there and returns. ram_base is the address ram was initialised with, and is
+ * The service never waits for request bytes or response-ring space. Backend
+ * callbacks are synchronous and may block on Host file I/O. ram_base is the
+ * address ram was initialised with, and is
  * needed because ring_base is an address while the RAM accessors take offsets.
  */
 uint32_t yan_host_block_service(YanHostBlock *block, YanTransport *transport,

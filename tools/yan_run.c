@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "host_block.h"
+#include "host_disk.h"
 #include "host_file.h"
 #include "host_terminal.h"
 #include "yan/cpu.h"
@@ -78,6 +79,7 @@ typedef struct {
     int terminal;
     uint64_t disk_blocks;
     int disk;
+    const char *disk_image;
     int help;
 } Options;
 
@@ -88,7 +90,7 @@ static void usage(FILE *stream, const char *program)
 {
     fprintf(stream, "usage: %s --image FILE [--base ADDR] [--ram BYTES] "
             "[--max-steps N] [--tohost ADDR] [--ignore-tohost] [--terminal] "
-            "[--disk BLOCKS] [--trace FILE] [--signature FILE START END]\n"
+            "[--disk BLOCKS | --disk-image FILE] [--trace FILE] [--signature FILE START END]\n"
             "  -h, --help      print this message and exit\n"
             "  --tohost ADDR   stop when the word at ADDR becomes nonzero\n"
             "  --ignore-tohost run to the step limit; use when a Guest writes\n"
@@ -101,6 +103,9 @@ static void usage(FILE *stream, const char *program)
             "                  blocks to the host transport channel and serve\n"
             "                  the block protocol on it; the top 16 KiB of the\n"
             "                  RAM window is reserved for the two rings\n"
+            "  --disk-image FILE  open an existing raw image (4096-byte blocks);\n"
+            "                  never create or truncate it. Writes are flushed\n"
+            "                  before success; power-loss atomicity is not promised\n"
             "exit: 0 tohost PASS, 2 usage, 4 no termination, 5 Host error, "
             "6 Guest failure, 7 signature exported\n", program);
 }
@@ -139,6 +144,7 @@ static int parse_options(int argc, char **argv, Options *options)
         } else if (strcmp(argv[i], "--terminal") == 0) {
             options->terminal = 1;
         } else if (strcmp(argv[i], "--disk") == 0 && i + 1 < argc) {
+            if (options->disk || options->disk_image != NULL) return 0;
             /* A device of zero blocks answers every request as out of range,
              * which is a test of the error path and never a useful disk, so the
              * command line rejects it rather than passing it through. */
@@ -148,6 +154,9 @@ static int parse_options(int argc, char **argv, Options *options)
                 return 0;
             }
             options->disk = 1;
+        } else if (strcmp(argv[i], "--disk-image") == 0 && i + 1 < argc) {
+            if (options->disk || options->disk_image != NULL) return 0;
+            options->disk_image = argv[++i];
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             options->help = 1;
         } else if (strcmp(argv[i], "--tohost") == 0 && i + 1 < argc) {
@@ -218,6 +227,7 @@ int main(int argc, char **argv)
     YanMachine machine = {0};
     YanHostTerminal terminal = {0};
     YanHostBlock block = {0};
+    YanHostDisk disk_file = {0};
     YanImageInfo info = {0};
     uint8_t *image = NULL;
     uint8_t *disk_storage = NULL;
@@ -237,7 +247,7 @@ int main(int argc, char **argv)
     }
     /* The device is attached before the image is loaded, so the Guest never runs
      * in a window where the channel is mapped but unconfigured. */
-    if (options.disk) {
+    if (options.disk || options.disk_image != NULL) {
         if (options.ram_size < DISK_RING_BYTES + DISK_RAM_MARGIN) {
             fprintf(stderr, "yan_run: --disk reserves the top %u bytes of the RAM "
                     "window for the channel rings and needs at least %u\n",
@@ -253,12 +263,28 @@ int main(int argc, char **argv)
             goto done;
         }
         yan_transport_set_notify(&machine.transport, disk_notify, &doorbell_rung);
-        disk_storage = calloc((size_t)options.disk_blocks, YAN_HOST_BLOCK_BLOCK_SIZE);
-        if (disk_storage == NULL ||
-            yan_host_block_init(&block, disk_storage, options.disk_blocks) != YAN_OK) {
-            fprintf(stderr, "yan_run: cannot allocate %" PRIu64
-                    " blocks of backing store\n", options.disk_blocks);
-            goto done;
+        if (options.disk_image != NULL) {
+            if (!yan_host_disk_open(&disk_file, options.disk_image)) {
+                fprintf(stderr, "yan_run: cannot open a nonempty block-aligned disk image '%s'\n",
+                        options.disk_image);
+                goto done;
+            }
+            if (yan_host_disk_same_file(&disk_file, options.trace) ||
+                yan_host_disk_same_file(&disk_file, options.signature) ||
+                yan_host_disk_same_file(&disk_file, options.image)) {
+                fprintf(stderr, "yan_run: disk image aliases an ELF or output file\n");
+                goto done;
+            }
+            if (yan_host_block_init_backend(&block, yan_host_disk_backend(&disk_file),
+                    disk_file.bytes / YAN_HOST_BLOCK_BLOCK_SIZE) != YAN_OK) goto done;
+        } else {
+            disk_storage = calloc((size_t)options.disk_blocks, YAN_HOST_BLOCK_BLOCK_SIZE);
+            if (disk_storage == NULL ||
+                yan_host_block_init(&block, disk_storage, options.disk_blocks) != YAN_OK) {
+                fprintf(stderr, "yan_run: cannot allocate %" PRIu64
+                        " blocks of backing store\n", options.disk_blocks);
+                goto done;
+            }
         }
         disk_attached = 1;
     }
@@ -385,6 +411,10 @@ done:
     }
     free(image);
     free(disk_storage);
+    if (!yan_host_disk_close(&disk_file)) {
+        fprintf(stderr, "yan_run: disk close failed\n");
+        result = EXIT_HOST_ERROR;
+    }
     yan_machine_destroy(&machine);
     return result;
 }

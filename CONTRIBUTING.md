@@ -50,11 +50,11 @@ ISA 行为遵循 Spec → Test → Implementation：先写用例并确认预期�
 ### 合并前检查清单
 
 1. 默认套件全绿：`cmake --build build --parallel && ctest --test-dir build --output-on-failure`。这里的 `build` 指**你自己的构建目录**：本机上 `build/` 是各构建目录的容器（`build/agent-*` 等，没有统一的根配置），所以要先 `cmake -S . -B build/<你的目录>` 配置它，否则 `cmake --build build` 会直接报 `Error: could not load cache`（exit 1）。
-2. 变异检查显式跑一次：`cmake -S . -B build -DYAN_BUILD_TOOLS=ON -DYAN_ENABLE_MUTATION_TESTS=ON …` 后运行 `ctest --test-dir build -R 'mutation'`。开关下注册的 `*mutation*` 套件是**五组**：`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`；另有两组 `difftest_mutation` / `difftest_ref_mutation` **只在检出 NEMU 参考模型时注册**，本地缺参考模型时不在名单里。每一组都必须 **0 存活**，而且**检出只认断言失败**：timeout、信号死亡（139 等）、sanitizer 报告、fixture abort、构建失败**一律归 harness error，不计检出**（这两条判据是 2026-09-20 两次门禁缺陷换来的：一次是只加一行 `fputs` 的零行为变化变异体被判成检出，一次是纯崩溃与 fixture abort 被计成检出）。**这一步不能省**：变异检查是"测试真的有检测力"的唯一证据，默认不注册只是因为它慢。
+2. 变异检查显式跑一次：`cmake -S . -B build -DYAN_BUILD_TOOLS=ON -DYAN_ENABLE_MUTATION_TESTS=ON …` 后运行 `ctest --test-dir build -R 'mutation'`。开关下注册的 `*mutation*` 套件在 Linux、工具与依赖齐备时是**七组**：`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`；另有两组 `difftest_mutation` / `difftest_ref_mutation` **只在检出 NEMU 参考模型时注册**，本地缺参考模型时不在名单里。每一组都必须 **0 存活**，而且**检出只认断言失败**：timeout、信号死亡（139 等）、sanitizer 报告、fixture abort、构建失败**一律归 harness error，不计检出**（这两条判据是 2026-09-20 两次门禁缺陷换来的：一次是只加一行 `fputs` 的零行为变化变异体被判成检出，一次是纯崩溃与 fixture abort 被计成检出）。**这一步不能省**：变异检查是"测试真的有检测力"的唯一证据，默认不注册只是因为它慢。
 3. 文档自洽核对：由总审核角色核对状态行、规格索引、计数与链接。
 4. **新增或改动被忽略扩展名的工件时，确认它真的能进提交**：判据是 `git add --dry-run <路径>` 是否列出该文件，**不是** `git check-ignore` 的返回码——命中取反规则时它也返回 0。仓库已经踩过一次：golden 基准的 `.jsonl` / `.hex` 被"验证产物不提交"的规则吃掉，基准进不了仓库，测试会在别的机器上静默 SKIP。
 
-变异检查默认关闭，是为了不让默认套件被它们主导：**本机现测**（2026-09-20，提交前审计那一轮）默认 **28 组约 25 秒**，打开开关后 **33 组**、只跑 `ctest -R mutation` 的 5 组约 **4.7 分钟**（281 s）；`device_mutation` 与 `guest_block_mutation` 是两个大头（后者直接跑约 2 分 13 秒），耗时随机器负载与并行构建波动。这些数字每次提交前都要**现测**，不要沿用。把开关写进配置命令而不是默认值，是让"慢证据"在需要它的场合（合并前、收口时）出现，而不是让每次改一行代码都等它。
+变异检查默认关闭，合并前显式运行。2026-10-03 的 Linux 工具配置注册默认 **32 组**、开启变异后 **39 组**；Release 默认 **32/32（21.10 s）**、Debug ASan/UBSan 默认 **32/32（22.99 s）**、全部七组变异 **7/7（157.64 s）**，均无失败、无 SKIP。配置、证据与历史测量见 [STATUS](docs/STATUS.md)。每次提交前重新测量并记录配置、命令、通过与跳过数量，历史耗时仅作参考。
 
 ### 提交前总审核检查清单
 

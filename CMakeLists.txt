@@ -47,7 +47,7 @@ target_compile_options(yan_machine PRIVATE ${YAN_WARNINGS})
 
 if(YAN_BUILD_TOOLS)
     add_executable(yan_run tools/yan_run.c tools/host_file.c tools/host_terminal.c
-                            tools/host_block.c)
+                            tools/host_block.c tools/host_disk.c)
     target_link_libraries(yan_run PRIVATE yan_machine)
     target_compile_options(yan_run PRIVATE ${YAN_WARNINGS})
 
@@ -75,6 +75,28 @@ if(BUILD_TESTING)
         URL_HASH SHA256=a197ea06556f524e378861e503fcfe2fe040447c7b90540ad86b653b13245ae4)
     FetchContent_MakeAvailable(unity)
 
+    if(YAN_BUILD_TOOLS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Test-only executor: inject a close error for one fixture image after
+        # the real fclose, to exercise the final Host exit status after PASS.
+        add_executable(yan_run_disk_close_fault tools/yan_run.c tools/host_file.c
+                       tools/host_terminal.c tools/host_block.c tools/host_disk.c
+                       tests/host_disk_close_fault.c)
+        target_link_libraries(yan_run_disk_close_fault PRIVATE yan_machine)
+        target_compile_options(yan_run_disk_close_fault PRIVATE ${YAN_WARNINGS})
+        target_link_options(yan_run_disk_close_fault PRIVATE -Wl,--wrap=fclose)
+
+        add_executable(test_host_disk tests/test_host_disk.c
+                       tools/host_disk.c tools/host_block.c)
+        target_include_directories(test_host_disk PRIVATE tools)
+        target_link_libraries(test_host_disk PRIVATE yan_machine unity::framework)
+        target_compile_options(test_host_disk PRIVATE ${YAN_WARNINGS})
+        target_link_options(test_host_disk PRIVATE
+                            -Wl,--wrap=fread -Wl,--wrap=fwrite
+                            -Wl,--wrap=fflush -Wl,--wrap=fclose)
+        add_test(NAME host_disk COMMAND test_host_disk)
+        set_tests_properties(host_disk PROPERTIES TIMEOUT 30)
+    endif()
+
     foreach(suite ram bus machine cpu fetch step alu control memory csr trap m snapshot
                   image difftest interrupt clint plic boot uart transport)
         add_executable(test_${suite} tests/test_${suite}.c)
@@ -92,6 +114,18 @@ if(BUILD_TESTING)
                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest"
                                "${CMAKE_CURRENT_SOURCE_DIR}/os")
 
+    # The persistent-combined gate's own negative controls need only Python:
+    # both Guest processes are mocked, so they run on every machine and are not
+    # tied to the cross toolchain. The case gate runs the same file before it
+    # builds anything; registering it here puts it in the default suite as well.
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME persistent_combined_gate
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/test_persistent_combined_gate.py")
+        set_tests_properties(persistent_combined_gate PROPERTIES TIMEOUT 120)
+    endif()
+
     # ---------------------------------------------------------------- external
     set(_yan_gcc_names riscv64-unknown-elf-gcc riscv32-unknown-elf-gcc
                        riscv64-linux-gnu-gcc)
@@ -105,6 +139,39 @@ if(BUILD_TESTING)
     # but no reference model: it exercises CSR and interrupt semantics that
     # NEMU cannot mirror.
     if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        set(_yan_close_fault_args)
+        if(TARGET yan_run_disk_close_fault)
+            list(APPEND _yan_close_fault_args --run-close-fault
+                 "$<TARGET_FILE:yan_run_disk_close_fault>")
+        endif()
+        add_test(NAME guest_persistent_block
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_persistent_block.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    ${_yan_close_fault_args}
+                    --work "${CMAKE_BINARY_DIR}/persistent-block")
+        set_tests_properties(guest_persistent_block PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+
+        # The persistent file backend and the cooperative runtime together: a
+        # task issues a block write through the protocol, waits for it with
+        # yan_os_task_wait() - once on the already-happened path and once inside
+        # a real BLOCKED window built from the response ring's flow control - is
+        # woken by the device interrupt, and a *second* simulator process reads
+        # the same image back. The host compares the target block, every
+        # neighbouring block and the length on its own, without either Guest.
+        add_test(NAME guest_persistent_combined
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_persistent_combined.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${CMAKE_BINARY_DIR}/persistent-combined")
+        set_tests_properties(guest_persistent_combined PROPERTIES
+                             SKIP_RETURN_CODE 77 TIMEOUT 300)
+
         add_test(NAME guest_trap_env
             COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_trap_env.sh"
                     --source "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -232,6 +299,39 @@ if(BUILD_TESTING)
 
     option(YAN_ENABLE_MUTATION_TESTS
            "Register the mutation checks with CTest (slow)" OFF)
+    if(YAN_BUILD_TOOLS AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND YAN_ENABLE_MUTATION_TESTS)
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        add_test(NAME persistent_block_mutation
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_persistent_mutation.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --cc "${CMAKE_C_COMPILER}"
+                    --unity "${unity_SOURCE_DIR}"
+                    --work "${CMAKE_BINARY_DIR}/persistent-mutation")
+        set_tests_properties(persistent_block_mutation PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+
+        # Planted-defect run for the combined persistent case. Each mutant
+        # declares the exact check that owns it: fake-wait and yield-once are
+        # caught by the writer's own window assertions, omit-write by the
+        # writer's payload assertion when the read-back finds the seed, and
+        # wrong-block only by the host's independent byte comparison (reads and
+        # writes shift together, so the Guest reads its own shifted write back
+        # and passes). A no-behaviour-change mutant must survive and a wait that
+        # hangs is inconclusive, never detected; a reader panic or an unfitting
+        # expectation is a harness error. The gate's verdict rules have their
+        # own negative controls in persistent_combined_gate.
+        add_test(NAME persistent_combined_mutation
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_persistent_combined.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --cc "${CMAKE_C_COMPILER}"
+                    --work "${YAN_MUTATION_WORK_ROOT}/persistent-combined"
+                    --mutation)
+        set_tests_properties(persistent_combined_mutation PROPERTIES
+                             SKIP_RETURN_CODE 77 TIMEOUT 600)
+    endif()
     if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC AND YAN_ENABLE_MUTATION_TESTS)
         # Planted-defect run for the console: every mutation must be caught, so
         # a surviving defect fails this test rather than passing quietly.

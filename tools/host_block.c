@@ -18,13 +18,14 @@
  *      read to its end.
  *
  * A request that has not fully arrived is left where it is, positions
- * untouched, and the pump returns: it never blocks and never waits.
+ * untouched, and the pump returns. Backend I/O itself is synchronous.
  *
  * All byte order here is little-endian, field by field. The header is not overlaid
  * on a struct, so padding and host endianness cannot enter the protocol. */
 #include "host_block.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 #include "yan/ram.h"
 #include "yan/transport.h"
@@ -259,6 +260,19 @@ YanStatus yan_host_block_init(YanHostBlock *block, uint8_t *storage,
     block->capacity_blocks = capacity_blocks;
     block->served = 0;
     block->fail_next = false;
+    block->backend = (YanHostBlockBackend){0};
+    return YAN_OK;
+}
+
+YanStatus yan_host_block_init_backend(YanHostBlock *block,
+                                      YanHostBlockBackend backend,
+                                      uint64_t capacity_blocks)
+{
+    if (block == NULL || backend.read == NULL || backend.write == NULL ||
+        capacity_blocks > UINT64_MAX / YAN_HOST_BLOCK_BLOCK_SIZE) {
+        return YAN_INVALID_ARGUMENT;
+    }
+    *block = (YanHostBlock){.capacity_blocks = capacity_blocks, .backend = backend};
     return YAN_OK;
 }
 
@@ -334,7 +348,7 @@ uint32_t yan_host_block_service(YanHostBlock *block, YanTransport *transport,
             status = YAN_HOST_BLOCK_STATUS_DEVICE;
         }
 
-        const uint32_t reply_length = response_length(header.op, status, header.count);
+        uint32_t reply_length = response_length(header.op, status, header.count);
         /* Rule 4 for the other direction: the response is published in one
          * piece or not at all. When it does not fit, the request stays where it
          * is and the next call tries again once the Guest has drained. */
@@ -351,8 +365,32 @@ uint32_t yan_host_block_service(YanHostBlock *block, YanTransport *transport,
             break;
         }
 
-        /* The backend, reached only by a request that passed validation. */
-        if (status == YAN_HOST_BLOCK_STATUS_OK && header.op == YAN_HOST_BLOCK_OP_WRITE) {
+        /* Stage callback reads privately: even a short read must publish only
+         * an error header, never a partly filled success payload. Reserve the
+         * largest possible response before performing any backend operation. */
+        uint8_t *payload = NULL;
+        if (status == YAN_HOST_BLOCK_STATUS_OK && block->backend.read != NULL &&
+            (header.op == YAN_HOST_BLOCK_OP_READ || header.op == YAN_HOST_BLOCK_OP_WRITE)) {
+            const size_t bytes = (size_t)header.count * YAN_HOST_BLOCK_BLOCK_SIZE;
+            const uint64_t offset = (uint64_t)header.lba * YAN_HOST_BLOCK_BLOCK_SIZE;
+            payload = malloc(bytes);
+            bool success = false;
+            if (payload != NULL) {
+                if (header.op == YAN_HOST_BLOCK_OP_WRITE) {
+                    ring_load_storage(&view, frame_at + YAN_HOST_BLOCK_HEADER_SIZE,
+                                      payload, bytes);
+                    success = block->backend.write(block->backend.context, offset,
+                                                   payload, bytes);
+                } else {
+                    success = block->backend.read(block->backend.context, offset,
+                                                  payload, bytes);
+                }
+            }
+            if (!success) {
+                status = YAN_HOST_BLOCK_STATUS_DEVICE;
+                reply_length = response_length(header.op, status, header.count);
+            }
+        } else if (status == YAN_HOST_BLOCK_STATUS_OK && header.op == YAN_HOST_BLOCK_OP_WRITE) {
             ring_load_storage(&view, frame_at + YAN_HOST_BLOCK_HEADER_SIZE,
                               block->storage + (uint64_t)header.lba * YAN_HOST_BLOCK_BLOCK_SIZE,
                               (uint64_t)header.count * YAN_HOST_BLOCK_BLOCK_SIZE);
@@ -365,6 +403,7 @@ uint32_t yan_host_block_service(YanHostBlock *block, YanTransport *transport,
         ring_store(&view, view.h2g, at, reply, sizeof reply);
         if (status == YAN_HOST_BLOCK_STATUS_OK && header.op == YAN_HOST_BLOCK_OP_READ) {
             ring_store_storage(&view, at + YAN_HOST_BLOCK_HEADER_SIZE,
+                               payload != NULL ? payload :
                                block->storage + (uint64_t)header.lba * YAN_HOST_BLOCK_BLOCK_SIZE,
                                (uint64_t)header.count * YAN_HOST_BLOCK_BLOCK_SIZE);
         } else if (status == YAN_HOST_BLOCK_STATUS_OK &&
@@ -379,6 +418,7 @@ uint32_t yan_host_block_service(YanHostBlock *block, YanTransport *transport,
          * so the interrupt and the frame become visible together. Only here,
          * with the failure actually on its way to the Guest, is the injected
          * fault spent. */
+        free(payload);
         if (yan_transport_host_publish(transport, reply_length) != YAN_OK) {
             break;
         }

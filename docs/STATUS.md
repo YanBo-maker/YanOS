@@ -1,6 +1,11 @@
 # 项目状态
 
-当前阶段：M2a 的实现与验证进行中。[0018](specs/0018-block-protocol.md) 与 [0019](specs/0019-cooperative-runtime.md) 的规格已锁定；架构前置（`os/platform.h` 的通道与 PLIC 视图、`test_boot.c` 的防漂移比对）已落地并验证；协作式运行时已实现，实现侧经独立验证**未能推翻**（等价变异体、陷阱帧、注入时点三项都拿到独立证据），但同一轮验证**打回了验证门禁本身**（见下）；块协议已交付（13 个变异体、自称 0 存活），**其独立验证仍在进行，本文不把它记为已验证**。M1a 的平台设备M1a 的平台设备（PLIC 电平网关、UART、Host 传输通道）与 `os/` 控制台已随 11 条提交落到 `feat/m1-device-channel`（尚未进 `main`）：[0014](specs/0014-host-transport-channel.md) 的 v1 / v2、[0015](specs/0015-uart-device.md) 的 v1 / v2 / v3、[0016](specs/0016-plic-gateway-and-irq-lines.md)、[0017](specs/0017-console-and-os-layout.md) 与 M2a 的 [0018](specs/0018-block-protocol.md)（块请求协议）与 [0019](specs/0019-cooperative-runtime.md)（协作式运行时）均已由项目所有者审核通过并锁定；后两份对应的实现与它们要求的前置改动（扩展 `os/platform.h`、`test_boot.c` 的防漂移比对）**都还没有开始**，见「下一步」。PLIC 网关已按电平语义实现并通过独立验证；UART（19 例）与传输通道（14 例）的模块测试在 Debug ASan/UBSan 与 Release 下全绿。`os/` 层已随 0017 落地：`os/platform.h` 与 `os/console.h` 是冻结接口；控制台驱动、Guest 侧控制台自检与 Host terminal backend 已随 11 条提交落到 `feat/m1-device-channel`（尚未进 `main`）；`yan_run` 也已迁到 `YanMachine` 与 `yan_machine_step`，设备中断线在该执行器下可达。`main` 目前停在 `fa7af56`，因此本文记录的设备、控制台与 golden 都还只在任务分支上。上一阶段（Guest 启动与统一 trap 环境）已完成：模块测试、逐指令差分测试、官方 `riscv-tests` 套件与 Sail 签名比对都已接入并在本机通过；ACT4 官方框架尚未接入。M-mode 的 CLINT、PLIC、中断进入 / 返回，以及 Guest 侧的启动入口、陷阱向量与设备访问封装都已实现；中断与陷阱语义仍没有外部参考模型可比较。
+当前阶段：持久化块镜像契约与交付收口。[0020](specs/0020-persistent-block-image.md) 已于 2026-10-03 由项目所有者批准并锁定；[0018](specs/0018-block-protocol.md) 的错误响应格式保持不变，新增解释明确其不保证介质回滚。当前分支为 `codex/persistent-block-image`，实现与验证已完成，交付待用户审查。
+
+- 规格批准：成功前完整写入并刷新；失败后停用；失败写不承诺回滚或断电持久性。关闭重开只恢复后端可用性。
+- 实现：已有文件后端、协议适配与 CLI 已核对；新增失败后读写拒绝及重开内容边界测试已完成。
+- 验证：2026-10-03 补强后 Release 默认 32/32、Debug ASan/UBSan 默认 32/32、全部变异 7/7 通过；独立审查未发现阻塞项。
+- 用户审查：契约已批准，实现交付与理解程度仍待项目所有者审查。
 
 ## 已完成
 
@@ -32,9 +37,39 @@
 - `yan_gen` 随机 RV32IM 指令流生成器（给定种子确定输出），以及 5 个手写 Guest 用例。
 - C17 / CMake 构建、Unity 单元测试、CTest 及 GitHub Actions。
 
-详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）；**当前实测是默认 28 组、开变异开关 33 组**，见本页「验证」一节。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；各组的通过情况以本页「验证」一节为准。
+详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）；**2026-10-03 配置注册默认 32 组、开变异开关 39 组**，见本页「验证」一节。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；各组的通过情况以本页「验证」一节为准。
 
 ## 验证
+
+### 本轮验证：2026-10-03
+
+WSL Linux、GCC 11.4、`YAN_BUILD_TOOLS=ON`，具备 Python 与 RISC-V 交叉工具链，未配置外部参考模型。默认注册 32 组：22 组 Host/Unity、9 组 Guest 验证及 1 组 Python 门禁负控；Release 开启 `YAN_ENABLE_MUTATION_TESTS=ON` 后注册 39 组。总审核独立核对配置、注册表与本轮保存的命令日志。
+
+- Release：`ctest --test-dir build/closeout-persistent-release -E mutation --output-on-failure`，32/32 passed，21.10 s。
+- Debug ASan/UBSan：`ctest --test-dir build/closeout-persistent-asan --output-on-failure`，32/32 passed，22.99 s。
+- 七组变异：`ctest --test-dir build/closeout-persistent-release -R mutation --output-on-failure`，7/7 passed，157.64 s。
+
+以上均 0 失败、0 SKIP。日志分别保留为各目录的 `final-default.log` 与 Release 的 `final-mutations.log`，不依赖会被后续 CTest 命令覆盖的 `LastTest.log`。`host_disk` 当前 10 个用例，`persistent_block_mutation` 检出 9 个非等价缺陷；baseline 与 no-effect 对照均存活。新增用例确认失败后读写不再调用文件 I/O，以及短写的 4095 字节在重开后仍存在、邻块保持原样，随后完整写可成功。
+
+Host 变异逐项绑定表中指定的测试断言，无关断言失败负控不能计检出。Linux 测试专用执行器在真实关闭镜像后注入失败，CLI 验证 Guest 成功后最终退出 5、打印关闭失败诊断且镜像不变；忽略关闭失败返回值的隔离变异被测试拒绝。简单 reader 初始负控固定要求字节比较失败码 `0x80000008`。
+
+25 个组合门禁负控通过；fake-wait、yield-once、omit-write 各命中声明的 Guest 断言码与阶段，wrong-block 命中 Host 字节比对。no-effect 存活，pure-hang 不计检出，编译失败负控由门禁检查拒绝。缺源与依赖共六个探针通过：缺执行器或被测 `host_disk.c` 返回 1，缺外部编译器返回 77，未移动工作树源码；记录在 Release 的 `source-probes.log`。
+
+本轮验证正常运行与跨进程可见性，不验证断电持久性；文件后端仍是单写者、同步 Host I/O。外部参考层与 MSVC 工具目标本轮未运行。独立源代码审查及针对性复审未发现阻塞项，提出的断言归因与 CLI 关闭边界缺口已补强；只读审查不代替测试执行。用户已批准契约，交付审查仍待进行。
+
+### 历史测量：2026-09-24 持久化组合门禁
+
+2026-09-24 总审核复验：Linux 构建启用 `YAN_BUILD_TOOLS=ON`，具备 Python 与 RISC-V 交叉工具链，未配置外部参考模型。默认注册 **32 组**：22 组 Host/Unity、9 组 Guest 验证及 1 组 Python 门禁负控；开启 `YAN_ENABLE_MUTATION_TESTS` 后共 **39 组**，新增 7 组变异检查。
+
+本轮 Release 默认套件 **32/32 passed，21.46 s**；`persistent_combined_mutation` **1/1 passed，6.21 s**。25 个门禁负控全部通过，原始的两个总审核复现负控原样通过。四个变异分别命中预定证据：fake-wait 为 writer `0x50000014 / phase 10`，yield-once 为 writer `0x50000013 / phase 10`，omit-write 为 writer `0x50000011 / phase 20`，wrong-block 为 Host 镜像字节不一致。无行为变化对照存活，纯挂起与编译失败不计检出。
+
+修复前同日总审核实测 Release **31/31，22.84 s**、Debug ASan/UBSan **31/31，24.54 s**、全部变异组 **7/7，154.95 s**。本轮修改 Python 判据并新增负控，未重跑 ASan 全量与其余六组变异；这些历史结果不记为当前 39 组全量通过。外部参考层本轮未运行。
+
+组合用例覆盖已完成响应的快速路径、背压下的阻塞与中断唤醒，以及写入后重新启动读回。Host 在两个模拟器进程之间独立核对全部 32768 字节，reader 逐字节核对目标块、快速路径块与邻块，再确认镜像未被改动。成功写响应要求完整写入及 `fflush` 成功；当前实现不保证断电持久性或失败写回滚，I/O 失败后拒绝后续读写，关闭并重新打开才能恢复使用。该次测量时后端语义尚待规格裁定；2026-10-03 的批准与锁定见本页开头及 0020。
+
+### 历史测量：M2a
+
+下段保留 2026-09-20 的原始测量与当时统计说明，当前配置以本节开头为准。
 
 GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建注册 **21 组 Unity 套件**（共 **172 个用例**：`uart` 19、`plic` 15、`transport` 14，其余为既有分组；`boot` 由 4 增至 6，新增两条是 0017 的 A1 / A2）。启用 Guest 工具链与 `yan_run` 时默认另有 6 组 Guest 侧测试：`guest_trap_env`、`guest_terminal`、`guest_console`、`guest_golden`、`guest_runtime` 与 `guest_block`，合计 **28 组 CTest**；加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 时为 **33 组**（再注册 `guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`）。**以下数字以本段为准**，本页其它段落若残留旧口径以本段覆盖。**两次独立测量**：总审核角色在全新目录实测默认 **28/28 passed，25.21 s**、`ctest -R mutation` **5/5 passed，281.19 s**；主 Agent 在开关下实测整套 **33/33 passed，317.39 s**（`guest_console_mutation` 45.4 s、`device_mutation` 40.5 s、`guest_runtime_mutation` 48.2 s、`guest_block_mutation` 151.0 s、`guest_m2a_combined_mutation` 3.7 s）——两次测量量级一致，差异来自机器负载。变异检查默认不注册，只为不让慢证据主导默认套件；合并前必须显式跑一次，见 [CONTRIBUTING](../CONTRIBUTING.md) 的「合并前检查清单」与「提交前总审核检查清单」。
 
@@ -79,6 +114,7 @@ Guest 层同样做了变异检查：在副本里注入 10 个缺陷（不清 MSI
 - **变异测试（参考模型侧）**：把 NEMU 参考模型的 `slt` 改成无符号比较、重新构建共享对象，差分测试仍然报告不一致，而未变异时同一镜像通过。只改 DUT 只能证明工具有检测力；改参考模型才能证明比较真的读取了参考状态。
 - **官方 riscv-tests**：`rv32ui` 与 `rv32um` 共 50 例，49 例通过，1 例显式 SKIP（`rv32ui-p-ma_data` 要求非对齐访存成功，而 Yan 平台按设计拒绝）。
 - **官方 ACT4 测试语料**：`riscv-arch-test` 的 `rv32i/I` 与 `rv32i/M` 共 47 例，其中 40 例的 DUT 签名与 Sail 参考模型的签名逐字节相同，0 例不同，7 例 SKIP。7 例全部是 `I-beq/bge/bgeu/blt/bltu/bne/jal` 的分支与跳转用例，它们故意构造未对齐目标并期望陷阱处理器接管；框架把陷阱处理器的实例化放在 `STANDARD_SM_SUPPORTED` 之内，而该开关的前提是 `medeleg` / `mideleg` 委托、PMP 与 S-mode，YanOS 都没有，所以两侧都落到地址 0 并报「possible trap loop」，脚本据此报 SKIP 而不报通过。`mie` / `mip` 与 CLINT / PLIC 已实现，但语料里**没有任何用例调用中断宏**（`RVMODEL_SET/CLR_MEXT_INT`、`RVMODEL_SET/CLR_MSW_INT`、`RVMODEL_MSIP_ADDRESS`、`RVMODEL_MTIME_ADDRESS` 在 `tests/rv32i/I` 与 `tests/rv32i/M` 中出现 0 次），因此本阶段交付的是接口而不是 ACT4 中断通过数。脚本另有两项配置检查：DUT 头声明的 CLINT 地址必须与框架 `sail_macros.h` 的有效地址一致（探针汇编失败即 FAIL），以及 DUT 中断宏守卫确实被框架覆盖。这一层使用官方测试源与官方参考模型，但不使用 ACT4 自带的构建系统。
+- **已知限制（既有设计，非本轮引入）：ACT4 脚本把"两侧都没出签名"记成 SKIP，因此部分跳过仍可能整体通过**。`tests/official/run_act4.sh:205-211` 在 Sail 与 DUT **都**没有产生签名时按"用例需要陷阱处理器"计入 `skipped`；而整体判定是 `[ "$differed" -eq 0 ] && [ "$matched" -gt 0 ]`（`:239`），只有在**全部**跳过（`matched = 0`）时才 fail-closed。**事实**：单看一条用例无法区分"DUT 行为不对"与"该用例需要陷阱处理器"——两侧都拒绝同一镜像时证据是一样的。**代价**：在真有 ACT4 检出的机器上，它可能掩盖"某几个用例的 DUT 行为不对"，只表现为跳过数偏多。**触发条件**：配置了 `YAN_RISCV_ARCH_TEST_DIR` 且部分用例未出签名（本机没有 ACT4 检出，该脚本根本不会注册，所以本机遇不到）。**候选动作**：下一阶段真正跑官方语料时，把它改成"跳过比例超过阈值即 FAIL"，并**在能验证的机器上**落笔——按项目纪律，未验证的改动不进仓库，所以本轮不修。
 - **签名比对**：8 个镜像的签名与 Sail（第三方参考模型）逐字节相同，签名区大小 256～17184 字节。
 - **Guest trap 环境**：编译 `tests/guest/mtrap_entry.S`、`mtrap.c`、`trap_env.c` 并由 `yan_run` 执行，Guest 自检的每一项都通过（退出码 0）。该层只用交叉工具链与 DUT，不需要参考模型，因为陷阱与中断语义不在参考模型范围内。
 
@@ -95,7 +131,15 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
+按 0020 收口本轮验证、独立审核与提交。随后进入 YanFS 最小磁盘格式设计，由项目所有者审核范围和不变量后实现。
+
+### 历史推进记录（M1a / M2a）
+
+以下保留当时的分支、计数与待办，后续记录中的修复和裁定取代早期状态；它们不描述当前工作树。
+
 完成 M1a 的收口：`feat/m1-device-channel` 上的 11 条提交（`d612bec..8a8c8c1`）已经推送，但它们**不在任何 PR 里**——PR #13 在 2026-09-20 19:06 以 `fa7af56`（`os/` 骨架那一提交）为头被合入 `main`（merge commit `03f5b80`），GitHub 因此不再推进 `refs/pull/13/head`。下一步是**为这 11 条提交开一个新的 PR** 交项目所有者审阅；`main` 目前只含到 `fa7af56`，本文记录的设备、控制台与 golden 都还只在任务分支上。
+
+**M2a 的实现已在分支 `feat/m2a-block-and-runtime` 上收口**（自 `e5ae493` 切出，9 条提交 `71769c9..65d22bb`，已推送，远端 ref `65d22bb`；工作区干净）。**PR 尚未创建**——需要项目所有者在 GitHub 上新建，堆叠目标为 `feat/m1-device-channel`；在此之前 M2a 的实现只存在于该分支上。提交后复核（总审核角色独立执行，不采信执行方数字）：只有 `CMakeLists.txt`（4 条）与 `tools/yan_run.c`（2 条）出现在多条提交里，正是设计的 hunk 级拆分；`1e83dc5` 的 `yan_run.c` 里 `yan_transport_host_readable` 出现 0 次（边沿版），`2dffc6b` 的 diff 恰好只有门铃那一处；注册名逐条递进（`1e83dc5` 无新注册 → `d18aacb` `guest_block` → `6600c61` `guest_runtime` → `4347e8e` `guest_m2a_combined`）；`git diff --stat e5ae493..HEAD -- 0005/0006/0007/0008/0012` 为空；文档只出现在第 1 条（规格）与第 9 条（README/STATUS/CONTRIBUTING/0011）；并用 `git archive` 取出两个快照独立复跑：**第 6 条树上 28 组里恰好只红 `guest_m2a_combined`**，**第 7 条树上 28/28 全绿**——"预期失败 → 修复转绿"的教学结构成立。**记账**：第 3 条（`feat(host)`）的提交信息里"当门铃响起时服务一次"描述的是**该提交当时的边沿行为**，不是最终设计；这一决定的缺陷与修复见第 7 条（`fix(host)`），两者在历史里成对存在。主 Agent 决定**不改写提交信息**（reword 会重写其后全部哈希、让本页记录的提交号与远端 ref 失效），因此把导航记在这里：读者从本页即可知道"边沿 → 电平"是一个被记录下来的演进，而不是漏掉的旧说法。
 
 开始 M2a：[0018](specs/0018-block-protocol.md) 与 [0019](specs/0019-cooperative-runtime.md) 的规格已经锁定，实现按它们的 IMPLE PLAN 推进——先扩展 `os/platform.h`（通道寄存器与 PLIC 访问器）与 `tests/test_boot.c` 的防漂移比对，再做块协议的帧层与协作式运行时。0019 里记录了一笔已知债务：树里会同时存在 `tests/guest/mtrap_entry.S` 与 `os/trap_entry.S` 两份陷阱入口，合并成一份的条件写在那一节。
 
@@ -134,7 +178,11 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 已实现 40 条 RV32I 基础指令的功能路径、八条 RV32M 指令、CSR 指令和 MRET。单步返回 YAN_OK 表示正常完成，YAN_TRAP 表示已进入 Guest 异常或中断；Host 参数和对象状态错误仍直接返回。Bus、RAM 与独立取指接口保留原有错误语义。
 
-中断与陷阱目前只覆盖单 hart、M-mode、直接入口与非抢占的固定优先级：没有 S/U 模式，没有 `medeleg` / `mideleg` 委托，没有 `mtvec` 向量模式，没有中断嵌套，PLIC 只有一个 M-mode context，CLINT 只有 hart 0 的 msip / mtimecmp。Guest 环境是最小运行时，不是操作系统：无系统调用 ABI、无进程、无页表、无调度。也未完成完整 ISA / 特权架构符合性验收。陷阱与中断语义没有参考模型可比较，证据来自本仓库的模块测试与 Guest 自检，属于已知边界而非已验收能力。两个设备（UART、传输通道）同样没有外部参考模型可比，证据只来自本仓库的模块测试；控制台与 `os/` 层只有 Guest 侧自检与变异检查，同样没有外部参考模型。
+中断与陷阱目前只覆盖单 hart、M-mode、直接入口与非抢占的固定优先级：没有 S/U 模式，没有 `medeleg` / `mideleg` 委托，没有 `mtvec` 向量模式，没有中断嵌套，PLIC 只有一个 M-mode context，CLINT 只有 hart 0 的 msip / mtimecmp。Guest 已有协作式任务调度；系统调用 ABI、进程、页表与抢占式调度尚未实现。也未完成完整 ISA / 特权架构符合性验收。陷阱与中断语义没有参考模型可比较，证据来自本仓库的模块测试与 Guest 自检，属于已知边界而非已验收能力。两个设备（UART、传输通道）同样没有外部参考模型可比，证据只来自本仓库的模块测试；控制台与 `os/` 层只有 Guest 侧自检与变异检查，同样没有外部参考模型。
+
+## 规格锁定后的修正
+
+2026-10-03：0018 原文“v1 的失败是全有全无”保留；补充响应语义与介质状态的边界及 0020 链接。依据为项目所有者在本会话对“成功前刷新、失败后停用、失败写不承诺回滚”方案的“可以”批准；由总审核角色落笔。0018 未改变帧格式或 status 值，文件后端的恢复规则在 0020 定义。
 
 ## 待定设计
 
