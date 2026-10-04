@@ -10,6 +10,8 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [YanFS](docs/specs/0021-yanfs.md) 已实现并验证格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收。初版采用单根目录、最多 63 文件和连续 extent；覆盖需要新旧内容同时容纳，碎片可能导致 NOSPACE。元数据写失败可能拒挂，不保证断电一致性，不自动修复。实现与验证已完成，交付待用户审查。
 
+[Guest 终端文件操作](docs/specs/0022-terminal-file-operations.md) 已实现并验证：独立应用提供 help、ls、stat、cat、create、write、rm 和 exit，使用 UART 中断等待输入，接入已有 YanFS 镜像。create 创建新文件，write 整文件覆盖；单行最多 1023 字节，超长或非法控制字节整行拒绝。cat 保留合法 UTF-8，并转义指定控制字节和非法编码。实现与验证完成，交付与理解程度待用户审查。
+
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
 ## 构建与测试
@@ -43,7 +45,21 @@ build/yanfs/yan_run --image guest.elf --disk-image new.img
 
 `guest.elf` 是调用文件系统接口的 Guest 程序；公开接口见 [os/yanfs.h](os/yanfs.h)，Guest 块适配见 [os/yanfs_block.h](os/yanfs_block.h)，可运行的整体例子见 [Guest 验收程序](tests/guest/yanfs_check.c) 与 [验收脚本](tests/guest/run_yanfs.py)。mkfs 与当前工具验证使用 Linux/WSL 路径；Guest 不自动格式化镜像。
 
-变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 可注册八组：`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `yanfs_mutation_gate` 检查分类器判据，随默认回归运行。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
+Linux/WSL 中具备 RISC-V 交叉编译器时，可构建生产终端应用；`BUILD_TESTING=OFF` 也能构建此目标，不需要 Unity：
+
+```sh
+cmake -S . -B build/terminal -DYAN_BUILD_TOOLS=ON
+cmake --build build/terminal --target yanfs_terminal yan_run yan_mkfs --parallel
+build/terminal/yan_mkfs --image terminal.img --blocks 16
+python3 tools/yan_shell.py --run build/terminal/yan_run \
+  --guest build/terminal/guest-apps/yanfs_terminal.elf --disk-image terminal.img
+```
+
+已有镜像可直接传给启动器；上面的 mkfs 仅用于创建新镜像。输入 `create hello.txt hello`、`cat hello.txt`、`write hello.txt world`、`rm hello.txt`，最后用 `exit` 结束。TEXT 不隐式添加换行，退格按字节处理。启动器临时调整 Unix TTY 并恢复完整属性；stdin EOF 不传给 Guest，必须显式 exit。默认使用很大的有限步数上限，可通过 `--max-steps` 缩小；空闲仍消耗 CPU。文件发布后输出失败不回滚，不自动修复或重新挂载。
+
+生产入口见 [应用](apps/yanfs_terminal/main.c)，公共接口见 [shell](os/shell.h)、[读行器](os/line.h) 和 [UART 终端](os/terminal.h)。应用依赖 `os/`，不依赖 `tests/`。
+
+变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 可注册九组：`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
 
 `yan_run` 的默认执行路径由 `guest_golden` 用基准工件逐字节守住：改动默认行为会让它失败，先读差异再决定是否有意为之。生成与重生成见 [`tests/guest/golden/README.md`](tests/guest/golden/README.md)。
 
@@ -82,7 +98,7 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 
 ## 开发
 
-参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)、[控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)、[块请求协议规格](docs/specs/0018-block-protocol.md)、 [协作式运行时规格](docs/specs/0019-cooperative-runtime.md) 和 [持久化块镜像规格](docs/specs/0020-persistent-block-image.md) 和 [YanFS 规格](docs/specs/0021-yanfs.md)。
+参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)、[控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)、[块请求协议规格](docs/specs/0018-block-protocol.md)、[协作式运行时规格](docs/specs/0019-cooperative-runtime.md)、[持久化块镜像规格](docs/specs/0020-persistent-block-image.md)、[YanFS 规格](docs/specs/0021-yanfs.md) 和 [终端文件操作规格](docs/specs/0022-terminal-file-operations.md)。
 
 ## 许可证
 

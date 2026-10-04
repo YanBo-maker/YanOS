@@ -1,6 +1,15 @@
 # 项目状态
 
-当前阶段：YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0021-yanfs.md) 于 2026-10-03 经项目所有者批准并锁定；格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收按同一格式交付。当前分支为 `codex/yanfs`，持久化后端已交付在 `d2efd72`。
+当前阶段：Guest终端文件操作实现与验证完成，[0022](specs/0022-terminal-file-operations.md) 于2026-10-03锁定；交付与理解程度待用户审查。当前分支为 `codex/terminal-fs`，基线为已交付YanFS的 `24b80bb`。
+
+- 规格批准：项目所有者本轮明确回复“批准整体方案，继续实现”，涵盖八命令、create仅创建/write仅覆盖、单行原始字节且无隐式LF、1023字节整行拒绝、UART中断等待、独立Guest与TTY恢复、cat中文/控制转义及正常exit/致命失败；总审核据此锁定0022。
+- 实现：行状态与显示、命令与FS、UART运行时、独立生产入口及TTY启动器已完成；别名、输出末字节与信号生命周期审查项已修复。
+- 验证：最新Release默认43/43（50.40 s）、ASan/UBSan默认43/43（77.88 s），九组实际变异9/9（86.57 s，-j3）；下方YanFS与持久化后端结果保留各阶段历史。
+- 用户审查：整体具体行为已批准，实现交付与理解程度待项目所有者审查。
+
+### YanFS 交付基线
+
+YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0021-yanfs.md) 于2026-10-03经项目所有者批准并锁定；格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收按同一格式交付。该阶段分支为 `codex/yanfs`，提交 `24b80bb`；持久化后端此前交付在 `d2efd72`。本轮批准终端方案不改变YanFS交付审查状态。
 
 - 规格批准：单根目录最多 63 文件，连续 extent 分配，覆盖先写新数据再发布目录；唯一元数据块写失败可能导致拒挂，不承诺断电一致性。
 - 实现：FS 核心、Linux mkfs、Guest 块适配与整体用例已完成；名称与输出边界、失败后的缓存发布、完整响应消费等审查项已修复。
@@ -41,9 +50,27 @@
 
 ## 验证
 
-### YanFS 初版（2026-10-03）
+### Guest 终端文件操作（2026-10-04）
 
-WSL Linux、GCC 11.4、C17 严格警告，启用 `YAN_BUILD_TOOLS`，具备 Python、Unity 与 RISC-V 交叉工具链，未配置外部参考模型。当前默认注册 37 组；Release 开启变异后共 45 组，包含八组实际变异。默认的 `yanfs_mutation_gate` 是分类器负控，不能被宽泛的 `-E mutation` 排除。
+WSL Linux、GCC 11.4、C17 严格警告，启用工具并具备 Python、Unity 与 RISC-V 交叉编译器，未配置外部参考模型。默认注册43组；Release开启实际变异后共52组，包含九组实际变异。默认的两个 `*_mutation_gate` 是分类器负控，必须保留在默认套件中。
+
+- Release默认：`ctest --test-dir build/terminal-release -E '_mutation$' --output-on-failure`，43/43，50.40 s。
+- Debug ASan/UBSan默认：`ctest --test-dir build/terminal-asan --output-on-failure`，43/43，77.88 s。
+- 九组实际变异：`ctest --test-dir build/terminal-release -R '_mutation$' -j3 --output-on-failure`，9/9，86.57 s；新终端组14个native与6个runtime非等价缺陷均命中具名具体断言，20检出、0存活、0harness error。
+
+默认与变异结果均0失败、0 SKIP。默认保存为对应目录 `final-default.log`，变异汇总和完整输出为Release的 `final-all-mutations-fixed.log`、`final-all-mutations-fixed-detail.log`；具名终端变异证据保存于 `build/terminal-final-mutation-evidence/`。两个配置完成 clean-first verbose 构建（`final-build.log`）；Host核心、native shell/line及真实runtime driver启用ASan/UBSan，生产Guest仍是严格 freestanding RV32IM，未受Host sanitizer插桩。独立 `BUILD_TESTING=OFF` 配置实际构建生产ELF、yan_run与yan_mkfs，不依赖tests或Unity。
+
+九组变异运行前后149个source/test/CMake输入的SHA-256相同。之后仅澄清shell.h中“FS从未初始化的普通INVALID”与“已初始化但未挂载的致命NOT_MOUNTED”注释，声明和实现未改；附加Release/ASan native shell/line各2/2通过（0.04 s/0.10 s）。最终149项清单总审核复算与当前文件一致。新的独立生产构建再次以实际ELF、yan_run与yan_mkfs执行files七场景，7通过、0失败、0harness error。
+
+shell 66个Unity用例、line 40个用例、launcher 15个PTY/生命周期用例、生产Guest files 7个场景和真实UART/runtime 27个场景随默认回归通过。真实窗口核对RXDATA保留、source2 mask/ack/wake/complete、消费后rearm、predicate只读与BLOCKED期间另一任务推进；六个输出阶段分别注入首/中/末字节失败，绑定精确应用故障码及输出前缀。独立whole-image oracle核对成功写、新进程读回、拒绝行不改盘和提交后输出失败仍保留新文件。cat显示以CPython严格UTF-8 decoder与16项literal自检作为独立判据。
+
+初期shell/FS别名探针触发invalid bool读取，修正为地址检测先于bool读取；TTY信号窗口探针曾出现属性未恢复，修正为raw前安装handler、restore后释放handler。PTY强制回收测试补SIG_IGN后READY屏障和实际-SIGKILL断言；receipt末byte注入曾命中CR，改为按接受byte计数命中末LF。内部oracle自检异常归HARNESS2。首次九组变异为8通过、1失败（124.34 s）：FS fatal变异预期误写unmount reason15，实际FAULTED可卸载并错误健康exit；门禁正确拒绝wrong-owner。改为绑定实际tohost1与预期SHELL_FATAL12后重跑，得到上述最终9/9。此前原八组8/8、185.04 s及默认43/43的45.75 s/75.97 s是独立阶段快照，不代替最终结果。早期局部green不代替这些失败与修复证据。
+
+限制保留：单行文本、按byte退格、不提供完整Unicode编辑；EOF不可见Guest，断开不产生新的IRQ，不能保证BLOCKED立即发现断开。没有输入deadline或WFI，空闲仍耗CPU；SIGKILL不保证TTY恢复。FS连续extent、覆盖峰值空间、唯一metadata块、无断电一致性和自动修复沿0021。实现交付与理解程度由项目所有者判断。
+
+### 历史测量：YanFS 初版（2026-10-03）
+
+WSL Linux、GCC 11.4、C17 严格警告，启用 `YAN_BUILD_TOOLS`，具备 Python、Unity 与 RISC-V 交叉工具链，未配置外部参考模型。该阶段默认注册 37 组；Release 开启变异后共 45 组，包含八组实际变异。默认的 `yanfs_mutation_gate` 是分类器负控，不能被宽泛的 `-E mutation` 排除。
 
 - Release 默认：`ctest --test-dir build/yanfs-release -E '_mutation$' --output-on-failure`，37/37，34.67 s。
 - Debug ASan/UBSan 默认（变异关闭）：`ctest --test-dir build/yanfs-asan --output-on-failure`，37/37，56.59 s。
@@ -156,7 +183,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-按 0021 完成文件系统整体实现、验证与独立审核，随后交项目所有者审查。
+交项目所有者审查终端文件操作：先从16块镜像创建5字节文件，观察整文件覆盖的extent切换与删除回收，再查看UART等待、拒绝整行和输出失败后的磁盘状态。下一项能力由项目所有者决定；0021继续作为镜像格式与FS接口基线。
 
 ### 历史推进记录（M1a / M2a）
 

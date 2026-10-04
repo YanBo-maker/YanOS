@@ -83,6 +83,38 @@ static inline int yan_os_uart_get(uint8_t *byte)
     return 0;
 }
 
+/* Read-only receive-ready query. It is the same STATUS bit yan_os_uart_get
+ * consults, so a caller that saw ready here cannot be told "no byte" by the
+ * take that immediately follows (unless another consumer took it first). */
+static inline int yan_os_uart_rx_ready(void)
+{
+    return (yan_os_uart_status() & YAN_OS_UART_STATUS_RX_READY) != 0;
+}
+
+/* Enable or disable the receive interrupt. The write is a read-modify-write of
+ * CONTROL so the reserved bits are preserved, which matters on real hardware
+ * and costs nothing here. The interrupt line is RX_READY && RX_IRQ_ENABLE, so
+ * clearing the enable is what actually withdraws an asserted line; the arrival
+ * latch alone is not enough. */
+static inline void yan_os_uart_set_rx_irq(int enable)
+{
+    uint32_t control = YAN_OS_MMIO_READ32(YAN_OS_UART_BASE + YAN_OS_UART_CONTROL);
+    if (enable) {
+        control |= YAN_OS_UART_CONTROL_RX_IRQ_ENABLE;
+    } else {
+        control &= ~YAN_OS_UART_CONTROL_RX_IRQ_ENABLE;
+    }
+    YAN_OS_MMIO_WRITE32(YAN_OS_UART_BASE + YAN_OS_UART_CONTROL, control);
+}
+
+/* Clear the arrival latch (write one to clear). This does not withdraw the
+ * interrupt line by itself; yan_os_uart_set_rx_irq(0) does that. */
+static inline void yan_os_uart_ack_rx(void)
+{
+    YAN_OS_MMIO_WRITE32(YAN_OS_UART_BASE + YAN_OS_UART_IRQ_STATUS,
+                        YAN_OS_UART_IRQ_RX_PENDING);
+}
+
 /* Host transport channel: one byte ring in each direction, control registers in
  * MMIO and a doorbell. See docs/specs/0014-host-transport-channel.md for the
  * register map and docs/specs/0018-block-protocol.md for the first payload

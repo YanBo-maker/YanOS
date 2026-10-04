@@ -39,6 +39,15 @@ set(YAN_RISCV_ARCH_TEST_DIR "" CACHE PATH
 set(YAN_SAIL_BIN "" CACHE FILEPATH
     "sail_riscv_sim used as the reference model for signature comparison")
 
+# Guest applications have a production build even when tests are disabled.
+set(_yan_gcc_names riscv64-unknown-elf-gcc riscv32-unknown-elf-gcc
+                   riscv64-linux-gnu-gcc)
+if(YAN_RISCV_PREFIX)
+    list(INSERT _yan_gcc_names 0 "${YAN_RISCV_PREFIX}gcc")
+endif()
+unset(YAN_RISCV_GCC CACHE)
+find_program(YAN_RISCV_GCC NAMES ${_yan_gcc_names})
+
 add_library(yan_machine STATIC src/ram.c src/bus.c src/machine.c src/cpu.c src/csr.c
                               src/interrupt.c src/image.c src/difftest.c
                               src/uart.c src/transport.c)
@@ -50,6 +59,14 @@ target_compile_options(yan_machine PRIVATE ${YAN_WARNINGS})
 add_library(yan_fs STATIC os/yanfs.c)
 target_include_directories(yan_fs PUBLIC os)
 target_compile_options(yan_fs PRIVATE ${YAN_WARNINGS})
+
+add_library(yan_shell STATIC os/shell.c)
+target_link_libraries(yan_shell PUBLIC yan_fs)
+target_compile_options(yan_shell PRIVATE ${YAN_WARNINGS})
+
+add_library(yan_line STATIC os/line.c)
+target_include_directories(yan_line PUBLIC os)
+target_compile_options(yan_line PRIVATE ${YAN_WARNINGS})
 
 if(YAN_BUILD_TOOLS)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -74,6 +91,42 @@ if(YAN_BUILD_TOOLS)
     endif()
 endif()
 
+if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
+    set(YAN_TERMINAL_ELF "${CMAKE_BINARY_DIR}/guest-apps/yanfs_terminal.elf")
+    set(_yan_terminal_sources
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/yanfs_terminal/main.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/trap_entry.S"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/task_switch.S"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/task.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/console.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/line.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/terminal.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/shell.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/block.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/yanfs.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/yanfs_block.c")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/os/memory.c")
+        list(APPEND _yan_terminal_sources "${CMAKE_CURRENT_SOURCE_DIR}/os/memory.c")
+    endif()
+    set(_yan_terminal_headers)
+    foreach(_header block console line platform shell task terminal yanfs yanfs_block)
+        list(APPEND _yan_terminal_headers "${CMAKE_CURRENT_SOURCE_DIR}/os/${_header}.h")
+    endforeach()
+    add_custom_command(OUTPUT "${YAN_TERMINAL_ELF}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/guest-apps"
+        COMMAND "${YAN_RISCV_GCC}" -std=c17 -march=rv32im -mabi=ilp32
+                -mcmodel=medany -static -nostdlib -nostartfiles -ffreestanding
+                -fno-builtin -fno-stack-protector -O2
+                -Wall -Wextra -Wpedantic -Werror
+                -I "${CMAKE_CURRENT_SOURCE_DIR}/os"
+                -T "${CMAKE_CURRENT_SOURCE_DIR}/os/guest.ld"
+                ${_yan_terminal_sources} -Wl,--build-id=none -o "${YAN_TERMINAL_ELF}"
+        DEPENDS ${_yan_terminal_sources} ${_yan_terminal_headers}
+                "${CMAKE_CURRENT_SOURCE_DIR}/os/guest.ld"
+        VERBATIM)
+    add_custom_target(yanfs_terminal ALL DEPENDS "${YAN_TERMINAL_ELF}")
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
     include(FetchContent)
@@ -91,6 +144,18 @@ if(BUILD_TESTING)
     target_compile_options(test_yanfs PRIVATE ${YAN_WARNINGS})
     add_test(NAME yanfs COMMAND test_yanfs)
     set_tests_properties(yanfs PROPERTIES TIMEOUT 30)
+
+    add_executable(test_shell tests/test_shell.c)
+    target_link_libraries(test_shell PRIVATE yan_shell unity::framework)
+    target_compile_options(test_shell PRIVATE ${YAN_WARNINGS})
+    add_test(NAME shell COMMAND test_shell)
+    set_tests_properties(shell PROPERTIES TIMEOUT 30)
+
+    add_executable(test_line tests/test_line.c)
+    target_link_libraries(test_line PRIVATE yan_line unity::framework)
+    target_compile_options(test_line PRIVATE ${YAN_WARNINGS})
+    add_test(NAME line COMMAND test_line)
+    set_tests_properties(line PROPERTIES TIMEOUT 30)
 
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # Native platform/framing doubles exercise the actual adapter source;
@@ -153,10 +218,49 @@ if(BUILD_TESTING)
     # builds anything; registering it here puts it in the default suite as well.
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME shell_launcher
+                COMMAND "${Python3_EXECUTABLE}" -B
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_shell_launcher.py"
+                        --launcher "${CMAKE_CURRENT_SOURCE_DIR}/tools/yan_shell.py"
+                        --work "${CMAKE_BINARY_DIR}/shell-launcher")
+            set_tests_properties(shell_launcher PROPERTIES TIMEOUT 180)
+            if(TARGET yanfs_terminal AND TARGET yan_mkfs AND TARGET yan_run_disk_close_fault)
+                add_test(NAME guest_terminal_files
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_terminal_files.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-terminal-files"
+                            --run "$<TARGET_FILE:yan_run>"
+                            --mkfs "$<TARGET_FILE:yan_mkfs>"
+                            --guest "${YAN_TERMINAL_ELF}"
+                            --close-fault-run "$<TARGET_FILE:yan_run_disk_close_fault>")
+                set_tests_properties(guest_terminal_files PROPERTIES TIMEOUT 600)
+                set(_yan_terminal_runtime_args)
+                if(YAN_ENABLE_SANITIZERS)
+                    list(APPEND _yan_terminal_runtime_args --sanitizers)
+                endif()
+                add_test(NAME guest_terminal_runtime
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_terminal_runtime.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-terminal-runtime"
+                            --cc "${CMAKE_C_COMPILER}"
+                            --gcc "${YAN_RISCV_GCC}"
+                            --guest "${YAN_TERMINAL_ELF}"
+                            ${_yan_terminal_runtime_args})
+                set_tests_properties(guest_terminal_runtime PROPERTIES
+                                     SKIP_RETURN_CODE 77 TIMEOUT 600)
+            endif()
+        endif()
         add_test(NAME yanfs_mutation_gate
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_yanfs_mutation_gate.py")
         set_tests_properties(yanfs_mutation_gate PROPERTIES TIMEOUT 120)
+        add_test(NAME terminal_mutation_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_terminal_mutation_gate.py")
+        set_tests_properties(terminal_mutation_gate PROPERTIES TIMEOUT 120)
         if(TARGET yan_mkfs_fault)
             add_test(NAME yanfs_mkfs
                 COMMAND "${Python3_EXECUTABLE}"
@@ -173,14 +277,6 @@ if(BUILD_TESTING)
     endif()
 
     # ---------------------------------------------------------------- external
-    set(_yan_gcc_names riscv64-unknown-elf-gcc riscv32-unknown-elf-gcc
-                       riscv64-linux-gnu-gcc)
-    if(YAN_RISCV_PREFIX)
-        list(INSERT _yan_gcc_names 0 "${YAN_RISCV_PREFIX}gcc")
-    endif()
-    unset(YAN_RISCV_GCC CACHE)
-    find_program(YAN_RISCV_GCC NAMES ${_yan_gcc_names})
-
     # The Guest trap environment needs a RISC-V toolchain and the DUT executor,
     # but no reference model: it exercises CSR and interrupt semantics that
     # NEMU cannot mirror.
@@ -398,6 +494,18 @@ if(BUILD_TESTING)
                              SKIP_RETURN_CODE 77 TIMEOUT 600)
     endif()
     if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC AND YAN_ENABLE_MUTATION_TESTS)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME terminal_mutation
+                COMMAND "${Python3_EXECUTABLE}" -B
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_terminal_mutation.py"
+                        --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                        --work "${YAN_MUTATION_WORK_ROOT}/terminal"
+                        --cc "${CMAKE_C_COMPILER}"
+                        --unity "${unity_SOURCE_DIR}"
+                        --gcc "${YAN_RISCV_GCC}")
+            set_tests_properties(terminal_mutation PROPERTIES
+                                 SKIP_RETURN_CODE 77 TIMEOUT 900)
+        endif()
         # Planted-defect run for the console: every mutation must be caught, so
         # a surviving defect fails this test rather than passing quietly.
         add_test(NAME guest_console_mutation

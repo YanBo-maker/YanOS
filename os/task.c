@@ -502,6 +502,16 @@ uint32_t yan_os_trap_handler(uint32_t mcause, uint32_t mepc, uint32_t mtval)
         /* 3. Mark the waiter runnable. Nothing else: no scheduling, no context
          *    switch, no state change for any other task. */
         yan_os_wake(YAN_OS_EVENT_TRANSPORT);
+    } else if (source == YAN_OS_PLIC_SOURCE_UART) {
+        /* The UART line is RX_READY && RX_IRQ_ENABLE, so clearing the latch
+         * alone would leave the level asserted and re-pend the source as soon
+         * as it is completed. Withdraw the level first by masking the enable,
+         * then clear the arrival latch. RXDATA is deliberately not read: the
+         * byte belongs to the line reader, which will re-arm and take it. */
+        yan_os_uart_set_rx_irq(0);
+        yan_os_uart_ack_rx();
+        /* 3. Mark the waiter runnable; the reader rechecks the device itself. */
+        yan_os_wake(YAN_OS_EVENT_UART);
     } else {
         /* No service routine for this device. Completing a source whose line is
          * still asserted pends it again immediately, which is an interrupt
