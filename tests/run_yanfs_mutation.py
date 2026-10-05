@@ -47,22 +47,39 @@ OS_FILES = ["yanfs.h", "yanfs.c", "yanfs_block.h", "yanfs_block.c",
             "block.h", "platform.h", "task.h"]
 TEST_FILES = ["test_yanfs.c", "test_yanfs_adapter.c"]
 
-# mutation name -> owning Unity test function (the test that must fail)
+# mutation name -> (owning Unity test function, required assertion marker)
+# The marker is the exact FAIL message the intended owning assertion prints in
+# the verified run; a same-owner failure on any other assertion does not match.
 OWNING_ASSERTIONS = {
-    "bad_crc_accepted": "mount_rejects_wrong_crc_unknown_magic_and_wrong_sizes",
-    "extent_overlap_accepted": "mount_checks_partial_extent_overlap_and_adjacency",
-    "tail_not_zeroed": "read_handles_all_lengths_and_tail_zero",
+    "bad_crc_accepted":
+        ("mount_rejects_wrong_crc_unknown_magic_and_wrong_sizes",
+         "YFS bad_crc accepted"),
+    "extent_overlap_accepted":
+        ("mount_checks_partial_extent_overlap_and_adjacency",
+         "YFS extent overlap accepted"),
+    "tail_not_zeroed":
+        ("read_handles_all_lengths_and_tail_zero",
+         "the bytes past the logical end must be zero"),
     "cache_published_before_validation":
-        "mount_never_writes_and_publishes_cache_only_after_validation",
-    "faulted_cache_still_read": "faulted_instance_refuses_cached_views",
+        ("mount_never_writes_and_publishes_cache_only_after_validation",
+         "YFS cache published early"),
+    "faulted_cache_still_read":
+        ("faulted_instance_refuses_cached_views", "YFS faulted read allowed"),
     "first_fit_ignores_fragmentation":
-        "create_reports_nospace_for_fragmented_free_space",
-    "error_frame_waits_for_payload": "read_device_error_is_io_without_waiting",
-    "wrong_tag_accepted": "wrong_tag_full_frame_is_consumed_then_rejected",
+        ("create_reports_nospace_for_fragmented_free_space",
+         "two free blocks that are not adjacent cannot hold a two-block file"),
+    "error_frame_waits_for_payload":
+        ("read_device_error_is_io_without_waiting",
+         "the adapter must not wait on a complete 16-byte error frame"),
+    "wrong_tag_accepted":
+        ("wrong_tag_full_frame_is_consumed_then_rejected",
+         "YFS wrong tag accepted"),
     "extent_start_range_accepted":
-        "mount_rejects_out_of_range_and_overlapping_extents",
+        ("mount_rejects_out_of_range_and_overlapping_extents",
+         "YFS extent start accepted"),
     "replace_borrows_old_extent":
-        "replace_cannot_borrow_its_own_extent_at_peak",
+        ("replace_cannot_borrow_its_own_extent_at_peak",
+         "a replacement cannot reuse the extent it is replacing"),
 }
 
 MUTATIONS = [
@@ -218,6 +235,7 @@ NO_EFFECT = {
     "old": "#include <stddef.h>\n",
     "new": "#include <stddef.h> /* no-effect control */\n",
     "owner": "read_handles_all_lengths_and_tail_zero",
+    "assertion": "no-effect-control",
 }
 WRONG_OWNER = {
     "name": "wrong-owner-control",
@@ -225,11 +243,12 @@ WRONG_OWNER = {
     "old": "            fs->scratch[j] = j < chunk ? bytes[offset + j] : 0u;\n",
     "new": "            fs->scratch[j] = j < chunk ? bytes[offset + j] : 0xA5u;\n",
     "owner": "format_encodes_capacity_little_endian",
+    "assertion": "wrong-owner-control",
 }
 
 FOOTER = re.compile(r"^\s*(\d+) Tests (\d+) Failures (\d+) Ignored\s*$")
 RECORD = re.compile(
-    r"^([^\s:]+):(\d+):([A-Za-z_][A-Za-z0-9_]*):(PASS|FAIL|IGNORE)\b.*$")
+    r"^([^\s:]+):(\d+):([A-Za-z_][A-Za-z0-9_]*):(PASS|FAIL|IGNORE)\b(.*)$")
 BREAKER = re.compile(r"^\s*-{3,}\s*$")
 TERMINAL = re.compile(r"^\s*(OK|FAIL)\s*$")
 HARNESS_HINTS = (b"sanitizer", b"runtime error:", b"harness-error", b"fixture abort")
@@ -242,19 +261,19 @@ class HarnessError(RuntimeError):
 def parse_unity(stdout):
     """Strict decode of one Unity suite's stdout.
 
-    Returns (tests, failures, ignored, fail_names) only for a complete,
-    self-consistent run: exactly one breaker/footer pair, one recorded line per
-    test, counters that match the footer exactly (a swallowed IGNORE or a FAIL
-    the footer does not count is a mismatch), the terminal OK/FAIL line that
-    agrees with the failure count, and no record after the footer. Anything
-    else -- empty stdout, partial output, a missing or duplicated footer, a
-    count mismatch -- returns None, which the caller treats as a harness error,
-    never as a detection.
+    Returns (tests, failures, ignored, fail_names, fail_messages) only for a
+    complete, self-consistent run. fail_messages maps a failing test name to the
+    message Unity printed after "FAIL:" (the assertion detail), so a caller can
+    require the *specific* assertion that the mutation is meant to trip instead
+    of crediting any failure of that test. Anything else -- empty stdout, partial
+    output, a missing or duplicated footer, a count mismatch -- returns None,
+    which the caller treats as a harness error, never as a detection.
     """
     text = stdout.decode("utf-8", "replace")
     lines = [line.rstrip("\r") for line in text.split("\n")]
     footers = []
     records = []
+    fail_messages = {}
     for index, line in enumerate(lines):
         footer = FOOTER.match(line)
         if footer is not None:
@@ -262,7 +281,18 @@ def parse_unity(stdout):
             continue
         record = RECORD.match(line)
         if record is not None:
-            records.append((index, record.group(3), record.group(4)))
+            name = record.group(3)
+            status = record.group(4)
+            message = record.group(5).strip()
+            records.append((index, name, status))
+            if status == "FAIL":
+                fail_messages[name] = message
+    names = [name for _index, name, _status in records]
+    if len(set(names)) != len(names):
+        # Duplicate records for the same test (two FAILs, or a PASS and a FAIL)
+        # make the Unity output ambiguous: reject the whole run as harness, even
+        # if a fake footer's counts would otherwise look consistent.
+        return None
     if len(footers) != 1:
         return None
     footer_index, (tests, failures, ignored) = footers[0]
@@ -279,22 +309,24 @@ def parse_unity(stdout):
         return None
     fail_names = [name for _index, name, status in records if status == "FAIL"]
     ignored_names = [name for _index, name, status in records if status == "IGNORE"]
-    pass_count = sum(1 for _index, _name, status in records if status == "PASS")
     if tests < 1 or tests != len(records):
         return None
     if failures != len(fail_names) or ignored != len(ignored_names):
         return None
-    return tests, failures, ignored, fail_names
+    return tests, failures, ignored, fail_names, fail_messages
 
 
-def classify_run(returncode, stdout, stderr, owner):
+def classify_run(returncode, stdout, stderr, owner, assertion=None):
     """Pure verdict for one suite's run.
 
     A detection needs a complete Unity run whose exit code equals the footer's
-    failure count and whose failing tests include the declared owner. Exit 0
-    with no output, a bare FAIL without a footer, a signal (negative or the
-    shell's 128+ form), a timeout, a sanitizer/abort report, or any counter
-    inconsistency is a harness error, never a detection.
+    failure count, whose failing tests include the declared owner, and whose
+    owner FAIL message contains the required `assertion` marker (the specific
+    assertion the mutation is meant to trip). A missing marker is a harness
+    error, never a detection: an unrelated failure of the same owner must not be
+    credited. Exit 0 with no output, a bare FAIL without a footer, a signal
+    (negative or the shell's 128+ form), a timeout, a sanitizer/abort report, or
+    any counter inconsistency is a harness error, never a detection.
     """
     text = stdout + b"\n" + stderr
     lowered = text.lower()
@@ -307,7 +339,7 @@ def classify_run(returncode, stdout, stderr, owner):
     parsed = parse_unity(stdout)
     if parsed is None:
         return "harness"
-    _tests, failures, _ignored, fail_names = parsed
+    _tests, failures, _ignored, fail_names, fail_messages = parsed
     if returncode != failures:
         return "harness"
     if returncode == 0:
@@ -316,9 +348,17 @@ def classify_run(returncode, stdout, stderr, owner):
         return "pass"
     if not fail_names:
         return "harness"
-    if owner in fail_names:
+    if not owner:
         return "owner-fail"
-    return "wrong-owner"
+    if not assertion:
+        # An actual mutant must supply its expected assertion marker; missing
+        # metadata is never silently accepted as a detection.
+        return "harness"
+    if owner not in fail_names:
+        return "wrong-owner"
+    if assertion in fail_messages.get(owner, ""):
+        return "owner-fail"
+    return "wrong-assertion"
 
 
 def apply_replacement(path, old, new):
@@ -416,28 +456,43 @@ def run_binary(path):
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def run_suites(bin_core, bin_adapter, owner):
+def run_suites(bin_core, bin_adapter, owner, assertion=None):
     rc_core, out_core, err_core = run_binary(bin_core)
     rc_adapter, out_adapter, err_adapter = run_binary(bin_adapter)
-    verdict_core = classify_run(rc_core, out_core, err_core, owner)
-    verdict_adapter = classify_run(rc_adapter, out_adapter, err_adapter, owner)
+    verdict_core = classify_run(rc_core, out_core, err_core, owner, assertion)
+    verdict_adapter = classify_run(rc_adapter, out_adapter, err_adapter, owner,
+                                   assertion)
     blob = out_core + err_core + out_adapter + err_adapter
-    if verdict_core == "harness" or verdict_adapter == "harness":
+    verdicts = (verdict_core, verdict_adapter)
+    if "harness" in verdicts:
         return "harness", blob
-    if verdict_core == "owner-fail" or verdict_adapter == "owner-fail":
+    if "owner-fail" in verdicts:
         return "owner-fail", blob
-    if verdict_core == "wrong-owner" or verdict_adapter == "wrong-owner":
+    if "wrong-assertion" in verdicts:
+        return "wrong-assertion", blob
+    if "wrong-owner" in verdicts:
         return "wrong-owner", blob
     return "pass", blob
 
 
 def unity_suite(records):
-    """Build a complete, self-consistent Unity stdout for the mocked controls."""
-    failures = sum(1 for _name, status in records if status == "FAIL")
-    ignored = sum(1 for _name, status in records if status == "IGNORE")
+    """Build a complete, self-consistent Unity stdout for the mocked controls.
+
+    A record is (name, status) or (name, status, message); the message is the
+    assertion detail after "FAIL:".
+    """
+    failures = 0
+    ignored = 0
     lines = []
-    for index, (name, status) in enumerate(records, start=1):
-        suffix = ": message" if status == "FAIL" else ""
+    for index, record in enumerate(records, start=1):
+        name = record[0]
+        status = record[1]
+        message = record[2] if len(record) > 2 else "message"
+        if status == "FAIL":
+            failures += 1
+        elif status == "IGNORE":
+            ignored += 1
+        suffix = (": " + message) if status in ("FAIL", "IGNORE") else ""
         lines.append("tests/test_yanfs.c:%d:%s:%s%s" % (index, name, status, suffix))
     lines.append("-----------------------")
     lines.append("%d Tests %d Failures %d Ignored " % (len(records), failures,
@@ -447,34 +502,43 @@ def unity_suite(records):
 
 
 def self_test_run_suites():
-    """Permanent mocked controls for run_suites' precedence.
+    """Permanent mocked controls for run_suites' precedence and the required
+    assertion marker.
 
     A harness symptom on either suite must win over an owner failure on the
-    other; an owner failure must win over a wrong-owner failure. This runs
-    without a compiler, so yanfs_mutation_gate covers it in the default suite.
+    other; the owner must fail on the required assertion, not merely on some
+    assertion of the same test; an owner failure must win over a wrong-owner
+    failure. This runs without a compiler, so yanfs_mutation_gate covers it in
+    the default suite.
     """
+    marker = "OWNER-ASSERTION-MARKER"
     pass_suite = (0, unity_suite([("a", "PASS"), ("b", "PASS")]), b"")
-    owner_suite = (1, unity_suite([("owner", "FAIL")]), b"")
-    other_suite = (1, unity_suite([("other", "FAIL")]), b"")
+    owner_suite = (1, unity_suite([("owner", "FAIL", marker)]), b"")
+    wrong_assertion_suite = (1, unity_suite([("owner", "FAIL", "other value")]), b"")
+    other_suite = (1, unity_suite([("other", "FAIL", marker)]), b"")
+    no_marker_suite = (1, unity_suite([("owner", "FAIL")]), b"")
     empty_suite = (0, b"", b"")
     timeout_suite = (None, b"", b"")
-    signal_suite = (139, unity_suite([("owner", "FAIL")]), b"")
+    signal_suite = (139, unity_suite([("owner", "FAIL", marker)]), b"")
     exit2_suite = (2, b"", b"")
     cases = [
-        (pass_suite, pass_suite, "pass"),
-        (owner_suite, pass_suite, "owner-fail"),
-        (pass_suite, owner_suite, "owner-fail"),
-        (other_suite, pass_suite, "wrong-owner"),
-        (other_suite, owner_suite, "owner-fail"),
-        (empty_suite, owner_suite, "harness"),
-        (owner_suite, empty_suite, "harness"),
-        (timeout_suite, owner_suite, "harness"),
-        (signal_suite, pass_suite, "harness"),
-        (exit2_suite, owner_suite, "harness"),
+        (pass_suite, pass_suite, marker, "pass"),
+        (owner_suite, pass_suite, marker, "owner-fail"),
+        (pass_suite, owner_suite, marker, "owner-fail"),
+        (wrong_assertion_suite, pass_suite, marker, "wrong-assertion"),
+        (other_suite, pass_suite, marker, "wrong-owner"),
+        (other_suite, owner_suite, marker, "owner-fail"),
+        (no_marker_suite, pass_suite, None, "harness"),
+        (no_marker_suite, pass_suite, marker, "wrong-assertion"),
+        (empty_suite, owner_suite, marker, "harness"),
+        (owner_suite, empty_suite, marker, "harness"),
+        (timeout_suite, owner_suite, marker, "harness"),
+        (signal_suite, pass_suite, marker, "harness"),
+        (exit2_suite, owner_suite, marker, "harness"),
     ]
     original = run_binary
     try:
-        for index, (core, adapter, expected) in enumerate(cases):
+        for index, (core, adapter, assertion, expected) in enumerate(cases):
             responses = {"test_yanfs": core, "test_yanfs_adapter": adapter}
 
             def stub(path, _responses=responses):
@@ -482,7 +546,8 @@ def self_test_run_suites():
 
             globals()["run_binary"] = stub
             verdict, _blob = run_suites("/mock/test_yanfs",
-                                        "/mock/test_yanfs_adapter", "owner")
+                                        "/mock/test_yanfs_adapter", "owner",
+                                        assertion)
             if verdict != expected:
                 raise HarnessError(
                     "run_suites control %d: got %s, expected %s"
@@ -513,6 +578,11 @@ def owner_fail_line(blob, owner):
 
 def run_mutation(source, tree_root, cc, mutation, logdir):
     owner = mutation["owner"]
+    assertion = mutation.get("assertion")
+    if not assertion:
+        # An actual mutant must declare the assertion it is meant to trip; never
+        # fall back to "any failure of the owner".
+        raise HarnessError("%s: no required assertion marker" % mutation["name"])
     tree = tree_root / ("mut-" + mutation["name"])
     shutil.copytree(tree_root / "baseline", tree,
                     ignore=shutil.ignore_patterns("bin"))
@@ -522,7 +592,7 @@ def run_mutation(source, tree_root, cc, mutation, logdir):
     if core_build.returncode != 0 or adapter_build.returncode != 0:
         write_log(logdir, mutation["name"], build_report)
         raise HarnessError("%s: mutant build failed" % mutation["name"])
-    verdict, blob = run_suites(core_bin, adapter_bin, owner)
+    verdict, blob = run_suites(core_bin, adapter_bin, owner, assertion)
     write_log(logdir, mutation["name"], build_report + b"\n" + blob)
     return verdict, blob
 
@@ -561,9 +631,9 @@ def main():
         return 1
     for name in OWNING_ASSERTIONS:
         match = next(item for item in MUTATIONS if item["name"] == name)
-        if not owner_exists(source, OWNING_ASSERTIONS[name], match["file"]):
+        if not owner_exists(source, OWNING_ASSERTIONS[name][0], match["file"]):
             print("FAIL owning test %s is not registered for %s"
-                  % (OWNING_ASSERTIONS[name], name), file=sys.stderr)
+                  % (OWNING_ASSERTIONS[name][0], name), file=sys.stderr)
             return 1
 
     args.work.mkdir(parents=True, exist_ok=True)
@@ -591,6 +661,7 @@ def main():
         for control, expected in ((NO_EFFECT, "pass"), (WRONG_OWNER, "wrong-owner")):
             entry = dict(control)
             entry["owner"] = control["owner"]
+            entry["assertion"] = control["assertion"]
             outcome, _ = run_mutation(source, tree_root, args.cc, entry, logdir)
             if outcome != expected:
                 print("HARNESS-ERROR: control %s was %s, expected %s"
@@ -600,7 +671,9 @@ def main():
 
         for mutation in MUTATIONS:
             mutation = dict(mutation)
-            mutation["owner"] = OWNING_ASSERTIONS[mutation["name"]]
+            owner, assertion = OWNING_ASSERTIONS[mutation["name"]]
+            mutation["owner"] = owner
+            mutation["assertion"] = assertion
             try:
                 outcome, blob = run_mutation(source, tree_root, args.cc, mutation,
                                              logdir)
@@ -609,13 +682,18 @@ def main():
                 print("HARNESS-ERROR %s: %s" % (mutation["name"], error))
                 continue
             if outcome == "owner-fail":
-                print("PASS mutant %s: owner %s failed -> %s"
-                      % (mutation["name"], mutation["owner"],
+                print("PASS mutant %s: owner %s failed on %r -> %s"
+                      % (mutation["name"], mutation["owner"], mutation["assertion"],
                          owner_fail_line(blob, mutation["owner"])))
             elif outcome == "harness":
                 harness.append((mutation["name"], "run classified as harness"))
                 print("HARNESS-ERROR %s: run classified as harness (never "
                       "detected)" % mutation["name"])
+            elif outcome == "wrong-assertion":
+                survivors.append((mutation["name"], "wrong assertion"))
+                print("FAIL mutant %s: owner %s failed, but not on the required"
+                      " assertion %r" % (mutation["name"], mutation["owner"],
+                                         mutation["assertion"]))
             elif outcome == "wrong-owner":
                 wrong = "a test other than %s failed" % mutation["owner"]
                 survivors.append((mutation["name"], wrong))

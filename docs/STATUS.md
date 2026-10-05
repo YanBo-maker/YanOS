@@ -1,11 +1,15 @@
 # 项目状态
 
-当前阶段：YanFS read状态/参数返回优先级已修复并验证，符合已锁定0021；当前分支为 `codex/fs-read-state-order`。终端能力此前交付在 `a8e1026`，YanFS基线为 `24b80bb`；交付与理解程度仍待用户审查。
+当前阶段：多行文本编辑整体实现与验证完成，[0023](specs/0023-multiline-text-editor.md) 于2026-10-05 09:22 +08:00经项目所有者批准并锁定；交付与理解程度待用户审查。当前分支为 `codex/multiline-editor`，基线为read状态优先修复 `1daae9f`。
 
-- 规格批准：项目所有者本轮明确回复“批准整体方案，继续实现”，涵盖八命令、create仅创建/write仅覆盖、单行原始字节且无隐式LF、1023字节整行拒绝、UART中断等待、独立Guest与TTY恢复、cat中文/控制转义及正常exit/致命失败；总审核据此锁定0022。
-- 实现：已交付终端的行状态与显示、命令与FS、UART运行时、独立生产入口及TTY启动器已完成；本轮read改为先检查状态，再判断字数输出指针，补充状态与无效参数组合的永久测试，未修改规格语义。
-- 验证：2026-10-05修复后Release默认43/43（17.16 s）、ASan/UBSan默认43/43（33.15 s），九组实际变异9/9（87.45 s，均-j3），0失败、0SKIP；旧交付与修前测量保留为历史。
-- 用户审查：整体具体行为已批准，实现交付与理解程度待项目所有者审查。
+- 规格批准：edit NAME、a/r/d/p/w/q、16KiB静态草稿、合法UTF-8文本与已有TAB、保留LF/CRLF/无末LF、一次save和取消不写盘；普通保存错误留稿，FS或输出fatal沿0022。项目所有者已认可形成规格并继续实现。
+- 实现：公共编辑核心、应用模式路由、真实Guest与故障验收已完成；原八命令与文件系统格式保持。0023记录公开接口、确认token与新增应用原因码18–21。
+- 验证：最终Release默认47/47（28.88 s）、ASan/UBSan默认47/47（48.86 s），十组实际变异10/10（130.76 s，均-j3），0失败、0SKIP。编辑核心64例、真实Guest15项与故障33项通过；11个编辑器变异均命中指定owner及具体断言。细节与限制见本页「验证」。
+- 用户审查：具体行为已批准，实现交付与理解程度待项目所有者审查。
+
+### 已交付终端与状态优先修复
+
+终端八命令在 `a8e1026` 交付；2026-10-05的 `1daae9f` 修复read先状态后参数，符合锁定0021，没有修改规格语义。修复后Release默认43/43（17.16 s）、ASan/UBSan默认43/43（33.15 s）、九组实际变异9/9（87.45 s，均-j3），0失败、0SKIP。旧交付、修前及修后测量保留在「验证」，交付审查与学习仍由项目所有者判断。
 
 ### YanFS 交付基线
 
@@ -46,9 +50,29 @@ YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0
 - `yan_gen` 随机 RV32IM 指令流生成器（给定种子确定输出），以及 5 个手写 Guest 用例。
 - C17 / CMake 构建、Unity 单元测试、CTest 及 GitHub Actions。
 
-详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前0022配置默认43组、开实际变异后52组；0020于2026-10-03的32/39组保留在本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；各组的通过情况以本页「验证」一节为准。
+详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前0023配置默认47组、开实际变异后57组；0022的43/52组与0020于2026-10-03的32/39组保留在本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；各组的通过情况以本页「验证」一节为准。
 
 ## 验证
+
+### 多行文本编辑（2026-10-05）
+
+最终配置使用Linux/WSL工具链，Release开启实际变异，Debug开启ASan/UBSan且关闭实际变异。Release注册57组，其中默认47组、实际变异10组；默认三个 `*_mutation_gate` 随回归运行，不被 `_mutation$` 过滤。构建日志 `build/editor-final-release-build.log` 与 `build/editor-final-asan-build.log` 均完成，没有warning/error匹配。
+
+- Release默认：`ctest --test-dir build/editor-release -E '_mutation$' -j3 --output-on-failure`，47/47，28.88 s。
+- ASan/UBSan默认：`ctest --test-dir build/editor-asan -j3 --output-on-failure`，47/47，48.86 s。
+- 十组实际变异：`ctest --test-dir build/editor-release -R '_mutation$' -j3 --output-on-failure`，10/10，130.76 s。
+
+上述均0失败、0SKIP；保存日志分别为 `build/editor-final-release-tests.log`、`build/editor-final-asan-tests.log`、`build/editor-final-mutations.log`，实际变异逐项证据保存在 `build/editor-final-mutations-detail.log`。11个编辑器变异均命中唯一指定owner和具体断言，0存活、0harness error，涵盖LF、CRLF、完整载入、容量拒绝、q无写、修改不立即写、固定create/replace、提交后输出失败以及名称内嵌NUL。真实no-effect与wrong-owner控制先运行；puregate拒绝同owner无关断言、marker只出现在stderr/PASS、缺metadata、重复记录及异常footer。
+
+全量结束后补强editor puregate的PASS-marker构造：先以永久检查复现fixture丢掉marker，再显式放入PASS记录；FS已有此记录，新增同类构造检查。两组puregate后验2/2（1.14 s），日志 `build/editor-final-pure-pass-marker.log`，总审核另行运行确认。只修改控制输入，不改生产、实际变异或指定断言；以上全量测量保留为本轮真实执行，不伪称重跑耗时。
+
+核心64例覆盖文本/EOL、16384容量原子性、输入/地址边界、重入、保存与输出故障。真实生产Guest15项用独立struct/zlib和完整镜像oracle核新建、修改、取消、空间不足、跨块中文及同进程连续会话；新进程cat读回保存字节。33项故障含两个健康baseline，分别核首/中/末输出字节、加载/保存IO以及两块加载响应错tag；应用原因19/17/9精确匹配，输出前缀与镜像分别断言。保存已发布后的输出失败保留新文件，不声称回滚。
+
+新增原生门禁复核发现共享分类器此前只要求owner；本轮补具体assertion marker及永久same-owner无关断言、marker非FAIL、duplicate和harness优先控制。YanFS10项、终端14个native项和6个runtime项现均通过对应判据；旧真实检出与测量保留，不把这次门禁缺口改写成历史回归失败。另以tests-first修复editor显式长度NAME中的NUL被截断为合法前缀；64例中包含完整拒绝和合法非NUL终止短名，总审核原探针重新严格ASan编译确认拒绝。
+
+生产 `BUILD_TESTING=OFF` 独立ext4配置构建三个目标并运行同15项Guest验收，日志 `build/editor-off-final-build.log` 与 `build/editor-off-final-guest.log`，不依赖Unity或测试Guest库。当前ELF text 29920、data 40、BSS 80108字节；editor对象静态持有。11个生产C单元的90个静态帧合计2480字节、单帧最大528，editor start为144、app为96，无动态帧；这是编译器帧报告，不构成完整调用、递归或ISR嵌套栈上界证明。
+
+故障driver只注入一次下一块请求IO失败，未单独注入保存的第二次metadata写失败；该边界仍沿0021。单根目录、连续extent碎片与覆盖峰值空间、单metadata写失败可能拒挂、无断电恢复、无deadline以及UTF-8按byte退格等限制保持。实现与验证完成，用户交付审查和理解程度仍待项目所有者判断。
 
 ### 规格与实现匹配复核（2026-10-05）
 
@@ -197,7 +221,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-项目所有者已批准下一项多行文本编辑整体方案：行式草稿命令、16KiB、合法UTF-8文本、保留已有换行格式、一次保存与取消不写盘。当前优先级修复单独收口后，在新分支形成0023并开始实现；编辑器尚未实现或验证。终端与文件系统已交付能力的学习和审查仍由项目所有者判断。
+审阅已实现的0023编辑流程、保存与取消的实际字节变化，再由项目所有者选择下一项能力。编辑器、终端与文件系统的交付审查和学习程度仍由项目所有者判断；尚无新能力规格锁定。
 
 ### 历史推进记录（M1a / M2a）
 

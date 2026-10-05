@@ -75,7 +75,7 @@ HOST_HEADERS = [
 GUEST_HEADERS = [
     "tests/guest/guest.h", "os/block.h", "os/console.h", "os/line.h",
     "os/platform.h", "os/shell.h", "os/task.h", "os/terminal.h", "os/yanfs.h",
-    "os/yanfs_block.h",
+    "os/yanfs_block.h", "os/editor.h",
 ]
 SANITIZER_FLAGS = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all",
                    "-fno-omit-frame-pointer"]
@@ -98,7 +98,7 @@ TOHOST_LINE_UNAVAILABLE = 0x71000009
 TOHOST_SHELL_FATAL = 0x7100000C
 TOHOST_OUTPUT = 0x71000011
 APP_FAIL_TOP = 0x71000000
-APP_REASON_LAST = 17
+APP_REASON_LAST = 21
 
 # tests/guest/terminal_wait_check.c: TW_FAIL(reason) = 0x72000000 | reason.
 FIXTURE_FAIL_TOP = 0x72000000

@@ -421,7 +421,8 @@ static void create_makes_a_new_file_with_the_exact_text(void)
     expect_output("OK create\r\n");
     YanFsInfo info;
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_stat(&fs, "hello.txt", &info));
-    TEST_ASSERT_EQUAL_UINT32(5u, info.size_bytes);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(5u, info.size_bytes,
+                                     "TML text_gets_implicit_lf");
     uint8_t readback[8];
     uint32_t read_bytes = 0u;
     TEST_ASSERT_EQUAL_INT(
@@ -463,7 +464,8 @@ static void write_preserves_extra_leading_and_trailing_spaces(void)
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_OK, yan_fs_read(&fs, "hello.txt", 0u, readback, 8u, &read_bytes));
     TEST_ASSERT_EQUAL_UINT32(7u, read_bytes);
-    TEST_ASSERT_EQUAL_MEMORY(" world ", readback, 7u);
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(" world ", readback, 7u,
+                                     "TML text_swallows_leading_space");
 }
 
 static void create_allows_spaces_between_command_and_name(void)
@@ -490,7 +492,12 @@ static void create_duplicate_reports_exists_and_keeps_the_original(void)
     reset_counters();
     reset_capture();
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("create dup other"));
-    expect_output("ERROR EXISTS\r\n");
+    static const char expected_exists[] = "ERROR EXISTS\r\n";
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(sizeof expected_exists - 1u, capture.length,
+                                     "TML create_replace_swapped");
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(expected_exists, capture.bytes,
+                                     sizeof expected_exists - 1u,
+                                     "TML bytes create_replace_swapped");
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
     TEST_ASSERT_TRUE(medium_unchanged());
     uint8_t readback[16];
@@ -576,7 +583,8 @@ static void rm_missing_file_reports_not_found(void)
 static void exit_writes_ok_and_returns_exit(void)
 {
     reset_capture();
-    TEST_ASSERT_EQUAL_INT(YAN_SHELL_EXIT, execute_text("exit"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SHELL_EXIT, execute_text("exit"),
+                                  "TML exit_reported_ok");
     expect_output("OK exit\r\n");
 }
 
@@ -866,7 +874,12 @@ static void write_io_error_reports_io_and_faults(void)
     device.write_status = YAN_FS_IO_ERROR;
     reset_capture();
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_FATAL, execute_text("create a hi"));
-    expect_output("ERROR IO\r\n");
+    static const char expected_io[] = "ERROR IO\r\n";
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(sizeof expected_io - 1u, capture.length,
+                                     "TML io_named_as_protocol");
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(expected_io, capture.bytes,
+                                     sizeof expected_io - 1u,
+                                     "TML bytes io_named_as_protocol");
     TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
     reset_capture();
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_FATAL, execute_text("stat a"));
@@ -990,7 +1003,10 @@ static void cat_escapes_backslash_and_c0_and_del(void)
     position = append_escape(expected, position, 0x7fu);
     expected[position++] = (uint8_t)'b';
     append_text(expected, &position, "\r\nOK cat\r\n");
-    expect_bytes(expected, position);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(position, capture.length,
+                                     "TML cat_ascii_controls_raw");
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(expected, capture.bytes, position,
+                                     "TML bytes cat_ascii_controls_raw");
 }
 
 static void cat_escapes_c1_controls_but_passes_other_utf8(void)
@@ -1143,7 +1159,11 @@ static void cat_of_a_large_file_reads_every_chunk(void)
     static uint8_t expected[sizeof content + 16];
     memcpy(expected, content, sizeof content);
     memcpy(expected + sizeof content, "\r\nOK cat\r\n", 10u);
-    expect_bytes(expected, sizeof content + 10u);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(sizeof content + 10u, capture.length,
+                                     "TML cat_skips_a_chunk_byte");
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(expected, capture.bytes,
+                                     sizeof content + 10u,
+                                     "TML bytes cat_skips_a_chunk_byte");
     TEST_ASSERT_TRUE(device.reads > 1u);
 }
 
@@ -1172,7 +1192,8 @@ static void output_failure_in_the_middle_stops_immediately(void)
 static void output_failure_on_the_exit_tail_is_fatal_not_exit(void)
 {
     capture.fail_at = 9u; /* the final '\n' of "OK exit\r\n" */
-    TEST_ASSERT_EQUAL_INT(YAN_SHELL_FATAL, execute_text("exit"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SHELL_FATAL, execute_text("exit"),
+                                  "TML exit_ignores_output_failure");
     TEST_ASSERT_TRUE(capture.fail_seen);
     TEST_ASSERT_EQUAL_UINT32(8u, capture.length);
     TEST_ASSERT_EQUAL_MEMORY("OK exit\r", capture.bytes, 8u);
@@ -1349,7 +1370,8 @@ static void faulted_filesystem_stops_output_only_commands(void)
 {
     device.write_status = YAN_FS_IO_ERROR;
     reset_capture();
-    TEST_ASSERT_EQUAL_INT(YAN_SHELL_FATAL, execute_text("create a hi"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SHELL_FATAL, execute_text("create a hi"),
+                                  "TML faulted_reported_ok");
     expect_output("ERROR IO\r\n");
 
     reset_capture();

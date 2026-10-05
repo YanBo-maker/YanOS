@@ -887,7 +887,9 @@ static void wrong_tag_full_frame_is_consumed_then_rejected(void)
 
     YanFsBlockIo io = backend();
     uint8_t out[YAN_OS_BLOCK_BLOCK_SIZE];
-    TEST_ASSERT_EQUAL_INT(YAN_FS_IO_PROTOCOL, io.read_block(io.context, 0u, out));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_IO_PROTOCOL,
+                                  io.read_block(io.context, 0u, out),
+                                  "YFS wrong tag accepted");
     TEST_ASSERT_TRUE(adapter.failed);
     TEST_ASSERT_EQUAL_UINT32(1u, mock_take_calls);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(

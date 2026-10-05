@@ -94,7 +94,7 @@ NATIVE_HEADERS = [
     "tests/test_shell.c", "tests/test_line.c",
     "os/shell.h", "os/yanfs.h", "os/line.h", "os/platform.h", "os/block.h",
     "os/task.h", "os/console.h", "os/terminal.h", "os/yanfs_block.h",
-    "tests/run_yanfs_mutation.py",
+    "tests/run_yanfs_mutation.py", "os/editor.h",
 ]
 
 # runtime production build recipe (the app plus the platform it links).
@@ -102,7 +102,7 @@ PRODUCTION_SOURCES = [
     "apps/yanfs_terminal/main.c", "os/trap_entry.S", "os/task_switch.S",
     "os/task.c", "os/block.c", "os/console.c", "os/yanfs.c",
     "os/yanfs_block.c", "os/shell.c", "os/line.c", "os/terminal.c",
-    "os/memory.c",
+    "os/memory.c", "os/editor.c",
 ]
 CROSS_FLAGS = [
     "-march=rv32im", "-mabi=ilp32", "-mcmodel=medany", "-nostdlib",
@@ -460,6 +460,7 @@ NO_EFFECT = {
     "old": "#include <stddef.h>\n",
     "new": "#include <stddef.h> /* no-effect control */\n",
     "owner": "exit_writes_ok_and_returns_exit",
+    "assertion": "no-effect-control",
 }
 WRONG_OWNER = {
     "name": "wrong-owner-control",
@@ -467,6 +468,27 @@ WRONG_OWNER = {
     "old": '    case YAN_FS_IO: return "IO";\n',
     "new": '    case YAN_FS_IO: return "PROTOCOL";\n',
     "owner": "cat_of_a_large_file_reads_every_chunk",
+    "assertion": "wrong-owner-control",
+}
+
+# mutant name -> the exact FAIL message of the assertion the mutation must trip.
+# A same-owner failure on any other assertion does not match, so an unrelated
+# failure of the declared test can never be credited as a detection.
+NATIVE_ASSERTIONS = {
+    "io_named_as_protocol": "TML io_named_as_protocol",
+    "faulted_reported_ok": "TML faulted_reported_ok",
+    "exit_reported_ok": "TML exit_reported_ok",
+    "text_swallows_leading_space": "TML text_swallows_leading_space",
+    "cat_skips_a_chunk_byte": "TML cat_skips_a_chunk_byte",
+    "exit_ignores_output_failure": "TML exit_ignores_output_failure",
+    "line_exit_left_masked": "TML line_exit_left_masked",
+    "line_get0_does_not_rearm": "TML line_get0_does_not_rearm",
+    "line_rearms_before_wait_masked": "TML line_rearms_before_wait_masked",
+    "line_control_not_rejected": "TML line_control_not_rejected",
+    "line_1024_accepted": "TML line_1024_accepted",
+    "create_replace_swapped": "TML create_replace_swapped",
+    "text_gets_implicit_lf": "TML text_gets_implicit_lf",
+    "cat_ascii_controls_raw": "TML cat_ascii_controls_raw",
 }
 
 
@@ -546,7 +568,7 @@ def run_binary(path):
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def run_native(tree, cc, owner, strict=False):
+def run_native(tree, cc, owner, assertion=None, strict=False):
     verdicts = {}
     blob = b""
     for name in NATIVE_SUITES:
@@ -557,11 +579,13 @@ def run_native(tree, cc, owner, strict=False):
             return "harness", blob
         rc, out, err = run_binary(target)
         blob += b"\n" + out + err
-        verdicts[name] = classify_native_run(rc, out, err, owner)
+        verdicts[name] = classify_native_run(rc, out, err, owner, assertion)
     if "harness" in verdicts.values():
         return "harness", blob
     if "owner-fail" in verdicts.values():
         return "owner-fail", blob
+    if "wrong-assertion" in verdicts.values():
+        return "wrong-assertion", blob
     if "wrong-owner" in verdicts.values():
         return "wrong-owner", blob
     return "pass", blob
@@ -703,7 +727,8 @@ def main():
     detected = 0
     try:
         copy_tree(source, unity, tree_root / "baseline")
-        verdict, blob = run_native(tree_root / "baseline", args.cc, "", strict=True)
+        verdict, blob = run_native(tree_root / "baseline", args.cc, "", None,
+                                   strict=True)
         (logdir / "baseline-native.log").write_bytes(blob)
         if verdict != "pass":
             print("HARNESS-ERROR: strict native baseline is %s" % verdict,
@@ -743,7 +768,8 @@ def main():
                 print("HARNESS-ERROR control %s: %s" % (control["name"], error),
                       file=sys.stderr)
                 return 2
-            verdict, blob = run_native(tree, args.cc, control["owner"])
+            verdict, blob = run_native(tree, args.cc, control["owner"],
+                                       control.get("assertion"))
             (logdir / ("control-" + control["name"] + ".log")).write_bytes(blob)
             if verdict != expected:
                 print("HARNESS-ERROR control %s was %s, expected %s"
@@ -763,12 +789,26 @@ def main():
                     harness.append((mutation["name"], str(error)))
                     print("HARNESS-ERROR %s: %s" % (mutation["name"], error))
                     continue
-                verdict, blob = run_native(tree, args.cc, mutation["owner"])
+                if mutation["name"] not in NATIVE_ASSERTIONS:
+                    harness.append((mutation["name"],
+                                    "no required assertion marker"))
+                    print("HARNESS-ERROR %s: no required assertion marker"
+                          % mutation["name"])
+                    continue
+                verdict, blob = run_native(tree, args.cc, mutation["owner"],
+                                           NATIVE_ASSERTIONS[mutation["name"]])
                 (logdir / (mutation["name"] + ".log")).write_bytes(blob)
                 if verdict == "owner-fail":
                     detected += 1
-                    print("PASS mutant %s: owner %s failed"
-                          % (mutation["name"], mutation["owner"]))
+                    print("PASS mutant %s: owner %s failed on %r"
+                          % (mutation["name"], mutation["owner"],
+                             NATIVE_ASSERTIONS[mutation["name"]]))
+                elif verdict == "wrong-assertion":
+                    survivors.append((mutation["name"], "wrong assertion"))
+                    print("FAIL mutant %s: owner %s failed, but not on the"
+                          " required assertion %r"
+                          % (mutation["name"], mutation["owner"],
+                             NATIVE_ASSERTIONS[mutation["name"]]))
                 elif verdict == "harness":
                     harness.append((mutation["name"], "harness classification"))
                     print("HARNESS-ERROR %s: harness classification"

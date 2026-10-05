@@ -68,6 +68,10 @@ add_library(yan_line STATIC os/line.c)
 target_include_directories(yan_line PUBLIC os)
 target_compile_options(yan_line PRIVATE ${YAN_WARNINGS})
 
+add_library(yan_editor STATIC os/editor.c)
+target_link_libraries(yan_editor PUBLIC yan_fs)
+target_compile_options(yan_editor PRIVATE ${YAN_WARNINGS})
+
 if(YAN_BUILD_TOOLS)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_executable(yan_mkfs tools/yan_mkfs.c)
@@ -102,6 +106,7 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         "${CMAKE_CURRENT_SOURCE_DIR}/os/line.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/terminal.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/shell.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/editor.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/block.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/yanfs.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/yanfs_block.c")
@@ -109,7 +114,7 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         list(APPEND _yan_terminal_sources "${CMAKE_CURRENT_SOURCE_DIR}/os/memory.c")
     endif()
     set(_yan_terminal_headers)
-    foreach(_header block console line platform shell task terminal yanfs yanfs_block)
+    foreach(_header block console editor line platform shell task terminal yanfs yanfs_block)
         list(APPEND _yan_terminal_headers "${CMAKE_CURRENT_SOURCE_DIR}/os/${_header}.h")
     endforeach()
     add_custom_command(OUTPUT "${YAN_TERMINAL_ELF}"
@@ -156,6 +161,12 @@ if(BUILD_TESTING)
     target_compile_options(test_line PRIVATE ${YAN_WARNINGS})
     add_test(NAME line COMMAND test_line)
     set_tests_properties(line PROPERTIES TIMEOUT 30)
+
+    add_executable(test_editor tests/test_editor.c)
+    target_link_libraries(test_editor PRIVATE yan_editor unity::framework)
+    target_compile_options(test_editor PRIVATE ${YAN_WARNINGS})
+    add_test(NAME editor COMMAND test_editor)
+    set_tests_properties(editor PROPERTIES TIMEOUT 30)
 
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # Native platform/framing doubles exercise the actual adapter source;
@@ -236,6 +247,15 @@ if(BUILD_TESTING)
                             --guest "${YAN_TERMINAL_ELF}"
                             --close-fault-run "$<TARGET_FILE:yan_run_disk_close_fault>")
                 set_tests_properties(guest_terminal_files PROPERTIES TIMEOUT 600)
+                add_test(NAME guest_editor
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_editor.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-editor"
+                            --run "$<TARGET_FILE:yan_run>"
+                            --mkfs "$<TARGET_FILE:yan_mkfs>"
+                            --guest "${YAN_TERMINAL_ELF}")
+                set_tests_properties(guest_editor PROPERTIES TIMEOUT 600)
                 set(_yan_terminal_runtime_args)
                 if(YAN_ENABLE_SANITIZERS)
                     list(APPEND _yan_terminal_runtime_args --sanitizers)
@@ -251,6 +271,16 @@ if(BUILD_TESTING)
                             ${_yan_terminal_runtime_args})
                 set_tests_properties(guest_terminal_runtime PROPERTIES
                                      SKIP_RETURN_CODE 77 TIMEOUT 600)
+                add_test(NAME guest_editor_faults
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_editor_faults.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-editor-faults"
+                            --cc "${CMAKE_C_COMPILER}"
+                            --guest "${YAN_TERMINAL_ELF}"
+                            ${_yan_terminal_runtime_args})
+                set_tests_properties(guest_editor_faults PROPERTIES
+                                     SKIP_RETURN_CODE 77 TIMEOUT 600)
             endif()
         endif()
         add_test(NAME yanfs_mutation_gate
@@ -261,6 +291,10 @@ if(BUILD_TESTING)
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_terminal_mutation_gate.py")
         set_tests_properties(terminal_mutation_gate PROPERTIES TIMEOUT 120)
+        add_test(NAME editor_mutation_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_editor_mutation_gate.py")
+        set_tests_properties(editor_mutation_gate PROPERTIES TIMEOUT 120)
         if(TARGET yan_mkfs_fault)
             add_test(NAME yanfs_mkfs
                 COMMAND "${Python3_EXECUTABLE}"
@@ -462,6 +496,14 @@ if(BUILD_TESTING)
                     --unity "${unity_SOURCE_DIR}"
                     --work "${YAN_MUTATION_WORK_ROOT}/yanfs")
         set_tests_properties(yanfs_mutation PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+        add_test(NAME editor_mutation
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_editor_mutation.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --cc "${CMAKE_C_COMPILER}"
+                    --unity "${unity_SOURCE_DIR}"
+                    --work "${YAN_MUTATION_WORK_ROOT}/editor")
+        set_tests_properties(editor_mutation PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
         add_test(NAME persistent_block_mutation
             COMMAND "${Python3_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_persistent_mutation.py"

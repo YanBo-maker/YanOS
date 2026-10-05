@@ -67,48 +67,76 @@ def permanent_controls():
 
 # ------------------------------------------------------------- native decode
 
+MARKER = "OWNER-MARKER"
+
+
 def native_controls():
     if YANFS is None:
         FAILURES.append("native: the shared Unity classifier did not import")
         return
     suite = YANFS.unity_suite
     pass_out = suite([("a", "PASS"), ("b", "PASS")])
-    owner_out = suite([("owner", "FAIL")])
-    other_out = suite([("other", "FAIL")])
+    owner_out = suite([("owner", "FAIL", MARKER)])
+    wrong_assertion_out = suite([("owner", "FAIL", "some other assertion")])
+    other_out = suite([("other", "FAIL", MARKER)])
     ignored_out = suite([("a", "IGNORE")])
     after_footer = pass_out + b"tests/test_shell.c:3:c:PASS\n"
 
-    check("native", "pass", YANFS.classify_run(0, pass_out, b"", "owner"), "pass")
-    check("native", "owner", YANFS.classify_run(1, owner_out, b"", "owner"), "owner-fail")
-    check("native", "wrong", YANFS.classify_run(1, other_out, b"", "owner"), "wrong-owner")
-    check("native", "empty", YANFS.classify_run(0, b"", b"", "owner"), "harness")
+    check("native", "pass", YANFS.classify_run(0, pass_out, b"", "owner", MARKER),
+          "pass")
+    check("native", "owner", YANFS.classify_run(1, owner_out, b"", "owner", MARKER),
+          "owner-fail")
+    check("native", "wrong-assertion", YANFS.classify_run(
+        1, wrong_assertion_out, b"", "owner", MARKER), "wrong-assertion")
+    check("native", "missing-marker", YANFS.classify_run(
+        1, owner_out, b"", "owner", None), "harness")
+    check("native", "wrong", YANFS.classify_run(1, other_out, b"", "owner", MARKER),
+          "wrong-owner")
+    check("native", "empty", YANFS.classify_run(0, b"", b"", "owner", MARKER),
+          "harness")
     check("native", "no-footer", YANFS.classify_run(
-        1, b"tests/test_shell.c:1:a:FAIL:\n", b"", "owner"), "harness")
+        1, b"tests/test_shell.c:1:a:FAIL:\n", b"", "owner", MARKER), "harness")
     check("native", "double-footer", YANFS.classify_run(
-        1, owner_out + owner_out, b"", "owner"), "harness")
+        1, owner_out + owner_out, b"", "owner", MARKER), "harness")
     check("native", "count-wrong", YANFS.classify_run(
         1, b"tests/test_shell.c:1:a:FAIL:\n-----------------------\n"
-           b"9 Tests 1 Failures 0 Ignored \nFAIL\n", b"", "owner"), "harness")
+           b"9 Tests 1 Failures 0 Ignored \nFAIL\n", b"", "owner", MARKER),
+        "harness")
     check("native", "record-after-footer", YANFS.classify_run(
-        1, after_footer, b"", "owner"), "harness")
-    check("native", "exit0-with-fail", YANFS.classify_run(0, owner_out, b"", "owner"),
+        1, after_footer, b"", "owner", MARKER), "harness")
+    check("native", "exit0-with-fail", YANFS.classify_run(0, owner_out, b"",
+                                                          "owner", MARKER),
           "harness")
     check("native", "ignored-swallowed", YANFS.classify_run(
-        1, ignored_out, b"", "owner"), "harness")
+        1, ignored_out, b"", "owner", MARKER), "harness")
     check("native", "stderr-noop", YANFS.classify_run(0, pass_out, b"a note\n",
-                                                      "owner"), "pass")
-    check("native", "signal", YANFS.classify_run(139, owner_out, b"", "owner"),
-          "harness")
-    check("native", "128-form", YANFS.classify_run(137, owner_out, b"", "owner"),
-          "harness")
-    check("native", "timeout", YANFS.classify_run(None, owner_out, b"", "owner"),
-          "harness")
-    check("native", "sanitizer", YANFS.classify_run(1, owner_out,
-                                                    b"runtime error: boom", "owner"),
-          "harness")
+                                                      "owner", MARKER), "pass")
+    check("native", "signal", YANFS.classify_run(139, owner_out, b"", "owner",
+                                                 MARKER), "harness")
+    check("native", "128-form", YANFS.classify_run(137, owner_out, b"", "owner",
+                                                   MARKER), "harness")
+    check("native", "timeout", YANFS.classify_run(None, owner_out, b"", "owner",
+                                                  MARKER), "harness")
+    check("native", "sanitizer-overrides-owner", YANFS.classify_run(
+        1, owner_out, b"runtime error: boom", "owner", MARKER), "harness")
     check("native", "fixture-abort", YANFS.classify_run(1, owner_out,
-                                                        b"fixture abort", "owner"),
-          "harness")
+                                                        b"fixture abort", "owner",
+                                                        MARKER), "harness")
+    duplicate_out = (b"tests/test_shell.c:1:owner:FAIL: " + MARKER.encode()
+                     + b"\ntests/test_shell.c:2:owner:FAIL: " + MARKER.encode()
+                     + b"\n-----------------------\n2 Tests 2 Failures 0 Ignored"
+                       b" \nFAIL\n")
+    check("native", "duplicate-owner-records", YANFS.classify_run(
+        2, duplicate_out, b"", "owner", MARKER), "harness")
+    check("native", "marker-only-stderr", YANFS.classify_run(
+        1, suite([("owner", "FAIL", "unrelated")]), MARKER.encode(), "owner",
+        MARKER), "wrong-assertion")
+    check("native", "marker-only-other-owner", YANFS.classify_run(
+        1, suite([("other", "FAIL", MARKER)]), b"", "owner", MARKER),
+        "wrong-owner")
+    check("native", "same-owner-same-numbers-wrong-assertion",
+          YANFS.classify_run(1, suite([("owner", "FAIL", "Expected 10 Was 16")]),
+                             b"", "owner", MARKER), "wrong-assertion")
 
 
 # ------------------------------------------------------------ runtime decode

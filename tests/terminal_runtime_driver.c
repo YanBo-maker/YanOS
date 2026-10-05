@@ -118,7 +118,7 @@ enum { FAULT_NONE = 0, FAULT_IO = 1, FAULT_PROTOCOL = 2 };
  * reason), a trap, or an application code with an unknown reason - is a harness
  * error, never a named owner failure. */
 #define APP_FAIL_TOP UINT32_C(0x71000000)
-#define APP_REASON_LAST 17u
+#define APP_REASON_LAST 21u
 #define FIXTURE_FAIL_TOP UINT32_C(0x72000000)
 #define FIXTURE_FAIL_LAST 17u
 

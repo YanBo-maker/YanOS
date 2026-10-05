@@ -408,7 +408,9 @@ static void nul_tab_escape_and_other_c0_reject_the_line(void)
         input[2] = (uint8_t)'b';
         input[3] = (uint8_t)'\n';
         load_stream(input, sizeof input);
-        TEST_ASSERT_EQUAL_INT(YAN_LINE_INVALID_INPUT, yan_line_next(&holder.line));
+        TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_LINE_INVALID_INPUT,
+                                      yan_line_next(&holder.line),
+                                      "TML line_control_not_rejected");
         TEST_ASSERT_EQUAL_UINT32(0u, holder.line.length);
         TEST_ASSERT_EQUAL_UINT8(0u, holder.line.buffer[0]);
         /* 'a' was echoed before the control; the control and 'b' were not. */
@@ -455,7 +457,8 @@ static void line_of_1024_bytes_is_too_long(void)
     memset(big, 'a', 1024u);
     big[1024] = (uint8_t)'\n';
     load_stream(big, 1025u);
-    TEST_ASSERT_EQUAL_INT(YAN_LINE_TOO_LONG, yan_line_next(&holder.line));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_LINE_TOO_LONG, yan_line_next(&holder.line),
+                                  "TML line_1024_accepted");
     TEST_ASSERT_EQUAL_UINT32(0u, holder.line.length);
     TEST_ASSERT_EQUAL_UINT8(0u, holder.line.buffer[0]);
     /* The first 1023 bytes were echoed; the 1024th and the drain were not. */
@@ -559,7 +562,8 @@ static void each_byte_is_masked_before_it_is_taken_and_rearmed_after(void)
     TEST_ASSERT_EQUAL_INT(YAN_LINE_OK, yan_line_next(&holder.line));
     /* M mask, G take, P echo, A re-arm; the ending takes without a re-arm and
      * then the release masks and acknowledges: M G P A M G P A M G P P M K. */
-    expect_log("MGPAMGPAMGPPMK");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("MGPAMGPAMGPPMK", fake.log,
+                                     "TML line_exit_left_masked");
     assert_mask_before_every_get();
     assert_arm_arithmetic();
 }
@@ -575,7 +579,15 @@ static void wait_path_delivers_bytes_without_empty_reads(void)
     TEST_ASSERT_EQUAL_UINT32(3u, fake.predicate_calls);
     TEST_ASSERT_FALSE(fake.predicate_consumed);
     assert_mask_before_every_get();
-    assert_arm_arithmetic();
+    uint32_t expected_rearm = fake.wait_calls;
+    if (fake.get_calls > 0u) {
+        expected_rearm += fake.get_calls - 1u;
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(expected_rearm, fake.arm_enable_calls,
+                                     "TML line_rearms_before_wait_masked");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(fake.get_calls + fake.ack_calls,
+                                     fake.arm_disable_calls,
+                                     "TML unrelated disable arithmetic");
 }
 
 static void predicate_is_read_only_and_does_not_consume(void)
@@ -832,7 +844,8 @@ static void ready_true_get_zero_rearms_then_reads(void)
     /* mask, take (0), re-arm, take 'a', echo, re-arm, take 'b', ... */
     /* Empty take re-arms; 'a' and 'b' each echo then re-arm; LF echoes
      * both CR and LF before the final mask and acknowledgement. */
-    TEST_ASSERT_EQUAL_STRING("MGAMGPAMGPAMGPPMK", fake.log);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("MGAMGPAMGPAMGPPMK", fake.log,
+                                     "TML line_get0_does_not_rearm");
     TEST_ASSERT_EQUAL_UINT32(1u, fake.ack_calls);
     TEST_ASSERT_EQUAL_UINT32(0u, fake.wait_calls); /* the ready path never waits */
     assert_mask_before_every_get();

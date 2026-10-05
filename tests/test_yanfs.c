@@ -613,7 +613,8 @@ static void mount_rejects_wrong_crc_unknown_magic_and_wrong_sizes(void)
     /* A correct layout with a deliberately wrong CRC. */
     fx_device(16u);
     fx_put_le32(device.blocks[0] + 60u, fx_block_crc(device.blocks[0]) ^ 1u);
-    TEST_ASSERT_EQUAL_INT(YAN_FS_CORRUPT, mount_fresh());
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_CORRUPT, mount_fresh(),
+                                  "YFS bad_crc accepted");
 
     /* A bad magic with a CRC that really covers it. */
     fx_device(16u);
@@ -755,7 +756,8 @@ static void mount_rejects_out_of_range_and_overlapping_extents(void)
     fx_device(16u);
     fx_entry(device.blocks[0], 0u, "zero-start", 1u, 0u, 1u);
     fx_seal(device.blocks[0]);
-    TEST_ASSERT_EQUAL_INT(YAN_FS_CORRUPT, mount_fresh());
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_CORRUPT, mount_fresh(),
+                                  "YFS extent start accepted");
 
     /* start == capacity leaves no room, because count is at least one. */
     fx_device(16u);
@@ -786,7 +788,8 @@ static void mount_checks_partial_extent_overlap_and_adjacency(void)
     fx_seal(device.blocks[0]);
     snapshot_medium();
     uint32_t writes = device.writes;
-    TEST_ASSERT_EQUAL_INT(YAN_FS_CORRUPT, mount_fresh());
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_CORRUPT, mount_fresh(),
+                                  "YFS extent overlap accepted");
     TEST_ASSERT_EQUAL_UINT32(writes, device.writes);
     TEST_ASSERT_TRUE(medium_equal_snapshot());
 
@@ -890,7 +893,8 @@ static void mount_never_writes_and_publishes_cache_only_after_validation(void)
     TEST_ASSERT_TRUE(probe_ran);
     TEST_ASSERT_TRUE(probe_cache_unpublished);
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
-    TEST_ASSERT_TRUE(region_is_zero(fs.metadata, YAN_FS_BLOCK_SIZE));
+    TEST_ASSERT_TRUE_MESSAGE(region_is_zero(fs.metadata, YAN_FS_BLOCK_SIZE),
+                             "YFS cache published early");
 }
 
 /* -------------------------------------------------------------------- list */
@@ -2114,7 +2118,9 @@ static void faulted_instance_refuses_cached_views(void)
     YanFsInfo info = {0};
     uint32_t got = 0xffffffffu;
     uint8_t byte = 0;
-    TEST_ASSERT_EQUAL_INT(YAN_FS_FAULTED, yan_fs_list(&fs, &cursor, &info));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_FAULTED,
+                                  yan_fs_list(&fs, &cursor, &info),
+                                  "YFS faulted read allowed");
     TEST_ASSERT_EQUAL_INT(YAN_FS_FAULTED, yan_fs_stat(&fs, "f", &info));
     TEST_ASSERT_EQUAL_INT(YAN_FS_FAULTED, yan_fs_read(&fs, "f", 0u, &byte, 1u, &got));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(
