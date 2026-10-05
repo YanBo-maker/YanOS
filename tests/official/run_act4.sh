@@ -28,8 +28,10 @@
 #     instead, so a case counts as passed only when both signatures exist and
 #     are identical.
 #
-# Exit codes: 0 every comparable case matched, 1 at least one signature
-# differed, 2 usage, 77 a dependency is missing.
+# Exit codes: 0 every comparable case matched, 1 at least one signature differed
+# or yan_run is missing from the repository, 2 usage, 77 this machine lacks a
+# dependency that lives outside the repository (the toolchain, Sail, the ACT4
+# checkout, python3 or its nm).
 set -u
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -57,15 +59,30 @@ if [ -z "$gcc" ] || [ -z "$run" ] || [ -z "$sail" ] || [ -z "$suite" ] || [ -z "
     echo "usage: run_act4.sh --gcc GCC --run YAN_RUN --sail SAIL --suite RISCV_ARCH_TEST --work DIR" >&2
     exit 2
 fi
-for required in "$gcc" "$run" "$sail"; do
-    [ -x "$required" ] || { echo "SKIP: missing $required"; exit 77; }
-done
+# 77 means "a dependency this machine does not have", and nothing else. The cross
+# toolchain, the Sail reference model, the ACT4 checkout, python3 and the
+# toolchain's nm all live outside the repository, so a missing one stays a skip.
+# yan_run is built from this repository: a missing one is a build that did not
+# happen, so it fails instead. Deleting the executor must never be a way to a
+# green suite - CTest records 77 as a skip, and a skip is not a pass.
+if [ ! -x "$gcc" ]; then
+    echo "SKIP: no RISC-V compiler at $gcc"
+    exit 77
+fi
+if [ ! -x "$sail" ]; then
+    echo "SKIP: no Sail reference model at $sail"
+    exit 77
+fi
 [ -d "$suite/tests/rv32i/I" ] || { echo "SKIP: $suite is not an ACT4 checkout"; exit 77; }
 command -v python3 > /dev/null 2>&1 || { echo "SKIP: python3 is required"; exit 77; }
 
 # The symbol reader belongs to the same toolchain as the compiler.
 nm_tool="${gcc%gcc}nm"
 [ -x "$nm_tool" ] || { echo "SKIP: no symbol reader at $nm_tool"; exit 77; }
+if [ ! -x "$run" ]; then
+    echo "FAIL the executor under test is missing: $run"
+    exit 1
+fi
 
 gcc_dir="$(cd "$(dirname "$gcc")" && pwd)"
 PATH="$gcc_dir:$PATH"

@@ -2,8 +2,10 @@
 # Builds the YanOS Guest corpus and runs every image through the differential
 # tester, which compares YanCPU with a reference model after each instruction.
 #
-# Exit codes: 0 all cases passed, 1 at least one case failed, 77 a dependency
-# is missing, which CTest reports as SKIP rather than as a pass.
+# Exit codes: 0 all cases passed, 1 at least one case failed or a tool this check
+# drives is missing from the repository, 2 usage, 77 this machine lacks a
+# dependency that lives outside the repository (the cross toolchain or the NEMU
+# reference shared object).
 set -u
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,15 +33,28 @@ if [ -z "$gcc" ] || [ -z "$gen" ] || [ -z "$dut" ] || [ -z "$ref" ] || [ -z "$wo
     exit 2
 fi
 
-missing=""
-[ -x "$gcc" ] || missing="$missing $gcc"
-[ -x "$gen" ] || missing="$missing $gen"
-[ -x "$dut" ] || missing="$missing $dut"
-[ -f "$ref" ] || missing="$missing $ref"
-if [ -n "$missing" ]; then
-    echo "SKIP: missing dependency:$missing"
+# 77 means "a dependency this machine does not have", and nothing else. The cross
+# toolchain and the NEMU reference shared object live outside the repository, so
+# a missing one stays a skip. yan_gen and yan_difftest are built from this
+# repository: a missing one is a build that did not happen, so it fails instead
+# of skipping. Deleting either tool must never be a way to a green suite - CTest
+# records 77 as a skip, and a skip is not a pass.
+if [ ! -x "$gcc" ]; then
+    echo "SKIP: no RISC-V compiler at $gcc"
     exit 77
 fi
+if [ ! -f "$ref" ]; then
+    echo "SKIP: no reference model at $ref"
+    exit 77
+fi
+missing=0
+for required in "$gen" "$dut"; do
+    if [ ! -x "$required" ]; then
+        echo "FAIL the tool under test is missing: $required"
+        missing=1
+    fi
+done
+[ "$missing" -eq 0 ] || exit 1
 
 mkdir -p "$work"
 

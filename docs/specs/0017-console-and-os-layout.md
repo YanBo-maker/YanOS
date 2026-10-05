@@ -1,6 +1,6 @@
 # 0017：控制台与 `os/` 层
 
-> 状态：**草案，待项目所有者审核**。审核通过并 Spec Lock 之前，`os/console.c` 保持骨架，不得实现。
+> 状态：**Spec Lock**（2026-09-20 项目所有者审核通过）。实现中如需变更接口、数据结构或行为，走 INTENTION / SPEC / IMPLE 审核，不得直接修改本文件；`os/console.h` 与 `os/platform.h` 是随本规格冻结的接口。
 
 ## INTENTION
 
@@ -20,6 +20,8 @@
 | `tests/guest/` | 验证程序 | **不变**；它引用 `os/`，而不是被 `os/` 引用 |
 
 依赖方向是单向的：`os/` 不得包含 `tests/` 下的任何头；`tests/` 可以包含 `os/`。
+
+上表只列本规格定义的成员；`os/` 的后续成员在各自的规格里定义——[0018：块请求协议](0018-block-protocol.md) 新增帧层（`os/block.h`、`os/block.c`），[0019：协作式运行时](0019-cooperative-runtime.md) 新增任务、上下文切换与运行时的陷阱入口（`os/task.h`、`os/task.c`、`os/task_switch.S`、`os/trap_entry.S`），后者还记录"树里暂时有两份陷阱入口"这笔债的成因与合并条件。
 
 ### Guest 侧平台视图与防漂移
 
@@ -46,17 +48,24 @@ YanOsResult  yan_os_console_getline(char *buffer, unsigned capacity, unsigned *l
 
 **输出**。`putc` 先读 `TX_READY`：为 1 时写 `TXDATA` 并返回 `YAN_OS_OK`；为 0 时返回 `YAN_OS_UNAVAILABLE`，不重试、不缓冲。`puts` 逐字符调用 `putc`，**在第一个被拒的字符处停止并返回该结果**——已经写出的部分保留，因为"部分输出 + 明确错误"比"静默截断"或"无限重试"都好定位。传 `NULL` 返回 `YAN_OS_INVALID_ARGUMENT`。
 
+`puts` 的入口判定先于逐字符循环，因此 `puts("")` 也带连接语义：没有终端时返回 `YAN_OS_UNAVAILABLE`，有终端时返回 `YAN_OS_OK`（两种情况都没有字节被写出）。
+
+**参数先于设备**。`putc` / `puts` / `getline` 都先校验参数、再看设备：参数非法（`puts(NULL)`、`getline(NULL, …)`、`capacity == 0`、`length == NULL`）一律返回 `YAN_OS_INVALID_ARGUMENT`，**即使此刻没有终端也不返回 `YAN_OS_UNAVAILABLE`**——调用方写错了，与设备是否接上没有关系。失败的调用不写任何输出参数：参数被拒时 `getline` 不碰 `buffer`，也不写 `*length`。
+
 **行编辑**（`getline`）：
 
 | 输入 | 行为 |
 | --- | --- |
 | 可打印字符（`0x20`–`0x7e`） | 存入缓冲并回显 |
+| `0x80`–`0xff` | 与可打印字符同样处理：按字节原样存入并回显，不做编码转换 |
 | `0x08` 或 `0x7f`（退格） | 缓冲非空时删除最后一个字符，并回显 `"\b \b"`；缓冲为空时什么都不做 |
 | `0x0d`（CR）或 `0x0a`（LF） | 结束该行：回显 `"\r\n"`，写入 NUL 终止符，返回 `YAN_OS_OK` |
 | 其它控制字符 | 忽略 |
-| 缓冲已满（已存 `capacity - 1` 个） | 忽略后续可打印字符，**不溢出、不结束行**；换行到达时正常返回，`length == capacity - 1` |
+| 缓冲已满（已存 `capacity - 1` 个） | 忽略后续可打印字符——**既不存入也不回显**，**不溢出、不结束行**；换行到达时正常返回，`length == capacity - 1` |
 
 CR 之后紧跟的 LF 视为同一行的结束并被吞掉（一位状态即可），这样 CRLF 与单独的 LF 都只产生一行。
+
+**回显被拒**。回显与输出走同一条设备路径。`getline` 采用**先存后回显**：字符先写入缓冲，随后才尝试回显。任一次回显（普通字符、退格序列 `"\b \b"`、行尾 `"\r\n"`）被拒（`TX_READY = 0`）时函数返回 `YAN_OS_UNAVAILABLE`，**`*length` 不写**，缓冲保持 NUL 终止；但缓冲里**已经反映了那次操作**——被拒回显的字符已经存入，退格已经擦除了目标字符。失败只通过返回值报告，不通过缓冲内容报告，调用方可以放弃这一行或重试下一次读行。
 
 **驱动契约（来自 0015，这里是它的兑现）**：
 
@@ -68,7 +77,7 @@ CR 之后紧跟的 LF 视为同一行的结束并被吞掉（一位状态即可�
 
 ### 明确不在范围内
 
-不做 ANSI 转义序列与光标控制；不做历史记录与行内编辑（左右键、Home/End）；不做 Tab 补全；不做多控制台与终端热切换；不做中断驱动的输入（等 M2 的协作式运行时）；不做字符编码转换（只处理单字节 7 位 ASCII，非 ASCII 字节按可打印字符原样传递）。
+不做 ANSI 转义序列与光标控制；不做历史记录与行内编辑（左右键、Home/End）；不做 Tab 补全；不做多控制台与终端热切换；不做中断驱动的输入（等 M2 的协作式运行时）；不做字符编码转换（`0x80`–`0xff` 按字节原样传递，见行为表）。
 
 ### 规范依据
 
@@ -90,14 +99,16 @@ CR 之后紧跟的 LF 视为同一行的结束并被吞掉（一位状态即可�
 
 | # | 用例 | 断言 |
 | --- | --- | --- |
-| B1 | 无终端时立即返回 | 未接 backend 时 `connected()==0`，`putc` / `puts` / `getline` 都返回 `YAN_OS_UNAVAILABLE`，且**不挂起**（用步数上限证明它没有循环等待） |
+| B1 | 无终端时立即返回 | 未接 backend 时 `connected()==0`，`putc` / `puts` / `puts("")` / `getline` 都返回 `YAN_OS_UNAVAILABLE`，且**不挂起**（用步数上限证明它没有循环等待）；`*length` 与 `buffer` 不被触碰 |
 | B2 | 输出逐字节 | 接入 backend 后 `puts("hi")` 返回 `YAN_OS_OK`，Host 捕获到恰好 `h`、`i` |
 | B3 | 输出被拒 | `TX_READY = 0` 时 `putc` 返回 `YAN_OS_UNAVAILABLE` 且没有字节被交付；`puts` 在第一个被拒字符处停止 |
 | B4 | 行编辑 | 输入 `ab` + 退格 + `c` + LF → `getline` 返回 `YAN_OS_OK`、`buffer == "ac"`、`length == 2`，回显包含退格序列 |
-| B5 | 缓冲边界 | 输入长度大于 `capacity` 时返回 `length == capacity - 1`、以 NUL 结尾、**不越界写**（哨兵字节不变） |
+| B5 | 缓冲边界 | 输入长度大于 `capacity` 时返回 `length == capacity - 1`、以 NUL 结尾、**不越界写**（哨兵字节不变），溢出的字符**不回显** |
 | B6 | CRLF | `a` CR LF `b` LF 产生两行 `"a"` 与 `"b"` |
 | B7 | 终端中途消失 | `getline` 轮询中 Host 断开 backend，函数返回 `YAN_OS_UNAVAILABLE` 而不是继续等待 |
-| B8 | 无效参数 | `getline(NULL, ...)`、`capacity == 0` 返回 `YAN_OS_INVALID_ARGUMENT` |
+| B8 | 无效参数 | `getline(NULL, ...)`、`capacity == 0`、`length == NULL` 返回 `YAN_OS_INVALID_ARGUMENT`；**参数非法时即使没有终端也不返回 `YAN_OS_UNAVAILABLE`**；`buffer` 与 `*length` 均不被写入 |
+| B9 | 回显被拒 | 三种被拒点各一例——普通字符、退格序列、行尾 `"\r\n"`：`CONNECTED = 1` 而回显被拒 → `getline` 返回 `YAN_OS_UNAVAILABLE`、`*length` 不被写入、缓冲保持 NUL 终止；且**先存后回显**：被拒回显的字符已在缓冲里，退格已擦除目标字符（哨兵字节不变） |
+| B10 | 高位字节 | 输入 `0x80` 后 LF → 该字节按原样存入并回显，`length == 1` |
 
 ### C. 变异检查
 

@@ -6,8 +6,10 @@
 # suite's linker places `tohost` after .text and the address moves with the
 # size of each test.
 #
-# Exit codes: 0 all selected tests passed, 1 at least one failed, 77 the suite
-# or the toolchain is missing (CTest reports SKIP, never PASS).
+# Exit codes: 0 all selected tests passed, 1 at least one failed or yan_run is
+# missing from the repository, 2 usage, 77 this machine lacks a dependency that
+# lives outside the repository (the toolchain or the riscv-tests checkout); CTest
+# reports 77 as SKIP, never as PASS.
 set -u
 
 gcc=""
@@ -30,9 +32,21 @@ if [ -z "$gcc" ] || [ -z "$run" ] || [ -z "$suite" ] || [ -z "$work" ]; then
     echo "usage: run_riscv_tests.sh --gcc GCC --run YAN_RUN --suite DIR --work DIR" >&2
     exit 2
 fi
-[ -x "$gcc" ] || { echo "SKIP: no RISC-V compiler at $gcc"; exit 77; }
-[ -x "$run" ] || { echo "SKIP: no yan_run at $run"; exit 77; }
+# 77 means "a dependency this machine does not have", and nothing else: the cross
+# toolchain and the riscv-tests checkout both live outside the repository, so a
+# missing one stays a skip. yan_run is built from this repository: a missing one
+# is a build that did not happen, so it fails instead. Deleting the executor must
+# never be a way to a green suite - CTest records 77 as a skip, and a skip is not
+# a pass.
+if [ ! -x "$gcc" ]; then
+    echo "SKIP: no RISC-V compiler at $gcc"
+    exit 77
+fi
 [ -f "$suite/env/p/link.ld" ] || { echo "SKIP: $suite is not a riscv-tests checkout"; exit 77; }
+if [ ! -x "$run" ]; then
+    echo "FAIL the executor under test is missing: $run"
+    exit 1
+fi
 
 gcc_dir="$(cd "$(dirname "$gcc")" && pwd)"
 PATH="$gcc_dir:$PATH"

@@ -11,7 +11,11 @@
 # differential tester.
 #
 # Exit codes: 0 the Guest reached its final check, 1 it reported a failing check
-# (the code is the check number), 77 a dependency is missing so CTest can SKIP.
+# (the code is the check number), 2 usage, 77 this machine has no cross
+# toolchain. 77 means "a dependency that lives outside the repository" and
+# nothing else: the Guest sources this check compiles are the thing under test,
+# so a missing one is a hard failure. Deleting them must never be a way to a
+# green suite - CTest records 77 as a skip, and a skip is not a pass.
 set -u
 
 source=""
@@ -35,10 +39,28 @@ if [ -z "$source" ] || [ -z "$gcc" ] || [ -z "$run" ] || [ -z "$work" ]; then
 fi
 
 guest_dir="$source/tests/guest"
-for required in "$gcc" "$run" "$guest_dir/mtrap_entry.S" "$guest_dir/mtrap.c" \
-                "$guest_dir/trap_env.c" "$guest_dir/guest_devices.h"; do
-    [ -e "$required" ] || { echo "SKIP: missing $required"; exit 77; }
+
+# The cross toolchain is the only thing outside the repository this check needs.
+if [ ! -x "$gcc" ] && ! command -v "$gcc" > /dev/null 2>&1; then
+    echo "SKIP: no cross toolchain at '$gcc'"
+    exit 77
+fi
+missing=0
+for required in "$guest_dir/mtrap_entry.S" "$guest_dir/mtrap.c" \
+                "$guest_dir/trap_env.c" "$guest_dir/guest_devices.h" \
+                "$guest_dir/guest_lib.c" "$guest_dir/link.ld"; do
+    if [ ! -e "$required" ]; then
+        echo "FAIL the source under test is missing: $required"
+        missing=1
+    fi
 done
+[ "$missing" -eq 0 ] || exit 1
+# An executor that was named but is not there is a build that did not happen,
+# not a missing dependency.
+if [ ! -x "$run" ]; then
+    echo "FAIL the executor under test is not executable: $run"
+    exit 1
+fi
 
 # A cross toolchain locates `as` and `ld` through its own directory.
 gcc_dir="$(cd "$(dirname "$gcc")" && pwd)"
