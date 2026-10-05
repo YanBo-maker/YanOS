@@ -8,11 +8,13 @@ YanOS 是一个用于学习计算机系统的项目，计划实现 RISC-V 模拟
 
 YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包含 RAM、CLINT、PLIC、UART 和 Host 传输通道。`os/` 已有控制台驱动、块请求协议与协作式任务运行时。`yan_run --disk-image FILE` 接入已有块镜像，持久化后端已验证 Guest 写入与新进程读回；[0020](docs/specs/0020-persistent-block-image.md) 锁定成功前刷新、失败后停用、失败写不保证回滚的契约。
 
-[YanFS](docs/specs/0021-yanfs.md) 已实现并验证格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收。初版采用单根目录、最多 63 文件和连续 extent；覆盖需要新旧内容同时容纳，碎片可能导致 NOSPACE。元数据写失败可能拒挂，不保证断电一致性，不自动修复。实现与验证已完成，交付待用户审查。
+[YanFS](docs/specs/0021-yanfs.md) 已实现并验证格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收。初版采用单根目录、最多 63 文件和连续 extent；覆盖需要新旧内容同时容纳，碎片可能导致 NOSPACE。元数据写失败可能拒挂，不保证断电一致性，不自动修复。实现与验证已完成。
 
-[Guest 终端文件操作](docs/specs/0022-terminal-file-operations.md) 已实现并验证：独立应用提供 help、ls、stat、cat、create、write、rm 和 exit，使用 UART 中断等待输入，接入已有 YanFS 镜像。create 创建新文件，write 整文件覆盖；单行最多 1023 字节，超长或非法控制字节整行拒绝。cat 保留合法 UTF-8，并转义指定控制字节和非法编码。实现与验证完成，交付与理解程度待用户审查。
+[Guest 终端文件操作](docs/specs/0022-terminal-file-operations.md) 已实现并验证：独立应用提供 help、ls、stat、cat、create、write、rm 和 exit，使用 UART 中断等待输入，接入已有 YanFS 镜像。create 创建新文件，write 整文件覆盖；单行最多 1023 字节，超长或非法控制字节整行拒绝。cat 保留合法 UTF-8，并转义指定控制字节和非法编码。实现与验证完成。
 
-[多行文本编辑](docs/specs/0023-multiline-text-editor.md) 已实现并验证：edit加载或新建16KiB内存草稿，用行式命令追加、替换、删除和显示，一次保存或取消；保留已有换行格式。实现交付与理解程度待用户审查。
+[多行文本编辑](docs/specs/0023-multiline-text-editor.md) 已实现并验证：edit加载或新建16KiB内存草稿，用行式命令追加、替换、删除和显示，一次保存或取消；保留已有换行格式。
+
+上述能力已于2026-10-05经项目所有者批准，通过 [PR #16](https://github.com/YanBo-maker/YanOS/pull/16) 合入main，保留阶段提交。学习与理解程度仍由项目所有者判断。
 
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
