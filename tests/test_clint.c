@@ -140,8 +140,14 @@ static void mtimecmp_boundary_triggers_at_equality(void)
     TEST_ASSERT_EQUAL_UINT64(UINT64_MAX, clint.mtimecmp);
     TEST_ASSERT_EQUAL_HEX32(0, yan_clint_pending(&clint));
 
-    /* A deadline of mtime + 1 is still not reached. */
-    write_word(YAN_CLINT_BASE + YAN_CLINT_MTIMECMP, clint.mtime + 1);
+    /* A deadline of mtime + 1 is still not reached. mtime is 1010 at this
+     * point, so mtime + 1 fits the low word and the high word stays zero: the
+     * 64-bit deadline is carried by the two words as before. The assertion
+     * pins that range so the narrowing cast cannot silently drop the upper
+     * half of the deadline if the tick history above ever changes. */
+    TEST_ASSERT_TRUE(clint.mtime < UINT32_MAX);
+    write_word(YAN_CLINT_BASE + YAN_CLINT_MTIMECMP,
+               (uint32_t)(clint.mtime + 1));
     write_word(YAN_CLINT_BASE + YAN_CLINT_MTIMECMP + 4, 0);
     TEST_ASSERT_EQUAL_HEX32(0, yan_clint_pending(&clint));
     yan_clint_tick(&clint, 1);

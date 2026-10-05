@@ -231,10 +231,17 @@ static inline void yan_os_transport_set_irq_enable(int enable)
 /* The ring stores must be visible before the position write that publishes
  * them (0014). YanCPU decodes FENCE and only advances the PC, so this holds the
  * contract without costing anything on today's single-hart model. */
+#if defined(__riscv)
 static inline void yan_os_fence(void)
 {
     __asm__ volatile ("fence" ::: "memory");
 }
+#else
+/* Native tests inspect the platform constants without executing Guest MMIO.
+ * Leave this undefined on Host so an accidental device call cannot silently
+ * use a no-op in place of the Guest's ordering instruction. */
+void yan_os_fence(void);
+#endif
 
 /* Byte offset of the ring's i-th slot. The ring size is a power of two, so the
  * wrap is a mask and the copy below may cross the wrap point without a second

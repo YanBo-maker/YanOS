@@ -1,6 +1,6 @@
 # 项目状态
 
-当前阶段：多行文本编辑整体实现与验证完成，[0023](specs/0023-multiline-text-editor.md) 于2026-10-05 09:22 +08:00经项目所有者批准并锁定；交付与理解程度待用户审查。当前分支为 `codex/multiline-editor`，基线为read状态优先修复 `1daae9f`。
+当前能力：多行文本编辑整体实现与验证完成，[0023](specs/0023-multiline-text-editor.md) 于2026-10-05 09:22 +08:00经项目所有者批准并锁定，交付提交为 `1009c61`；交付与理解程度待用户审查。交付阶段分支 `codex/multiline-editor` 和基线read状态优先修复 `1daae9f` 保留。当前在 `codex/integrate-terminal-notes` 整理Git并收口Windows兼容修复，功能行为与规格不变。
 
 - 规格批准：edit NAME、a/r/d/p/w/q、16KiB静态草稿、合法UTF-8文本与已有TAB、保留LF/CRLF/无末LF、一次save和取消不写盘；普通保存错误留稿，FS或输出fatal沿0022。项目所有者已认可形成规格并继续实现。
 - 实现：公共编辑核心、应用模式路由、真实Guest与故障验收已完成；原八命令与文件系统格式保持。0023记录公开接口、确认token与新增应用原因码18–21。
@@ -53,6 +53,21 @@ YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0
 详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前0023配置默认47组、开实际变异后57组；0022的43/52组与0020于2026-10-03的32/39组保留在本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；各组的通过情况以本页「验证」一节为准。
 
 ## 验证
+
+### Git整合与Windows兼容复测（2026-10-05）
+
+项目所有者授权整理Git并保留教学历史。整合分支用正常merge提交 `f4e9266` 连接 `1009c61` 与远端main的 `03f5b80`；merge树与 `1009c61` 的树完全相同，没有合入功能差异。各阶段提交和交付分支保留，后续兼容修复独立提交，通过PR审查再合入main。
+
+本机Windows首次VS2022 Debug构建失败：Host的常量对照测试包含 `os/platform.h`，其中裸RISC-V汇编不能由MSVC解析；测试另有C4127常量条件、C4244/C4267窄化警告，源码中文字符触发C4819。修复限于四个文件：CMake为MSVC启用 `/utf-8`，保留 `/W4 /WX`；platform仅在RISC-V Guest定义真实fence，Host只声明，误调用不会被空实现掩盖；boot改用等价数值断言并先检查RAM范围再转换偏移，clint先断言低word范围再显式转换。没有压低警告级别、删除测试判断或修改设备行为。
+
+- Windows MSVC 19.44 Debug、工具关闭：`ctest --test-dir build/git-windows -C Debug --output-on-failure`，29/29，4.02 s。
+- Linux Release：`ctest --test-dir build/editor-release -E '_mutation$' -j3 --output-on-failure`，47/47，17.67 s。
+- Linux ASan/UBSan：`ctest --test-dir build/editor-asan -j3 --output-on-failure`，47/47，31.65 s。
+- Linux十组实际变异：`ctest --test-dir build/editor-release -R '_mutation$' -j3 --output-on-failure`，10/10，88.14 s。
+
+均0失败、0SKIP。Windows29组仅是该平台本机配置，不包含Linux工具与真实Guest验收；Linux注册仍为57组，其中默认47、实际变异10。Windows RED、修后构建与测试日志为 `build/git-windows-red.log`、`build/git-windows-build.log`、`build/git-windows-tests.log`；Linux构建及测量分别保存于 `build/git-linux-release-build.log`、`-release-tests.log`、`-asan-build.log`、`-asan-tests.log`、`-mutations.log`。本机验证与远端CI、PR审查分别记录，远端结果以对应运行记录为准。
+
+本轮Linux生产ELF重新编译，实际RISC-V反汇编仍含fence，证据为 `build/git-guest-disassembly.log`；总审核另用小程序确认Guest编译产生fence、Host误调用链接失败。下方编辑器交付与早期阶段测量保留原值，本次复测不替换历史耗时。
 
 ### 多行文本编辑（2026-10-05）
 
@@ -221,7 +236,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-审阅已实现的0023编辑流程、保存与取消的实际字节变化，再由项目所有者选择下一项能力。编辑器、终端与文件系统的交付审查和学习程度仍由项目所有者判断；尚无新能力规格锁定。
+先完成整合分支的兼容修复PR审查，再审阅已实现的0023编辑流程、保存与取消的实际字节变化，由项目所有者选择下一项能力。编辑器、终端与文件系统的交付审查和学习程度仍由项目所有者判断；尚无新能力规格锁定。
 
 ### 历史推进记录（M1a / M2a）
 

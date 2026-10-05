@@ -6,7 +6,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 if(MSVC)
-    set(YAN_WARNINGS /W4 /WX)
+    set(YAN_WARNINGS /W4 /WX /utf-8)
 else()
     set(YAN_WARNINGS -Wall -Wextra -Wpedantic -Werror)
 endif()

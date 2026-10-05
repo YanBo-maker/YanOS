@@ -126,8 +126,10 @@ static void guest_uart_view_matches_the_host(void)
     }
     /* Every restated register must land inside the restated window, and that
      * window must stay clear of RAM the way the CLINT and PLIC windows do. */
-    TEST_ASSERT_TRUE(YAN_OS_UART_IRQ_STATUS + 4 <= YAN_OS_UART_SIZE);
-    TEST_ASSERT_TRUE(YAN_OS_UART_BASE + YAN_OS_UART_SIZE <= YAN_RAM_BASE);
+    TEST_ASSERT_EQUAL_INT(1,
+                          (YAN_OS_UART_IRQ_STATUS + 4 <= YAN_OS_UART_SIZE));
+    TEST_ASSERT_EQUAL_INT(1,
+                          (YAN_OS_UART_BASE + YAN_OS_UART_SIZE <= YAN_RAM_BASE));
 }
 
 /* The platform header is where the transport and the UART are mapped onto PLIC
@@ -144,12 +146,17 @@ static void guest_plic_sources_match_the_host(void)
     /* Source 0 is reserved, the two named sources are distinct, and both must
      * be numbers this PLIC can decode: a Guest that enables one of them must
      * not thereby unmask the other, nor write past the source window. */
-    TEST_ASSERT_TRUE(YAN_OS_PLIC_SOURCE_TRANSPORT != 0);
-    TEST_ASSERT_TRUE(YAN_OS_PLIC_SOURCE_UART != 0);
-    TEST_ASSERT_TRUE(YAN_OS_PLIC_SOURCE_TRANSPORT != YAN_OS_PLIC_SOURCE_UART);
-    TEST_ASSERT_TRUE(YAN_OS_PLIC_SOURCE_TRANSPORT <=
-                    (uint32_t)YAN_PLIC_SOURCE_MAX);
-    TEST_ASSERT_TRUE(YAN_OS_PLIC_SOURCE_UART <= (uint32_t)YAN_PLIC_SOURCE_MAX);
+    TEST_ASSERT_EQUAL_INT(1, (YAN_OS_PLIC_SOURCE_TRANSPORT != 0));
+    TEST_ASSERT_EQUAL_INT(1, (YAN_OS_PLIC_SOURCE_UART != 0));
+    TEST_ASSERT_EQUAL_INT(1,
+                          (YAN_OS_PLIC_SOURCE_TRANSPORT !=
+                           YAN_OS_PLIC_SOURCE_UART));
+    TEST_ASSERT_EQUAL_INT(1,
+                          (YAN_OS_PLIC_SOURCE_TRANSPORT <=
+                           (uint32_t)YAN_PLIC_SOURCE_MAX));
+    TEST_ASSERT_EQUAL_INT(1,
+                          (YAN_OS_PLIC_SOURCE_UART <=
+                           (uint32_t)YAN_PLIC_SOURCE_MAX));
 }
 
 /* The transport is the second device the Guest drives, and every constant of
@@ -209,16 +216,16 @@ static void guest_transport_view_matches_the_host(void)
             TEST_ASSERT_TRUE(offsets[i] != offsets[j]);
         }
     }
-    TEST_ASSERT_TRUE(YAN_OS_TRANSPORT_IRQ_ENABLE + 4 <= YAN_OS_TRANSPORT_SIZE);
-    TEST_ASSERT_TRUE(YAN_OS_TRANSPORT_BASE + YAN_OS_TRANSPORT_SIZE <=
-                     YAN_RAM_BASE);
+    TEST_ASSERT_EQUAL_INT(
+        1, (YAN_OS_TRANSPORT_IRQ_ENABLE + 4 <= YAN_OS_TRANSPORT_SIZE));
+    TEST_ASSERT_EQUAL_INT(
+        1, (YAN_OS_TRANSPORT_BASE + YAN_OS_TRANSPORT_SIZE <= YAN_RAM_BASE));
     /* The UART and the transport are neighbours in the same low window. One
      * address answering for two devices would make a Guest access depend on
      * which device the bus consulted first. */
-    TEST_ASSERT_TRUE(YAN_OS_UART_BASE + YAN_OS_UART_SIZE <=
-                         YAN_OS_TRANSPORT_BASE ||
-                     YAN_OS_TRANSPORT_BASE + YAN_OS_TRANSPORT_SIZE <=
-                         YAN_OS_UART_BASE);
+    TEST_ASSERT_EQUAL_INT(
+        1, (YAN_OS_UART_BASE + YAN_OS_UART_SIZE <= YAN_OS_TRANSPORT_BASE ||
+            YAN_OS_TRANSPORT_BASE + YAN_OS_TRANSPORT_SIZE <= YAN_OS_UART_BASE));
 }
 
 /* The controller now has three descriptions of one map: the Host header, the
@@ -239,11 +246,12 @@ static void guest_plic_map_matches_the_host(void)
     /* The per-source priority array is indexed by source number and must end
      * before the pending word begins, or a Guest setting the priority of the
      * highest source would write into a different register. */
-    TEST_ASSERT_TRUE(YAN_OS_PLIC_PRIORITY +
-                         4 * (uint32_t)YAN_OS_PLIC_SOURCE_MAX <
-                     YAN_OS_PLIC_PENDING);
-    TEST_ASSERT_TRUE(YAN_OS_PLIC_CLAIM_M + 4 <= YAN_OS_PLIC_SIZE);
-    TEST_ASSERT_TRUE(YAN_OS_PLIC_BASE + YAN_OS_PLIC_SIZE <= YAN_RAM_BASE);
+    TEST_ASSERT_EQUAL_INT(
+        1, (YAN_OS_PLIC_PRIORITY + 4 * (uint32_t)YAN_OS_PLIC_SOURCE_MAX <
+            YAN_OS_PLIC_PENDING));
+    TEST_ASSERT_EQUAL_INT(1, (YAN_OS_PLIC_CLAIM_M + 4 <= YAN_OS_PLIC_SIZE));
+    TEST_ASSERT_EQUAL_INT(1,
+                          (YAN_OS_PLIC_BASE + YAN_OS_PLIC_SIZE <= YAN_RAM_BASE));
 }
 
 /* The trap vector's frame is an ABI: the assembly writes it and the C
@@ -272,7 +280,8 @@ static void trap_frame_is_a_consistent_abi(void)
     TEST_ASSERT_EQUAL_UINT32(0, YAN_GUEST_TRAP_FRAME_BYTES % 16);
     /* The interrupted sp is recovered as sp + the frame size, so the vector
      * must push one full frame before it stores anything. */
-    TEST_ASSERT_TRUE(YAN_GUEST_TRAP_SP * 4 + 4 <= YAN_GUEST_TRAP_FRAME_BYTES);
+    TEST_ASSERT_EQUAL_INT(
+        1, (YAN_GUEST_TRAP_SP * 4 + 4 <= YAN_GUEST_TRAP_FRAME_BYTES));
 }
 
 /* Encodings the CPU executes below. A wrong constant would decode as an
@@ -288,9 +297,15 @@ static void trap_frame_is_a_consistent_abi(void)
 
 static void load_program(const uint32_t *words, size_t count)
 {
+    /* The program is written from RAM offset zero, one word per element, and
+     * the Bus takes a 32-bit address. Check first that every word lands inside
+     * the RAM window; only then is the byte offset narrowed to uint32_t, so the
+     * cast cannot wrap a program that the bus would otherwise place past RAM. */
+    TEST_ASSERT_TRUE(count <= YAN_RAM_SIZE / sizeof(uint32_t));
     for (size_t i = 0; i < count; ++i) {
+        const uint32_t offset = (uint32_t)(sizeof(uint32_t) * i);
         TEST_ASSERT_EQUAL_INT(YAN_OK,
-                              yan_bus_write(&machine.bus, YAN_RAM_BASE + 4 * i,
+                              yan_bus_write(&machine.bus, YAN_RAM_BASE + offset,
                                             4, words[i]).status);
     }
 }
@@ -350,8 +365,10 @@ static void guest_instructions_reach_clint_and_plic(void)
     /* Both windows are the standard ones and sit outside the RAM mapping. */
     TEST_ASSERT_EQUAL_HEX32(UINT32_C(0x02000000), YAN_GUEST_CLINT_BASE);
     TEST_ASSERT_EQUAL_HEX32(UINT32_C(0x0c000000), YAN_GUEST_PLIC_BASE);
-    TEST_ASSERT_TRUE(YAN_GUEST_CLINT_BASE + YAN_GUEST_CLINT_SIZE <= YAN_RAM_BASE);
-    TEST_ASSERT_TRUE(YAN_GUEST_PLIC_BASE + YAN_GUEST_PLIC_SIZE <= YAN_RAM_BASE);
+    TEST_ASSERT_EQUAL_INT(
+        1, (YAN_GUEST_CLINT_BASE + YAN_GUEST_CLINT_SIZE <= YAN_RAM_BASE));
+    TEST_ASSERT_EQUAL_INT(
+        1, (YAN_GUEST_PLIC_BASE + YAN_GUEST_PLIC_SIZE <= YAN_RAM_BASE));
 }
 
 /* The boot prolog's contract: reset leaves no vector and interrupts off, a
