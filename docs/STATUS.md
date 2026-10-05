@@ -1,10 +1,10 @@
 # 项目状态
 
-当前阶段：Guest终端文件操作实现与验证完成，[0022](specs/0022-terminal-file-operations.md) 于2026-10-03锁定；交付与理解程度待用户审查。当前分支为 `codex/terminal-fs`，基线为已交付YanFS的 `24b80bb`。
+当前阶段：YanFS read状态/参数返回优先级已修复并验证，符合已锁定0021；当前分支为 `codex/fs-read-state-order`。终端能力此前交付在 `a8e1026`，YanFS基线为 `24b80bb`；交付与理解程度仍待用户审查。
 
 - 规格批准：项目所有者本轮明确回复“批准整体方案，继续实现”，涵盖八命令、create仅创建/write仅覆盖、单行原始字节且无隐式LF、1023字节整行拒绝、UART中断等待、独立Guest与TTY恢复、cat中文/控制转义及正常exit/致命失败；总审核据此锁定0022。
-- 实现：行状态与显示、命令与FS、UART运行时、独立生产入口及TTY启动器已完成；别名、输出末字节与信号生命周期审查项已修复。
-- 验证：最新Release默认43/43（50.40 s）、ASan/UBSan默认43/43（77.88 s），九组实际变异9/9（86.57 s，-j3）；下方YanFS与持久化后端结果保留各阶段历史。
+- 实现：已交付终端的行状态与显示、命令与FS、UART运行时、独立生产入口及TTY启动器已完成；本轮read改为先检查状态，再判断字数输出指针，补充状态与无效参数组合的永久测试，未修改规格语义。
+- 验证：2026-10-05修复后Release默认43/43（17.16 s）、ASan/UBSan默认43/43（33.15 s），九组实际变异9/9（87.45 s，均-j3），0失败、0SKIP；旧交付与修前测量保留为历史。
 - 用户审查：整体具体行为已批准，实现交付与理解程度待项目所有者审查。
 
 ### YanFS 交付基线
@@ -32,9 +32,9 @@ YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0
 - 机器模式中断：`mie` / `mip` 的 MSIP、MTIP、MEIP 三位，全局 `mstatus.MIE`，中断进入（mcause 最高位置 1、mepc 指向未执行指令、mtval 为 0）与 MRET 返回，原因码优先级 MEIP > MTIP > MSIP，见 [机器模式中断规格](specs/0012-machine-interrupts.md)。
 - 单 hart CLINT：标准基址 `0x02000000`，msip、mtimecmp、mtime 的 32 位半字读写；mtime 只由 Host 的离散 tick 推进，不读宿主墙上时钟。
 - 单 context M-mode PLIC：标准基址 `0x0c000000`，priority、pending、enable、threshold、claim / complete，source 0 保留，只有 pending、enabled 且 priority 大于 threshold 的源拉高 MEIP。网关按电平语义工作：设备线 asserted 且该源未被 claim 时置 pending，源被 claim 后在 complete 之前不再重新 pending，complete 时线仍 asserted 才重新 pending，线 deassert 则撤销尚未 claim 的请求；平台用 `yan_plic_set_level(plic, source, asserted)` 双向驱动设备线，旧的 `yan_plic_raise` 已移除，见 [PLIC 网关与设备中断线规格](specs/0016-plic-gateway-and-irq-lines.md)。网关另经独立验证：对抗用例加 40000 步随机差分参考模型，唯一存活的变异由新增的边界用例闭合。
-- UART 字符设备（[0015](specs/0015-uart-device.md) v3）：标准基址 `0x10000000`，`TXDATA`、`RXDATA`、`STATUS`、`CONTROL`、`IRQ_STATUS` 五个寄存器。`STATUS` 的三位是 `TX_READY`、`RX_READY`、`CONNECTED`，`TX_READY` 的语义是"此刻写 `TXDATA` 是否会被接受"，与写入路径用的是同一个判据，因此不会出现"报告就绪却拒绝写入"；没有 backend 时三位全 0，两个方向都以 `YAN_UNAVAILABLE` 拒绝（`include/yan/status.h` 为此新增该状态码），驱动据此可以 headless 运行而不是一直空转。单字节接收缓冲，`IRQ_STATUS` 的 `RX_IRQ_PENDING` 写 1 清除，接收线经平台映射到 PLIC source 2。Host 侧 backend 是 `YanUartTerminal`（`tx_ready` / `tx_write` 两个回调），`yan_uart_push_rx` 注入接收字节；Guest 侧的控制台驱动放在 `os/console.c`，已随 `feat/m1-device-channel` 提交（尚未进 `main`）。
+- UART 字符设备（[0015](specs/0015-uart-device.md) v3）：标准基址 `0x10000000`，`TXDATA`、`RXDATA`、`STATUS`、`CONTROL`、`IRQ_STATUS` 五个寄存器。`STATUS` 的三位是 `TX_READY`、`RX_READY`、`CONNECTED`，`TX_READY` 的语义是"此刻写 `TXDATA` 是否会被接受"，与写入路径用的是同一个判据，因此不会出现"报告就绪却拒绝写入"；没有 backend 时三位全 0，两个方向都以 `YAN_UNAVAILABLE` 拒绝（`include/yan/status.h` 为此新增该状态码），驱动据此可以 headless 运行而不是一直空转。单字节接收缓冲，`IRQ_STATUS` 的 `RX_IRQ_PENDING` 写 1 清除，接收线经平台映射到 PLIC source 2。Host 侧 backend 是 `YanUartTerminal`（`tx_ready` / `tx_write` 两个回调），`yan_uart_push_rx` 注入接收字节；Guest 侧旧控制台驱动保留在 `os/console.c`，中断读行与末字节输出检查由0022新增层承担。早期分支交付记录保留在下方历史段。
 - Host 传输通道（[0014](specs/0014-host-transport-channel.md)）：标准基址 `0x10001000`，标识寄存器、两个共享 `RING_BASE` 的字节环、门铃与中断寄存器。`yan_transport_configure` 校验环的大小与落位，`G2H_TAIL` / `H2G_HEAD` 由 Host 驱动；Host 侧 `yan_transport_host_consume` / `host_publish` 在未配置时返回 `YAN_UNAVAILABLE`。越界不由 `DOORBELL` 判定，而由 Host 记账 API 在搬运时判定并置 `STATUS.OVERFLOW_DETECTED`，`DOORBELL` 只做通知。Host→Guest 中断线经平台映射到 PLIC source 1。
-- `os/` 层与控制台：`os/platform.h` 重述 Guest 侧 UART 与 PLIC 源号常量，`os/console.h` 冻结控制台接口（`connected` / `putc` / `puts` / `getline`，没有阻塞入口），`os/console.c` 已实现并提交在 `feat/m1-device-channel`（尚未进 `main`）。依赖方向单向：`os/` 不引用 `tests/`（本机核对 `grep -rn '#include' os/` 只命中 `console.h`、`platform.h` 与 `<stdint.h>`）。见 [控制台与 `os/` 层规格](specs/0017-console-and-os-layout.md)。
+- `os/` 层与控制台：`os/platform.h` 重述 Guest 侧 UART 与 PLIC 源号常量，`os/console.h` 冻结控制台接口（`connected` / `putc` / `puts` / `getline`，没有阻塞入口）。0022新增 `line`、`terminal` 与 `shell`，生产 `apps/` 依赖 `os/`；两者均不引用 `tests/`，测试可以引用生产层。2026-10-05当前include扫描与生产ELF链接输入核对无测试依赖；旧控制台约束见 [0017](specs/0017-console-and-os-layout.md)，新增层见 [0022](specs/0022-terminal-file-operations.md)。
 - 最小 M-mode Guest 环境：`tests/guest/mtrap_entry.S` 提供入口与 Direct 陷阱向量（固定 20 字帧、保存调用者保存寄存器与被中断的 `sp`），`mtrap.c` 提供统一调度与 CSR 访问，`guest_devices.h` 提供 Guest 可见的 CLINT / PLIC 地址与访问封装，见 [Guest 启动与统一 trap 环境规格](specs/0013-guest-trap-environment.md)。
 - `yan_run` 已经改用 `yan_machine_init_with` 组装 `YanMachine` 并逐条调用 `yan_machine_step`：四个设备窗口（CLINT、PLIC、UART、transport）都解码，设备中断线由平台每步采样进 PLIC，`mtime` 每条指令推进一次。UART 接收中断因此在该执行器下可达（`guest_terminal` 的接收中断场景由红转绿），transport 窗口的 `MAGIC` 也能读到；`-h` / `--help` 打印用法到标准输出并返回 0；这两种拼写、未知选项与无参数的退出码由 `guest_terminal` 的四条 CLI 断言固定，它们在缺交叉工具链时也先于 SKIP 门槛执行（`tests/guest/run_terminal.sh`）。`yan_difftest` 保持不连接设备。
 - RV32M 的 MUL、MULH、MULHSU、MULHU、DIV、DIVU、REM、REMU，包含除零和有符号溢出规则。
@@ -46,11 +46,25 @@ YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0
 - `yan_gen` 随机 RV32IM 指令流生成器（给定种子确定输出），以及 5 个手写 Guest 用例。
 - C17 / CMake 构建、Unity 单元测试、CTest 及 GitHub Actions。
 
-详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）；**0020 于 2026-10-03 的配置注册默认 32 组、开变异开关 39 组**，见本页「验证」一节。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；各组的通过情况以本页「验证」一节为准。
+详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前0022配置默认43组、开实际变异后52组；0020于2026-10-03的32/39组保留在本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；各组的通过情况以本页「验证」一节为准。
 
 ## 验证
 
-### Guest 终端文件操作（2026-10-04）
+### 规格与实现匹配复核（2026-10-05）
+
+已批准的0021双输出重叠限制已落入规格、实现和永久测试；read有效字数清零、list两输出保持、无I/O及非重叠/零长度路径均核实。STATUS尾段仍称“实现修正与执行验证仍待完成”，属于未收口的补充时记录，本轮保留原文并标明后续落地。
+
+独立审查另发现read先拒绝NULL/context别名字数指针、后检查状态，违反0021既定 `initialized → BUSY → FAULTED → MOUNTED → 其他参数` 顺序。真实探针在BUSY、FAULTED、未挂载配合NULL时均返回INVALID；补永久用例后先得到73例1失败，再把guard移到字数检查前。状态错误时仅有效且非context别名字数清零，无效指针不写；健康状态下无效参数仍为INVALID。真实callback中的BUSY组合检查整个FS缓存、输出哨兵和I/O增量不变。此项修实现以符合锁定SPEC，不新增接口例外或修改语义。
+
+- 修复后Release：`ctest --test-dir build/terminal-release -E '_mutation$' -j3 --output-on-failure`，43/43，17.16 s。
+- 修复后ASan/UBSan：`ctest --test-dir build/terminal-asan -j3 --output-on-failure`，43/43，33.15 s。
+- 九组实际变异：`ctest --test-dir build/terminal-release -R '_mutation$' -j3 --output-on-failure`，9/9，87.45 s；终端20项与YanFS10项均0存活、0harness error。
+
+均0失败、0SKIP；默认43组、Release开实际变异52组。日志为 `build/spec-imple-audit-20261005-fixed-release-default.log`、`-fixed-asan-default.log`、`-fixed-mutations.log`，前置构建日志分别为 `-fixed-release-build.log`、`-fixed-asan-build.log`；独立生产OFF配置三目标重建完成，记录在 `-fixed-production.log`。总审核在自有目录另行严格C17、ASan/UBSan编译运行核心73例全通过，并重编独立探针确认BUSY/FAULTED/NOT_MOUNTED精确返回，未复用旧二进制。
+
+本轮修前默认43/43的19.22 s/34.85 s属于修前树，旧核心72例全绿也未覆盖新组合，不代替修后结果。只读审查报告不代替这些执行证据；read/list批准条款无遗漏，返回优先级错配已关闭。README的生产apps分区、STATUS过期依赖统计和历史导航已机械纠正，旧规格与阶段结论未改。
+
+### 历史测量：Guest 终端文件操作（2026-10-04）
 
 WSL Linux、GCC 11.4、C17 严格警告，启用工具并具备 Python、Unity 与 RISC-V 交叉编译器，未配置外部参考模型。默认注册43组；Release开启实际变异后共52组，包含九组实际变异。默认的两个 `*_mutation_gate` 是分类器负控，必须保留在默认套件中。
 
@@ -183,7 +197,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-交项目所有者审查终端文件操作：先从16块镜像创建5字节文件，观察整文件覆盖的extent切换与删除回收，再查看UART等待、拒绝整行和输出失败后的磁盘状态。下一项能力由项目所有者决定；0021继续作为镜像格式与FS接口基线。
+项目所有者已批准下一项多行文本编辑整体方案：行式草稿命令、16KiB、合法UTF-8文本、保留已有换行格式、一次保存与取消不写盘。当前优先级修复单独收口后，在新分支形成0023并开始实现；编辑器尚未实现或验证。终端与文件系统已交付能力的学习和审查仍由项目所有者判断。
 
 ### 历史推进记录（M1a / M2a）
 
@@ -238,7 +252,9 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 2026-10-03：0021 锁定后补充 read/list 双输出不得彼此重叠，属于经批准的接口语义修正。原文“所有输入、输出缓冲与输出参数不得与 YanFs context（包括 metadata/scratch）重叠”保留，但它没有约束两个输出彼此重叠；原有 read 前缀计数与 list 文件信息、下一槽要求也保留。实际冲突输入是 read_bytes 指向 out：读取四字节 `ABCD` 时，同一地址无法同时保存 `ABCD` 和数值 4；list 的 cursor 指向 info.size_bytes 时，大小 5 的文件位于槽 0，同一字段无法同时保存大小 5 和下一槽 1。总审核发现并报告这两项规格遗漏，主 Agent 向项目所有者提出补充裁定。
 
-新条款禁止 read 的 length 字节内容输出与四字节字数输出重叠，以及整个 YanFsInfo 与四字节 cursor 输出重叠；可检测重叠返回 INVALID，不进行 I/O。read 的有效且非 context 别名字数输出清零，list 两输出保持不变；既定状态检查优先级不变。批准依据为项目所有者本轮明确回复：“read 的内容与字节数输出、list 的文件信息与下一项位置输出，均不得彼此重叠；可检测重叠返回 INVALID，不进行 I/O。read 的有效字节数输出清零，list 的输出保持不变。”由总审核角色落笔，VERIFY 已增加完全/部分重叠和不重叠边界验收计划。实现修正与执行验证仍待完成，此次规格修正不表示 YanFS 已通过。
+新条款禁止 read 的 length 字节内容输出与四字节字数输出重叠，以及整个 YanFsInfo 与四字节 cursor 输出重叠；可检测重叠返回 INVALID，不进行 I/O。read 的有效且非 context 别名字数输出清零，list 两输出保持不变；既定状态检查优先级不变。批准依据为项目所有者本轮明确回复：“read 的内容与字节数输出、list 的文件信息与下一项位置输出，均不得彼此重叠；可检测重叠返回 INVALID，不进行 I/O。read 的有效字节数输出清零，list 的输出保持不变。”由总审核角色落笔，VERIFY 已增加完全/部分重叠和不重叠边界验收计划。
+
+补充规格时的状态原文保留：“实现修正与执行验证仍待完成，此次规格修正不表示 YanFS 已通过。”此句描述2026-10-03补充条款当时的状态，已由同日YanFS交付验证取代。实现与永久测试已随 `24b80bb` 落地；2026-10-05总审核用当前源码严格C17、ASan/UBSan独立编译运行核心72例，0失败、0忽略。read/list重叠拒绝、字数清零、list输出保持、无I/O及不重叠/零长度用例均通过；这是本次补充的复核证据，不代替全量回归或用户审查。
 
 ## 待定设计
 

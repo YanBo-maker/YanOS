@@ -63,6 +63,15 @@ static YanFsResult probe_mount_result;
 static YanFsResult probe_unmount_result;
 static YanFsResult probe_init_result;
 static YanFsResult probe_read_result;
+static YanFsResult probe_read_null_result;
+static YanFsResult probe_read_alias_result;
+/* Isolated around each new probe read: the whole YanFs must stay byte-identical
+ * and no extra device callback may run, even though the outer operation is
+ * mutating the medium in the same callback. */
+static bool probe_read_null_fs_unchanged;
+static uint32_t probe_read_null_io;
+static bool probe_read_alias_fs_unchanged;
+static uint32_t probe_read_alias_io;
 static YanFsResult probe_create_result;
 static YanFsResult probe_remove_result;
 static uint32_t probe_cache_crc;
@@ -228,6 +237,27 @@ static void run_callback_probe(void)
     probe_unmount_result = yan_fs_unmount(probe_fs);
     probe_init_result = yan_fs_init(probe_fs, probe_fs->io);
     probe_read_result = yan_fs_read(probe_fs, "hello.txt", 0u, &byte, 1u, &read_bytes);
+    /* 0021 state priority: while the instance is busy, an invalid count pointer
+     * (NULL, or one aliasing the context) is still a later check, so both must
+     * answer BUSY rather than INVALID. */
+    static uint8_t fs_snapshot[sizeof(YanFs)];
+    uint32_t io_before;
+    memcpy(fs_snapshot, probe_fs, sizeof fs_snapshot);
+    io_before = device.reads + device.writes;
+    probe_read_null_result =
+        yan_fs_read(probe_fs, "hello.txt", 0u, &byte, 1u, NULL);
+    probe_read_null_fs_unchanged =
+        memcmp(fs_snapshot, probe_fs, sizeof fs_snapshot) == 0;
+    probe_read_null_io = (device.reads + device.writes) - io_before;
+
+    memcpy(fs_snapshot, probe_fs, sizeof fs_snapshot);
+    io_before = device.reads + device.writes;
+    probe_read_alias_result =
+        yan_fs_read(probe_fs, "hello.txt", 0u, &byte, 1u,
+                    (uint32_t *)(void *)probe_fs->metadata);
+    probe_read_alias_fs_unchanged =
+        memcmp(fs_snapshot, probe_fs, sizeof fs_snapshot) == 0;
+    probe_read_alias_io = (device.reads + device.writes) - io_before;
     probe_create_result = yan_fs_create(probe_fs, "probe", &byte, 1u);
     probe_remove_result = yan_fs_remove(probe_fs, "hello.txt");
     probe_cache_crc = yan_fs_metadata_crc(probe_fs->metadata);
@@ -1274,6 +1304,123 @@ static void read_before_mount_and_uninitialized_report_zero(void)
     TEST_ASSERT_TRUE(region_is_byte(out, sizeof out, 0xa5u));
 }
 
+/* 0021 file-API state order: context valid/initialized -> busy -> FAULTED ->
+ * MOUNTED -> the operation's other parameters. An invalid count pointer (NULL,
+ * or one aliasing the context) is an "other parameter", so a state refusal must
+ * win: BUSY, FAULTED and NOT_MOUNTED beat INVALID, and only a mounted, not-busy
+ * instance may answer INVALID for the count itself. The never-initialised
+ * context is INVALID first, because the context check precedes the state. */
+static void read_state_priority_precedes_an_invalid_count(void)
+{
+    uint8_t out[8];
+    uint32_t got = 0xfeedfaceu;
+    memset(out, 0xa5, sizeof out);
+
+    /* Never initialised: the context check comes first, so INVALID whatever the
+     * count pointer is. */
+    YanFs virgin;
+    memset(&virgin, 0, sizeof virgin);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+                          yan_fs_read(&virgin, "f", 0u, out, 4u, NULL));
+    TEST_ASSERT_EQUAL_INT(
+        YAN_FS_INVALID,
+        yan_fs_read(&virgin, "f", 0u, out, 4u,
+                    (uint32_t *)(void *)virgin.metadata));
+    TEST_ASSERT_TRUE(region_is_byte(out, sizeof out, 0xa5u));
+
+    /* Initialised and UNMOUNTED: NOT_MOUNTED wins over either invalid count,
+     * and a valid count is still cleared to zero. No I/O, medium untouched. */
+    fx_device(16u);
+    memset(&fs, 0, sizeof fs);
+    init_fs();
+    uint32_t reads_before = device.reads;
+    uint32_t writes_before = device.writes;
+    static uint8_t fs_before[sizeof(YanFs)];
+    memcpy(fs_before, &fs, sizeof fs_before);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_NOT_MOUNTED,
+                          yan_fs_read(&fs, "f", 0u, out, 4u, NULL));
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(fs_before, &fs, sizeof fs_before,
+                                     "a NULL count must not change the fs");
+    TEST_ASSERT_EQUAL_INT(
+        YAN_FS_NOT_MOUNTED,
+        yan_fs_read(&fs, "f", 0u, out, 4u, (uint32_t *)(void *)fs.metadata));
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(
+        fs_before, &fs, sizeof fs_before,
+        "a context-aliasing count must not change the fs");
+    got = 0xfeedfaceu;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_NOT_MOUNTED,
+                          yan_fs_read(&fs, "f", 0u, out, 4u, &got));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        0u, got, "a valid count is cleared even when the state is refused");
+    TEST_ASSERT_EQUAL_MEMORY(fs_before, &fs, sizeof fs_before);
+    TEST_ASSERT_EQUAL_UINT32(reads_before, device.reads);
+    TEST_ASSERT_EQUAL_UINT32(writes_before, device.writes);
+    TEST_ASSERT_TRUE(region_is_byte(out, sizeof out, 0xa5u));
+
+    /* FAULTED: FAULTED wins over either invalid count, and a valid count is
+     * cleared to zero. The fault is injected on the first medium write. */
+    mount_empty(16u);
+    fill_payload(5u, 0x21);
+    create_ok("f", payload, 5u);
+    device.writes = 0u;
+    device.write_fail_at = 1u;
+    device.write_partial = 0u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_IO, yan_fs_replace(&fs, "f", payload, 5u));
+    device.write_fail_at = 0u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
+    reads_before = device.reads;
+    writes_before = device.writes;
+    memcpy(fs_before, &fs, sizeof fs_before);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_FAULTED,
+                          yan_fs_read(&fs, "f", 0u, out, 4u, NULL));
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(fs_before, &fs, sizeof fs_before,
+                                     "a NULL count must not change the faulted fs");
+    TEST_ASSERT_EQUAL_INT(
+        YAN_FS_FAULTED,
+        yan_fs_read(&fs, "f", 0u, out, 4u, (uint32_t *)(void *)fs.metadata));
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(
+        fs_before, &fs, sizeof fs_before,
+        "an aliasing count must not change the faulted fs");
+    got = 0xfeedfaceu;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_FAULTED,
+                          yan_fs_read(&fs, "f", 0u, out, 4u, &got));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        0u, got, "a faulted read still clears a valid count");
+    TEST_ASSERT_EQUAL_MEMORY(fs_before, &fs, sizeof fs_before);
+    TEST_ASSERT_EQUAL_UINT32(reads_before, device.reads);
+    TEST_ASSERT_EQUAL_UINT32(writes_before, device.writes);
+    TEST_ASSERT_TRUE(region_is_byte(out, sizeof out, 0xa5u));
+
+    /* BUSY: the probe runs from inside a real write callback, so the instance
+     * is busy. Both invalid count forms must answer BUSY, not INVALID. */
+    mount_empty(16u);
+    fill_payload(5u, 0x22);
+    create_ok("hello.txt", payload, 5u);
+    probe_fs = &fs;
+    probe_ran = false;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
+                          yan_fs_replace(&fs, "hello.txt", payload, 5u));
+    TEST_ASSERT_TRUE_MESSAGE(probe_ran, "the write callback must run the probe");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        YAN_FS_BUSY, probe_read_null_result,
+        "busy wins over a NULL count pointer");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        YAN_FS_BUSY, probe_read_alias_result,
+        "busy wins over a context-aliasing count pointer");
+    TEST_ASSERT_TRUE_MESSAGE(
+        probe_read_null_fs_unchanged,
+        "busy NULL count must leave the whole fs byte-identical");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        0u, probe_read_null_io, "busy NULL count must run no device callback");
+    TEST_ASSERT_TRUE_MESSAGE(
+        probe_read_alias_fs_unchanged,
+        "busy aliasing count must leave the whole fs byte-identical");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        0u, probe_read_alias_io,
+        "busy aliasing count must run no device callback");
+    TEST_ASSERT_EQUAL_INT(YAN_FS_MOUNTED, fs.state);
+}
+
 /* -------------------------------------------------------------------- read */
 
 static void read_handles_all_lengths_and_tail_zero(void)
@@ -2179,6 +2326,7 @@ int main(void)
     RUN_TEST(name_inside_scratch_is_rejected_without_reading_past_it);
     RUN_TEST(read_handles_all_lengths_and_tail_zero);
     RUN_TEST(read_before_mount_and_uninitialized_report_zero);
+    RUN_TEST(read_state_priority_precedes_an_invalid_count);
     RUN_TEST(read_rejects_read_bytes_overlapping_out);
     RUN_TEST(read_accepts_disjoint_and_zero_length_outputs);
     RUN_TEST(read_allows_name_shared_with_count_or_out);

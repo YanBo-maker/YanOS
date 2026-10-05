@@ -92,7 +92,7 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 | YanFS | 单根目录文件系统，格式与失败边界见 [0021](docs/specs/0021-yanfs.md) |
 | Yan Knowledge System | 笔记、问题、关系和探索路径的终端交互 |
 
-代码按三层分区：Host 侧的 `src/` 与 `include/`（CPU、Bus、设备与工具）、YanOS 侧的 `os/`（在 Guest 上运行的 YanOS 代码，如控制台驱动）、以及 `tests/guest/` 下的验证程序。依赖方向单向：`os/` 不引用 `tests/`，`tests/` 可以引用 `os/`，见 [控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)。
+代码按职责分区：Host 侧的 `src/` 与 `include/`（CPU、Bus、设备与工具）、Guest 上的 `os/`（驱动、任务运行时与文件系统）、`apps/`（生产 Guest 应用），以及 `tests/`（本机与 Guest 验证程序）。依赖方向为 `apps/` → `os/`，生产应用与 `os/` 不引用 `tests/`；测试可以引用生产层。旧控制台分层约束见 [0017](docs/specs/0017-console-and-os-layout.md)，独立应用入口见 [0022](docs/specs/0022-terminal-file-operations.md)。
 
 各组件的完整能力将分阶段实现。浏览器支持计划通过 WebAssembly 和界面适配接入；新增能力的时机由实际使用决定。
 

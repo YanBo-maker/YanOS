@@ -833,19 +833,26 @@ YanFsResult yan_fs_read(YanFs *fs, const char *name, uint32_t offset,
     if (fs == NULL) {
         return YAN_FS_INVALID;
     }
-    /* read_bytes is the first thing checked: an invalid one returns INVALID and
-     * is not written, while every later parameter or state error is allowed to
-     * record the zero prefix through a valid one. */
-    if (read_bytes == NULL ||
-        context_overlap(fs, read_bytes, (uint64_t)sizeof(uint32_t))) {
-        return YAN_FS_INVALID;
-    }
+    /* 0021 file-API order: context/initialized -> busy -> FAULTED -> MOUNTED ->
+     * this operation's other parameters. The state guard therefore runs before
+     * the count pointer is judged, so BUSY, FAULTED and NOT_MOUNTED win over an
+     * invalid read_bytes. On a state error a valid, non-context count is cleared
+     * to zero, while an invalid one (NULL, a context alias, or a range leaving
+     * uintptr) is never written and the original state is returned. */
     YanFsResult state = operation_guard(fs);
+    const bool count_writable =
+        read_bytes != NULL &&
+        !context_overlap(fs, read_bytes, (uint64_t)sizeof(uint32_t));
     if (state != YAN_FS_OK) {
-        /* A valid, non-context read_bytes is cleared even on a state error. The
-         * state checks run first, so no name has to be parsed here. */
-        *read_bytes = 0u;
+        if (count_writable) {
+            *read_bytes = 0u;
+        }
         return state;
+    }
+    /* Healthy instance: an invalid count pointer is now an ordinary parameter
+     * error and is not written. */
+    if (!count_writable) {
+        return YAN_FS_INVALID;
     }
 
     /* 0021 forbids context aliases and the read out/read_bytes overlap, but a
