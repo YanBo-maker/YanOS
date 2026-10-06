@@ -1,11 +1,11 @@
 # 项目状态
 
-当前推进：文件重命名与复制，[0024](specs/0024-file-rename-copy.md) 于2026-10-05 18:22 +08:00获项目所有者整体批准并锁定，任务分支为 `codex/file-rename-copy`。
+当前交付：文件重命名与复制，[0024](specs/0024-file-rename-copy.md) 于2026-10-05 18:22 +08:00获项目所有者整体批准并锁定，交付提交为 `8e1bcbd`，项目所有者于2026-10-06批准 [PR #18](https://github.com/YanBo-maker/YanOS/pull/18) 合入main，merge提交为 `9ab2488`，树与已验收交付一致。任务分支 `codex/file-rename-copy` 保留。
 
 - 规格批准：mv/cp拒覆盖；rename原槽、同名零I/O；copy新槽新extent逐块复制任意二进制并清零尾块，数据成功后发布目录；状态顺序与故障边界沿既有契约，编辑态不执行两命令。
 - 实现：文件系统rename/copy、终端mv/cp、真实Guest与故障验收已完成，磁盘格式、块协议及编辑模式保持。
 - 验证：本机Windows默认29/29（2.27 s）、Linux Release默认49/49（19.29 s）、ASan/UBSan默认49/49（36.98 s）、十组实际变异10/10（97.01 s），0失败、0SKIP；当前Linux注册49默认、开启实际变异后59组。分项与边界见「重命名与复制验收」。
-- 用户审查：整体SPEC已批准，实现交付待维护者审查；学习与理解程度仍由项目所有者判断。
+- 用户审查：整体SPEC与PR #18合入均已批准；学习与理解程度仍由项目所有者判断。
 
 ### 已交付多行编辑基线
 
@@ -75,7 +75,7 @@ Linux Release默认49/49（19.29 s）、ASan/UBSan默认49/49（36.98 s）、Win
 
 首轮故障验收曾14通过、2失败：注入阈值位于最后echo字节的输出后检查，实际命令未执行，应为LINE_UNAVAILABLE和原镜像；修正验收后16项通过。终端首轮实际变异23检出、1wrong-owner是owner名称拼写错误，门禁未误计检出；修正后24检出。后验三项CTest均通过，记录在 `file-management-corrections-tests.log`；这些失败与修正保留，没有把首轮写成通过。
 
-native覆盖提交后回执首/中/末字节失败，真实Guest覆盖echo-boundary与回执中/末字节，物理首回执字节未单独注入。Guest I/O注入只针对下一请求；协议错配覆盖rename目录响应和copy响应3–7，metadata写后的错tag可留下已写新目录，不承诺回滚。最大u32大小仅验证NOSPACE、无I/O，未实跑4GiB成功复制。Guest静态栈单帧rename64、copy112、allocate528字节，不是完整调用链或ISR嵌套水位证明。实现与本机验证已完成，交付待维护者审查，学习理解仍由项目所有者判断。
+native覆盖提交后回执首/中/末字节失败，真实Guest覆盖echo-boundary与回执中/末字节，物理首回执字节未单独注入。Guest I/O注入只针对下一请求；协议错配覆盖rename目录响应和copy响应3–7，metadata写后的错tag可留下已写新目录，不承诺回滚。最大u32大小仅验证NOSPACE、无I/O，未实跑4GiB成功复制。Guest静态栈单帧rename64、copy112、allocate528字节，不是完整调用链或ISR嵌套水位证明。实现与本机验证已完成，后续经项目所有者批准通过PR #18合入main；学习理解仍由项目所有者判断。本机验证、远端CI与合入批准分别记录，远端结果以对应运行记录为准。
 
 ### Git整合与Windows兼容复测（2026-10-05）
 
@@ -261,7 +261,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-通过PR审查0024整体实现与验证，结合name、目录槽和数据块变化学习rename与copy；本能力尚未合入main。既有编辑器、终端与文件系统已获PR #16合入批准；学习与理解程度仍由项目所有者判断。
+阅读已交付的0024整体实现与验证，结合name、目录槽和数据块变化学习rename与copy；下一项能力待与项目所有者对齐。0024已获PR #18合入批准；学习与理解程度仍由项目所有者判断。
 
 ### 历史推进记录（M1a / M2a）
 
