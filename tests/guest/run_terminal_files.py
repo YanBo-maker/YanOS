@@ -564,8 +564,10 @@ def require_inputs(source, args):
     missing = []
     for rel in ("apps/yanfs_terminal/main.c", "os/trap_entry.S", "os/task.c",
                 "os/task_switch.S", "os/block.c", "os/console.c", "os/yanfs.c",
-                "os/yanfs_block.c", "os/shell.c", "os/line.c", "os/terminal.c",
-                "os/memory.c", "os/editor.c", "os/editor.h", "os/guest.ld", "tools/yan_shell.py"):
+                "os/yanfs_block.c", "os/shell.c", "os/search.c",
+                "os/search_linear.c", "os/line.c", "os/terminal.c",
+                "os/memory.c", "os/editor.c", "os/editor.h", "os/guest.ld",
+                "os/search.h", "os/search_linear.h", "tools/yan_shell.py"):
         path = source / rel
         if not path.is_file():
             missing.append(str(path))

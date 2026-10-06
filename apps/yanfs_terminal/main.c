@@ -54,6 +54,8 @@
 #include "editor.h"
 #include "line.h"
 #include "platform.h"
+#include "search.h"
+#include "search_linear.h"
 #include "shell.h"
 #include "task.h"
 #include "terminal.h"
@@ -95,6 +97,12 @@ static YanFsBlockAdapter adapter;
 static YanShell shell;
 static YanEditor editor;
 static YanTerminal terminal;
+/* The application selects and owns the search backend; the shell only receives
+ * the unified Search facade and never sees the filesystem-scoped linear
+ * context. The linear buffers exceed a task stack; both borrowed objects live
+ * in static storage for the entire session. */
+static YanSearchLinear search_linear;
+static YanSearch search;
 
 /* --------------------------------------------------------------- reporting */
 
@@ -348,7 +356,15 @@ _Noreturn static void app_session(void)
     YanShellOutput output;
     output.context = NULL;
     output.putc = app_putc;
-    if (yan_shell_init(&shell, &fs, output) != YAN_SHELL_OK) {
+    if (yan_search_linear_init(&search_linear, &fs) != YAN_SEARCH_OK) {
+        app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
+    }
+    if (yan_search_init(&search,
+                        yan_search_linear_backend(&search_linear)) !=
+        YAN_SEARCH_OK) {
+        app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
+    }
+    if (yan_shell_init(&shell, &fs, &search, output) != YAN_SHELL_OK) {
         app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
     }
     if (yan_editor_init(&editor, &fs, output) != YAN_EDITOR_OK) {

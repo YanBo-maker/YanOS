@@ -82,7 +82,8 @@ except Exception as error:
 # ------------------------------------------------------------- native suites
 
 NATIVE_SUITES = {
-    "shell": {"sources": ["tests/test_shell.c", "os/shell.c", "os/yanfs.c"],
+    "shell": {"sources": ["tests/test_shell.c", "os/shell.c", "os/search.c",
+                          "os/search_linear.c", "os/yanfs.c"],
               "includes": ["os"], "target": "test_shell"},
     "line": {"sources": ["tests/test_line.c", "os/line.c"],
              "includes": ["os"], "target": "test_line"},
@@ -92,7 +93,8 @@ NATIVE_SUITES = {
 # headers). Missing any is a hard failure (1).
 NATIVE_HEADERS = [
     "tests/test_shell.c", "tests/test_line.c",
-    "os/shell.h", "os/yanfs.h", "os/line.h", "os/platform.h", "os/block.h",
+    "os/shell.h", "os/search.h", "os/search_linear.h", "os/yanfs.h",
+    "os/line.h", "os/platform.h", "os/block.h",
     "os/task.h", "os/console.h", "os/terminal.h", "os/yanfs_block.h",
     "tests/run_yanfs_mutation.py", "os/editor.h",
 ]
@@ -101,7 +103,8 @@ NATIVE_HEADERS = [
 PRODUCTION_SOURCES = [
     "apps/yanfs_terminal/main.c", "os/trap_entry.S", "os/task_switch.S",
     "os/task.c", "os/block.c", "os/console.c", "os/yanfs.c",
-    "os/yanfs_block.c", "os/shell.c", "os/line.c", "os/terminal.c",
+    "os/yanfs_block.c", "os/shell.c", "os/search.c", "os/search_linear.c",
+    "os/line.c", "os/terminal.c",
     "os/memory.c", "os/editor.c",
 ]
 CROSS_FLAGS = [

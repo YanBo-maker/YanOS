@@ -64,6 +64,14 @@ GUEST_SOURCES = [
     "os/task.c", "os/console.c", "os/line.c", "os/terminal.c", "os/memory.c",
 ]
 GUEST_LD = "os/guest.ld"
+# Inputs of the supplied production ELF, separate from GUEST_SOURCES (the UART
+# fixture build). A stale ELF cannot replace a missing production source.
+PRODUCTION_SOURCES = [
+    "apps/yanfs_terminal/main.c", "os/trap_entry.S", "os/task_switch.S",
+    "os/task.c", "os/console.c", "os/line.c", "os/terminal.c",
+    "os/shell.c", "os/editor.c", "os/search.c", "os/search_linear.c",
+    "os/block.c", "os/yanfs.c", "os/yanfs_block.c", "os/memory.c",
+]
 # Every repository header the built sources include, so a missing one is a hard
 # failure (1), not a silent build error.
 HOST_HEADERS = [
@@ -74,7 +82,8 @@ HOST_HEADERS = [
 ]
 GUEST_HEADERS = [
     "tests/guest/guest.h", "os/block.h", "os/console.h", "os/line.h",
-    "os/platform.h", "os/shell.h", "os/task.h", "os/terminal.h", "os/yanfs.h",
+    "os/platform.h", "os/search.h", "os/search_linear.h", "os/shell.h",
+    "os/task.h", "os/terminal.h", "os/yanfs.h",
     "os/yanfs_block.h", "os/editor.h",
 ]
 SANITIZER_FLAGS = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all",
@@ -360,7 +369,10 @@ def check_not_harness(result, owner):
 
 def require_inputs(source, args):
     missing = []
-    for rel in HOST_SOURCES + GUEST_SOURCES + HOST_HEADERS + GUEST_HEADERS + [GUEST_LD]:
+    needed = HOST_SOURCES + GUEST_SOURCES + HOST_HEADERS + GUEST_HEADERS + [GUEST_LD]
+    if not getattr(args, "only_fixtures", False):
+        needed += PRODUCTION_SOURCES
+    for rel in needed:
         if not (source / rel).is_file():
             missing.append(str(source / rel))
     return missing

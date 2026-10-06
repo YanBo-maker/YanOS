@@ -1,6 +1,7 @@
 #ifndef YAN_OS_SHELL_H
 #define YAN_OS_SHELL_H
 
+#include "search.h"
 #include "yanfs.h"
 
 #include <stdbool.h>
@@ -12,13 +13,17 @@
  * raw bytes in, command output out, and a small result enum that tells the
  * caller whether to keep running, stop healthily, or stop because the
  * filesystem or the output channel can no longer be trusted. 0024 extends the
- * command set with the two-name `mv OLD NEW` and `cp SRC DEST`; the interface
- * below is unchanged by that stage.
+ * command set with the two-name `mv OLD NEW` and `cp SRC DEST`. 0025 adds the
+ * `grep` front end: the shell parses the pattern and formats results, and the
+ * literal byte search itself comes from the injected unified Search facade.
  *
  * The layer performs no Host I/O of its own. Every produced byte goes through
  * the borrowed YanShellOutput callback; every file operation goes through a
- * borrowed YanFs. A YanShell therefore owns neither the device nor the
- * terminal, and it is usable from the Guest as well as from a native test.
+ * borrowed YanFs; every grep query goes through a borrowed YanSearch. A
+ * YanShell therefore owns neither the device, the terminal, the search backend
+ * nor the filesystem, and it is usable from the Guest as well as from a native
+ * test. This header deliberately includes search.h, never search_linear.h: the
+ * shell must not instantiate, select or enumerate a backend.
  *
  * Lifetime and stack: a YanShell is long-lived (static storage or a
  * caller-owned object). Its 256-byte scratch is the fixed read chunk of cat,
@@ -30,7 +35,7 @@
  * or from inside a filesystem block callback returns YAN_SHELL_BUSY without
  * emitting a byte or touching the filesystem. The caller, not this layer, is
  * responsible for keeping those callbacks from reordering or editing the
- * borrowed YanFs and the line buffer. */
+ * borrowed YanFs, YanSearch and the line buffer. */
 
 /* A line longer than this is refused as LINE_TOO_LONG before any parse. The
  * limit counts every byte of the line, and the line is not NUL-terminated:
@@ -47,9 +52,10 @@ typedef enum {
     YAN_SHELL_OK = 0,
     /* A healthy `exit`. Nothing else returns this value. */
     YAN_SHELL_EXIT = 1,
-    /* The filesystem reported a state that forbids continuing, or the output
-     * channel failed. Only the last attempted output is guaranteed to have
-     * happened; a write command may already have changed the filesystem. */
+    /* The filesystem or the search backend reported a state that forbids
+     * continuing, or the output channel failed. Only the last attempted output
+     * is guaranteed to have happened; a write command may already have changed
+     * the filesystem. */
     YAN_SHELL_FATAL = 2,
     /* The call itself was invalid: a null or uninitialized shell, or a line
      * buffer that this API can prove is not addressable. No output, no I/O. */
@@ -61,8 +67,8 @@ typedef enum {
 
 /* Caller-owned byte sink. context may be NULL; putc returning false stops the
  * current command immediately and makes yan_shell_execute return
- * YAN_SHELL_FATAL. The callback must not modify the borrowed YanFs or the
- * line buffer, because the shell may still be reading them. */
+ * YAN_SHELL_FATAL. The callback must not modify the borrowed YanFs, YanSearch
+ * or the line buffer, because the shell may still be reading them. */
 typedef struct {
     void *context;
     bool (*putc)(void *context, uint8_t byte);
@@ -72,30 +78,41 @@ typedef struct {
  * zero-initialize before yan_shell_init and never edit them afterwards. */
 typedef struct {
     YanFs *fs;
+    YanSearch *search;
     YanShellOutput output;
     bool initialized;
     bool busy;
     uint8_t scratch[YAN_SHELL_SCRATCH_SIZE];
 } YanShell;
 
-/* Validates shell, fs, output.putc and that the borrowed filesystem does not
- * overlap the shell object, then records the borrowed objects. No filesystem
- * I/O and no output. The overlap test is pure address arithmetic and runs
- * before any bool field of either context is read, so a shell placed inside the
- * filesystem is rejected without a load that could be undefined. A null shell,
- * a null fs or a null putc returns YAN_SHELL_INVALID. Re-initializing an
+/* Validates shell, fs, search, output.putc and the protected-span boundaries
+ * of the borrowed Search, then records the borrowed objects. No filesystem I/O,
+ * no search I/O and no output.
+ *
+ * Every alias decision is pure address arithmetic and runs before any bool
+ * field of the Shell is read: the Shell, filesystem, Search and backend context
+ * must be disjoint. The backend's borrowed source may be that same filesystem,
+ * but must not overlap the other contexts. A nonempty protected span must have a
+ * non-NULL base whose range does not leave uintptr_t. A shell placed inside any
+ * of them is rejected without a load that could be undefined, and the rejected
+ * regions are left byte-identical.
+ *
+ * A null shell, fs or search, an uninitialized Search, a malformed span, an
+ * overlapping pair or a null putc returns YAN_SHELL_INVALID. Re-initializing an
  * instance that is currently inside yan_shell_execute returns YAN_SHELL_BUSY;
- * an idle instance may be re-initialized. */
-YanShellResult yan_shell_init(YanShell *, YanFs *, YanShellOutput);
+ * an idle instance may be re-initialized, which is how a caller swaps in a
+ * different backend. */
+YanShellResult yan_shell_init(YanShell *, YanFs *, YanSearch *, YanShellOutput);
 
 /* Runs one net line, already stripped of CR/LF by the caller's line reader.
  *
  * line points at length bytes that are legal to read; length may be zero, in
  * which case line may be NULL. The API rejects a line that overlaps the whole
- * YanShell or the whole YanFs, and one whose [line, line + length) range would
- * leave the uintptr_t address space, with YAN_SHELL_INVALID before any output
- * or filesystem call. What the caller does beyond that addressability is the
- * caller's precondition.
+ * YanShell, the whole YanFs, the whole YanSearch or either protected span
+ * declared by the Search's backend, and one whose [line, line + length) range
+ * would leave the uintptr_t address space, with YAN_SHELL_INVALID before any
+ * output or filesystem call. What the caller does beyond that addressability is
+ * the caller's precondition.
  *
  * The line length and control-byte checks run first and touch no filesystem
  * state. Only then does a read-only look at the borrowed filesystem's state
@@ -112,7 +129,15 @@ YanShellResult yan_shell_init(YanShell *, YanFs *, YanShellOutput);
  *
  * The line is not modified. A zero byte or a DEL byte, like any other C0
  * control byte, rejects the whole line as INVALID_INPUT so the bytes on either
- * side are never spliced into a command. */
+ * side are never spliced into a command.
+ *
+ * `grep` grammar: exactly one non-empty PATTERN. The bare form is one token
+ * with no space or double quote and may not start with `-`; the quoted form is
+ * one outer pair of double quotes whose interior bytes and spaces are literal
+ * (no escapes or single-quote interpretation, no inner double quote).
+ * `grep " "` is a valid
+ * one-space query and `grep "-i"` is a literal query for `-i`. Any other form
+ * prints ERROR USAGE and performs no Search or filesystem call. */
 YanShellResult yan_shell_execute(YanShell *, const uint8_t *line, uint32_t length);
 
 #endif
