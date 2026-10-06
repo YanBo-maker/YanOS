@@ -80,6 +80,15 @@
 #define YC_READER_LIST 34u
 #define YC_CORRUPT_RESULT 40u
 #define YC_CORRUPT_STATE 41u
+/* 0024 writer-only RV32 public-API pointer/state regressions. */
+#define YC_RV32_SIZE 42u
+#define YC_RV32_HEALTHY 43u
+#define YC_RV32_UNINIT 44u
+#define YC_RV32_UNMOUNTED 45u
+#define YC_RV32_ALIAS 46u
+#define YC_RV32_MISSING 47u
+#define YC_RV32_INVALID_BEATS 48u
+#define YC_RV32_ADJACENT 49u
 
 /* ------------------------------------------------------------- the console */
 
@@ -270,6 +279,148 @@ static void yc_writer(void)
     if (yan_fs_mount(&fs) != YAN_FS_OK) {
         yc_fail(YC_MOUNT);
     }
+
+    /* 0024 Guest RV32 public-API pointer/state regressions. They run on the
+     * healthy mounted filesystem before any file exists, use only the public
+     * API and static contexts (YanFs does not fit a 4 KiB task stack), and make
+     * no image or directory change, so the whole-image oracle below is
+     * unaffected. A distinct PASS fragment is printed only after every check. */
+    if (sizeof(uintptr_t) != 4u) {
+        yc_fail(YC_RV32_SIZE);
+    }
+
+    /* A name pointer of exactly UINTPTR_MAX is a one-byte range that leaves the
+     * uintptr domain, so every entry point must reject it before the first
+     * dereference. UINTPTR_MAX - 1 is deliberately not probed: it can be a
+     * readable caller address whose precondition is not satisfied here. */
+    static YanFs rv32_uninit;
+    static YanFs rv32_idle;
+    YanFsInfo rv32_info;
+    const char *rv32_high = (const char *)(uintptr_t)UINTPTR_MAX;
+    if (yan_fs_stat(&rv32_uninit, rv32_high, &rv32_info) != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_UNINIT);
+    }
+    if (yan_fs_rename(&rv32_uninit, rv32_high, "x") != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_UNINIT);
+    }
+    if (yan_fs_copy(&rv32_uninit, "x", rv32_high) != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_UNINIT);
+    }
+    if (yan_fs_init(&rv32_idle, io) != YAN_FS_OK) {
+        yc_fail(YC_RV32_UNMOUNTED);
+    }
+    if (yan_fs_stat(&rv32_idle, rv32_high, &rv32_info) != YAN_FS_NOT_MOUNTED) {
+        yc_fail(YC_RV32_UNMOUNTED);
+    }
+    if (yan_fs_rename(&rv32_idle, rv32_high, "x") != YAN_FS_NOT_MOUNTED) {
+        yc_fail(YC_RV32_UNMOUNTED);
+    }
+    if (yan_fs_copy(&rv32_idle, "x", rv32_high) != YAN_FS_NOT_MOUNTED) {
+        yc_fail(YC_RV32_UNMOUNTED);
+    }
+    if (yan_fs_stat(&fs, rv32_high, &rv32_info) != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_HEALTHY);
+    }
+    if (yan_fs_rename(&fs, rv32_high, "x") != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_HEALTHY);
+    }
+    if (yan_fs_rename(&fs, "x", rv32_high) != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_HEALTHY);
+    }
+    if (yan_fs_copy(&fs, rv32_high, "x") != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_HEALTHY);
+    }
+    if (yan_fs_copy(&fs, "x", rv32_high) != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_HEALTHY);
+    }
+
+    /* Context aliases are rejected before the name bytes are read: the name
+     * range must not touch the YanFs object, head or tail, source or
+     * destination. */
+    if (yan_fs_rename(&fs, (const char *)(const void *)fs.metadata, "x")
+        != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_ALIAS);
+    }
+    if (yan_fs_rename(&fs, "x",
+                      (const char *)(const void *)(fs.scratch
+                                                   + sizeof fs.scratch - 1u))
+        != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_ALIAS);
+    }
+    if (yan_fs_copy(&fs, (const char *)(const void *)fs.metadata, "x")
+        != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_ALIAS);
+    }
+    if (yan_fs_copy(&fs, "x",
+                    (const char *)(const void *)(fs.scratch
+                                                 + sizeof fs.scratch - 1u))
+        != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_ALIAS);
+    }
+
+    /* Same-name rules come after the source lookup: a missing source is
+     * NOT_FOUND even when both names are one identical pointer, and an invalid
+     * companion name is INVALID before the missing source is reported. */
+    static const char rv32_missing[] = "rv32-missing-file";
+    if (yan_fs_rename(&fs, rv32_missing, rv32_missing) != YAN_FS_NOT_FOUND) {
+        yc_fail(YC_RV32_MISSING);
+    }
+    if (yan_fs_copy(&fs, rv32_missing, rv32_missing) != YAN_FS_NOT_FOUND) {
+        yc_fail(YC_RV32_MISSING);
+    }
+    if (yan_fs_rename(&fs, rv32_missing, "bad/name") != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_INVALID_BEATS);
+    }
+    if (yan_fs_copy(&fs, "bad/name", rv32_missing) != YAN_FS_INVALID) {
+        yc_fail(YC_RV32_INVALID_BEATS);
+    }
+
+    /* A legal short name whose terminating NUL is the byte immediately before
+     * a static context: the bounded scan must accept it and the lookup must
+     * answer NOT_FOUND, not INVALID. The second adapter is idle because the
+     * first mount already drained its responses; this mount is read-only. */
+    static struct {
+        char name[8];
+        YanFs context;
+    } rv32_adjacent;
+    static YanFsBlockAdapter rv32_adjacent_adapter;
+    static const char rv32_adjacent_name[8] = "abcdefg";
+    for (uint32_t i = 0; i < 8u; ++i) {
+        rv32_adjacent.name[i] = rv32_adjacent_name[i];
+    }
+    if ((uintptr_t)&rv32_adjacent.context
+        - (uintptr_t)&rv32_adjacent.name[7] != 1u) {
+        yc_fail(YC_RV32_ADJACENT);
+    }
+    YanFsBlockIo rv32_adjacent_io =
+        yan_fs_block_backend(&rv32_adjacent_adapter);
+    if (yan_fs_block_init(&rv32_adjacent_adapter) != YAN_FS_OK) {
+        yc_fail(YC_RV32_ADJACENT);
+    }
+    if (yan_fs_init(&rv32_adjacent.context, rv32_adjacent_io) != YAN_FS_OK) {
+        yc_fail(YC_RV32_ADJACENT);
+    }
+    if (yan_fs_mount(&rv32_adjacent.context) != YAN_FS_OK) {
+        yc_fail(YC_RV32_ADJACENT);
+    }
+    if (yan_fs_stat(&rv32_adjacent.context, rv32_adjacent.name, &rv32_info)
+        != YAN_FS_NOT_FOUND) {
+        yc_fail(YC_RV32_ADJACENT);
+    }
+    if (yan_fs_rename(&rv32_adjacent.context, rv32_adjacent.name, "x")
+        != YAN_FS_NOT_FOUND ||
+        yan_fs_rename(&rv32_adjacent.context, "x", rv32_adjacent.name)
+        != YAN_FS_NOT_FOUND ||
+        yan_fs_copy(&rv32_adjacent.context, rv32_adjacent.name, "x")
+        != YAN_FS_NOT_FOUND ||
+        yan_fs_copy(&rv32_adjacent.context, "x", rv32_adjacent.name)
+        != YAN_FS_NOT_FOUND) {
+        yc_fail(YC_RV32_ADJACENT);
+    }
+    if (yan_fs_unmount(&rv32_adjacent.context) != YAN_FS_OK) {
+        yc_fail(YC_RV32_ADJACENT);
+    }
+    yc_puts("yanfs: rv32 public-api checks PASS\r\n");
 
     yc_phase = 3;
     yc_require_ok("create hello.txt", 5u,

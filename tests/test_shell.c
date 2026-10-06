@@ -86,6 +86,8 @@ static const char HELP_EXPECTED[] =
     "create NAME [TEXT]: create a new file\r\n"
     "write NAME [TEXT]: replace an existing file\r\n"
     "rm NAME: remove a file\r\n"
+    "mv OLD NEW: rename a file\r\n"
+    "cp SRC DEST: copy a file\r\n"
     "exit: end the session\r\n"
     "line: at most 1023 bytes, ended by CR or LF\r\n"
     "separators: ASCII spaces; commands and names are case sensitive\r\n"
@@ -331,6 +333,27 @@ static void make_indexed_name(char out[8], char prefix, uint32_t index)
     }
 }
 
+/* A fatal command must never have printed a success receipt, even when the
+ * filesystem change it reports was already committed. */
+static void assert_no_ok_in_capture(void)
+{
+    TEST_ASSERT_NULL_MESSAGE(strstr((const char *)capture.bytes, "OK"),
+                             "a fatal command must not print an OK line");
+}
+
+/* Builds "<command> <first> <second>" into a small caller buffer. */
+static uint32_t build_two_name_line(char *out, const char *command,
+                                   const char *first, const char *second)
+{
+    uint32_t at = 0u;
+    append_text((uint8_t *)out, &at, command);
+    append_text((uint8_t *)out, &at, " ");
+    append_text((uint8_t *)out, &at, first);
+    append_text((uint8_t *)out, &at, " ");
+    append_text((uint8_t *)out, &at, second);
+    return at;
+}
+
 /* ------------------------------------------------------------- command set */
 
 static void help_lists_all_commands_and_limits(void)
@@ -340,6 +363,8 @@ static void help_lists_all_commands_and_limits(void)
     expect_output(HELP_EXPECTED);
     TEST_ASSERT_NOT_NULL(strstr((const char *)capture.bytes, "stat NAME"));
     TEST_ASSERT_NOT_NULL(strstr((const char *)capture.bytes, "rm NAME"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)capture.bytes, "mv OLD NEW"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)capture.bytes, "cp SRC DEST"));
     TEST_ASSERT_NOT_NULL(strstr((const char *)capture.bytes, "1023"));
     TEST_ASSERT_NOT_NULL(strstr((const char *)capture.bytes, "exit"));
     TEST_ASSERT_NOT_NULL(strstr((const char *)capture.bytes, "UTF-8"));
@@ -1428,6 +1453,561 @@ static void health_guard_reads_mounted_state_without_a_filesystem_call(void)
     fs.busy = false;
 }
 
+/* ============================================================ 0024 mv / cp ==
+ * Native dispatcher tests for the two-name commands. They pin:
+ *   arity/spacing     two names exactly, ASCII spaces only, usage before I/O
+ *   exact output      OK mv / OK cp, and the shared ERROR format
+ *   error priority    invalid target before missing source, source before target
+ *   independence      a copy owns its own name, slot and bytes
+ *   allocation        directory full and no contiguous space are normal errors
+ *   BUSY              a busy filesystem keeps the session alive
+ *   faults            data read/write and metadata faults stop the session
+ *   output refusal    first/middle/last OK byte is fatal but the image stays
+ *   line rejection    control, length and invalid names never mutate
+ *   reentry           putc and block callbacks see BUSY for mv and cp
+ * ========================================================================= */
+
+static void mv_and_cp_wrong_arity_reports_usage_without_io(void)
+{
+    static const char *cases[] = {
+        "mv", "mv one", "mv one two three",
+        "cp", "cp one", "cp one two three",
+    };
+    seed_file("one", (const uint8_t *)"x", 1u);
+    snapshot_medium();
+    for (uint32_t i = 0; i < sizeof cases / sizeof cases[0]; ++i) {
+        reset_counters();
+        reset_capture();
+        TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SHELL_OK, execute_text(cases[i]),
+                                      "a usage error keeps the session alive");
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+            sizeof("ERROR USAGE\r\n") - 1u, capture.length,
+            "an mv or cp with missing or extra arguments must be a USAGE error");
+        TEST_ASSERT_EQUAL_MEMORY("ERROR USAGE\r\n", capture.bytes,
+                                 sizeof("ERROR USAGE\r\n") - 1u);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(0u, device.reads,
+                                         "a usage error must not read the medium");
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(0u, device.writes,
+                                         "a usage error must not write the medium");
+        TEST_ASSERT_TRUE(medium_unchanged());
+    }
+}
+
+static void mv_and_cp_allow_leading_trailing_and_multiple_spaces(void)
+{
+    seed_file("from", (const uint8_t *)"x", 1u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("   mv   from   to   "));
+    expect_output("OK mv\r\n");
+    YanFsInfo info;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_stat(&fs, "to", &info));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_NOT_FOUND, yan_fs_stat(&fs, "from", &info),
+                                  "an mv must remove the old name, not leave a copy");
+
+    seed_file("src2", (const uint8_t *)"y", 1u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("  cp  src2  dst2  "));
+    expect_output("OK cp\r\n");
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_stat(&fs, "dst2", &info));
+}
+
+static void mv_renames_and_reports_exact_ok(void)
+{
+    seed_file("note.txt", (const uint8_t *)"hello", 5u);
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("mv note.txt diary.txt"));
+    expect_output("OK mv\r\n");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1u, device.writes,
+                                     "a rename writes only the directory");
+    YanFsInfo info;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_stat(&fs, "diary.txt", &info));
+    TEST_ASSERT_EQUAL_UINT32(5u, info.size_bytes);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_NOT_FOUND, yan_fs_stat(&fs, "note.txt", &info));
+}
+
+static void cp_copies_and_reports_exact_ok(void)
+{
+    seed_file("src.txt", (const uint8_t *)"hello", 5u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("cp src.txt dst.txt"));
+    expect_output("OK cp\r\n");
+    YanFsInfo info;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_stat(&fs, "dst.txt", &info));
+    TEST_ASSERT_EQUAL_UINT32(5u, info.size_bytes);
+    uint8_t readback[8];
+    uint32_t got = 0u;
+    TEST_ASSERT_EQUAL_INT(
+        YAN_FS_OK, yan_fs_read(&fs, "dst.txt", 0u, readback, 8u, &got));
+    TEST_ASSERT_EQUAL_UINT32(5u, got);
+    TEST_ASSERT_EQUAL_MEMORY("hello", readback, 5u);
+}
+
+static void selfsame_mv_is_ok_and_selfsame_cp_is_exists(void)
+{
+    seed_file("same", (const uint8_t *)"x", 1u);
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("mv same same"));
+    expect_output("OK mv\r\n");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0u, device.reads,
+                                     "a self rename must not read the medium");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0u, device.writes,
+                                     "a self rename must not write the medium");
+
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("cp same same"));
+    expect_output("ERROR EXISTS\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+}
+
+static void mv_and_cp_missing_source_reports_not_found(void)
+{
+    snapshot_medium();
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("mv nope.txt other.txt"));
+    expect_output("ERROR NOT_FOUND\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("cp nope.txt other.txt"));
+    expect_output("ERROR NOT_FOUND\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+}
+
+static void mv_and_cp_existing_target_reports_exists_without_io(void)
+{
+    seed_file("first", (const uint8_t *)"x", 1u);
+    seed_file("second", (const uint8_t *)"y", 1u);
+    snapshot_medium();
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("mv first second"));
+    expect_output("ERROR EXISTS\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("cp first second"));
+    expect_output("ERROR EXISTS\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+}
+
+static void invalid_target_precedes_missing_source_for_both(void)
+{
+    snapshot_medium();
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("mv ghost bad/name"));
+    expect_output("ERROR INVALID\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("cp ghost bad/name"));
+    expect_output("ERROR INVALID\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+}
+
+static void missing_source_precedes_existing_target(void)
+{
+    seed_file("taken", (const uint8_t *)"x", 1u);
+    snapshot_medium();
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("mv ghost taken"));
+    expect_output("ERROR NOT_FOUND\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("cp ghost taken"));
+    expect_output("ERROR NOT_FOUND\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+}
+
+static void cp_creates_independent_name_slot_and_data(void)
+{
+    seed_file("master", (const uint8_t *)"hello", 5u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("cp master backup"));
+    expect_output("OK cp\r\n");
+
+    /* Its own name and directory entry: the original is still present. */
+    YanFsInfo info;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_stat(&fs, "master", &info),
+                                  "a copy must keep the source file");
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_stat(&fs, "backup", &info));
+    TEST_ASSERT_EQUAL_UINT32(5u, info.size_bytes);
+
+    /* Independent storage: modifying the copy leaves the original intact. */
+    TEST_ASSERT_EQUAL_INT(
+        YAN_FS_OK, yan_fs_replace(&fs, "backup", (const uint8_t *)"z", 1u));
+    uint8_t readback[8];
+    uint32_t got = 0u;
+    TEST_ASSERT_EQUAL_INT(
+        YAN_FS_OK, yan_fs_read(&fs, "master", 0u, readback, 8u, &got));
+    TEST_ASSERT_EQUAL_UINT32(5u, got);
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE("hello", readback, 5u,
+                                     "a copy must own its own bytes");
+
+    /* Removing the original must not disturb the copy. */
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_remove(&fs, "master"));
+    got = 0u;
+    TEST_ASSERT_EQUAL_INT(
+        YAN_FS_OK, yan_fs_read(&fs, "backup", 0u, readback, 8u, &got));
+    TEST_ASSERT_EQUAL_UINT32(1u, got);
+    TEST_ASSERT_EQUAL_MEMORY("z", readback, 1u);
+}
+
+static void cp_directory_full_reports_and_continues(void)
+{
+    for (uint32_t i = 0; i < 63u; ++i) {
+        char name[8];
+        make_indexed_name(name, 'f', i);
+        seed_file(name, NULL, 0u);
+    }
+    snapshot_medium();
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SHELL_OK, execute_text("cp f0 copy"),
+                                  "a full directory is a normal error");
+    expect_output("ERROR DIRECTORY_FULL\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("ls"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)capture.bytes, "OK ls"));
+}
+
+static void mv_renames_in_a_full_directory(void)
+{
+    for (uint32_t i = 0; i < 63u; ++i) {
+        char name[8];
+        make_indexed_name(name, 'm', i);
+        seed_file(name, NULL, 0u);
+    }
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("mv m0 moved"));
+    expect_output("OK mv\r\n");
+    YanFsInfo info;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_stat(&fs, "moved", &info));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_NOT_FOUND, yan_fs_stat(&fs, "m0", &info));
+}
+
+static void cp_nospace_reports_and_continues(void)
+{
+    for (uint32_t i = 0; i < 15u; ++i) {
+        char name[8];
+        make_indexed_name(name, 'd', i);
+        seed_file(name, (const uint8_t *)"x", 1u);
+    }
+    snapshot_medium();
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SHELL_OK, execute_text("cp d0 copy"),
+                                  "a full disk is a normal error");
+    expect_output("ERROR NOSPACE\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("stat d0"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)capture.bytes, "OK stat"));
+}
+
+static void mv_and_cp_busy_reports_busy_and_continues(void)
+{
+    seed_file("a", (const uint8_t *)"x", 1u);
+    fs.busy = true;
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("mv a b"));
+    expect_output("ERROR BUSY\r\n");
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("cp a c"));
+    expect_output("ERROR BUSY\r\n");
+    fs.busy = false;
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("mv a b"));
+    expect_output("OK mv\r\n");
+}
+
+static void cp_data_read_fault_is_fatal_without_ok(void)
+{
+    seed_file("big", (const uint8_t *)"hello", 5u);
+    device.read_fail_lba = 1u; /* the source data block */
+    device.read_fail_code = YAN_FS_IO_ERROR;
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        YAN_SHELL_FATAL, execute_text("cp big copy"),
+        "a data read fault must end the session");
+    expect_output("ERROR IO\r\n");
+    assert_no_ok_in_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
+}
+
+static void cp_data_write_fault_is_fatal_without_ok(void)
+{
+    seed_file("big", (const uint8_t *)"hello", 5u);
+    reset_counters();
+    device.write_fail_at = 1u; /* the first target data write */
+    device.write_fail_code = YAN_FS_IO_ERROR;
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        YAN_SHELL_FATAL, execute_text("cp big copy"),
+        "a target write fault must end the session");
+    expect_output("ERROR IO\r\n");
+    assert_no_ok_in_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
+}
+
+static void cp_write_protocol_fault_maps_protocol(void)
+{
+    seed_file("big", (const uint8_t *)"hello", 5u);
+    reset_counters();
+    device.write_fail_at = 1u;
+    device.write_fail_code = YAN_FS_IO_PROTOCOL;
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        YAN_SHELL_FATAL, execute_text("cp big copy"),
+        "a protocol write fault must end the session");
+    expect_output("ERROR PROTOCOL\r\n");
+    assert_no_ok_in_capture();
+}
+
+static void mv_metadata_write_fault_is_fatal_without_ok(void)
+{
+    seed_file("a", (const uint8_t *)"x", 1u);
+    reset_counters();
+    device.write_fail_at = 1u;
+    device.write_fail_code = YAN_FS_IO_ERROR;
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        YAN_SHELL_FATAL, execute_text("mv a b"),
+        "a metadata write fault must end the session");
+    expect_output("ERROR IO\r\n");
+    assert_no_ok_in_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
+}
+
+static void mv_output_failure_first_middle_last_keeps_rename(void)
+{
+    static const struct {
+        uint32_t fail_at;
+        uint32_t length;
+        const char *prefix;
+    } cases[] = {
+        {1u, 0u, ""},
+        {4u, 3u, "OK "},
+        {7u, 6u, "OK mv\r"},
+    };
+    for (uint32_t i = 0; i < 3u; ++i) {
+        char old_name[8];
+        char new_name[8];
+        make_indexed_name(old_name, 'o', i);
+        make_indexed_name(new_name, 'n', i);
+        seed_file(old_name, (const uint8_t *)"x", 1u);
+        char line[32];
+        uint32_t at = build_two_name_line(line, "mv", old_name, new_name);
+        reset_capture();
+        capture.fail_at = cases[i].fail_at;
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            YAN_SHELL_FATAL, yan_shell_execute(&shell, (const uint8_t *)line, at),
+            "an OK-receipt output failure must be fatal");
+        TEST_ASSERT_TRUE(capture.fail_seen);
+        TEST_ASSERT_EQUAL_UINT32(cases[i].length, capture.length);
+        if (cases[i].length > 0u) {
+            TEST_ASSERT_EQUAL_MEMORY(cases[i].prefix, capture.bytes,
+                                     cases[i].length);
+        }
+        YanFsInfo info;
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            YAN_FS_OK, yan_fs_stat(&fs, new_name, &info),
+            "the committed rename must survive an output failure");
+        TEST_ASSERT_EQUAL_INT(YAN_FS_NOT_FOUND, yan_fs_stat(&fs, old_name, &info));
+    }
+}
+
+static void cp_output_failure_first_middle_last_keeps_copy(void)
+{
+    static const struct {
+        uint32_t fail_at;
+        uint32_t length;
+        const char *prefix;
+    } cases[] = {
+        {1u, 0u, ""},
+        {4u, 3u, "OK "},
+        {7u, 6u, "OK cp\r"},
+    };
+    for (uint32_t i = 0; i < 3u; ++i) {
+        char src_name[8];
+        char dst_name[8];
+        make_indexed_name(src_name, 's', i);
+        make_indexed_name(dst_name, 't', i);
+        seed_file(src_name, (const uint8_t *)"hello", 5u);
+        char line[32];
+        uint32_t at = build_two_name_line(line, "cp", src_name, dst_name);
+        reset_capture();
+        capture.fail_at = cases[i].fail_at;
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            YAN_SHELL_FATAL, yan_shell_execute(&shell, (const uint8_t *)line, at),
+            "an OK-receipt output failure must be fatal");
+        TEST_ASSERT_TRUE(capture.fail_seen);
+        TEST_ASSERT_EQUAL_UINT32(cases[i].length, capture.length);
+        if (cases[i].length > 0u) {
+            TEST_ASSERT_EQUAL_MEMORY(cases[i].prefix, capture.bytes,
+                                     cases[i].length);
+        }
+        YanFsInfo info;
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            YAN_FS_OK, yan_fs_stat(&fs, dst_name, &info),
+            "the committed copy must survive an output failure");
+        TEST_ASSERT_EQUAL_UINT32(5u, info.size_bytes);
+        uint8_t readback[8];
+        uint32_t got = 0u;
+        TEST_ASSERT_EQUAL_INT(
+            YAN_FS_OK, yan_fs_read(&fs, dst_name, 0u, readback, 8u, &got));
+        TEST_ASSERT_EQUAL_UINT32(5u, got);
+        TEST_ASSERT_EQUAL_MEMORY("hello", readback, 5u);
+    }
+}
+
+static void invalid_line_control_and_length_prevent_mv_cp_mutations(void)
+{
+    seed_file("keep.txt", (const uint8_t *)"x", 1u);
+    snapshot_medium();
+
+    /* A control byte anywhere in an mv or cp line refuses the whole line. */
+    static const uint8_t control_mv[] = {
+        (uint8_t)'m', (uint8_t)'v', (uint8_t)' ', (uint8_t)'k',
+        (uint8_t)'e', (uint8_t)'e', (uint8_t)'p', (uint8_t)'.',
+        (uint8_t)'t', (uint8_t)'x', (uint8_t)'t', (uint8_t)' ',
+        0x09u, (uint8_t)'y'
+    };
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SHELL_OK, yan_shell_execute(&shell, control_mv, sizeof control_mv));
+    expect_output("ERROR INVALID_INPUT\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+
+    static const uint8_t control_cp[] = {
+        (uint8_t)'c', (uint8_t)'p', (uint8_t)' ', (uint8_t)'k',
+        (uint8_t)'e', (uint8_t)'e', (uint8_t)'p', (uint8_t)'.',
+        (uint8_t)'t', (uint8_t)'x', (uint8_t)'t', (uint8_t)' ',
+        0x1bu, (uint8_t)'z'
+    };
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SHELL_OK, yan_shell_execute(&shell, control_cp, sizeof control_cp));
+    expect_output("ERROR INVALID_INPUT\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+
+    /* A 1024-byte line is refused before any parse or filesystem call. */
+    static uint8_t long_line[1024];
+    uint32_t at = 0u;
+    append_text(long_line, &at, "mv keep.txt moved.txt ");
+    while (at < (uint32_t)sizeof long_line) {
+        long_line[at] = (uint8_t)' ';
+        ++at;
+    }
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SHELL_OK, yan_shell_execute(&shell, long_line, sizeof long_line));
+    expect_output("ERROR LINE_TOO_LONG\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+
+    /* An invalid name reaches the filesystem and is rejected before any write. */
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("mv keep.txt bad*name"));
+    expect_output("ERROR INVALID\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("cp keep.txt bad/name"));
+    expect_output("ERROR INVALID\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+
+    YanFsInfo info;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_stat(&fs, "keep.txt", &info));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_NOT_FOUND, yan_fs_stat(&fs, "y", &info));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_NOT_FOUND, yan_fs_stat(&fs, "z", &info));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_NOT_FOUND, yan_fs_stat(&fs, "moved.txt", &info));
+}
+
+static void reentrant_output_callback_gets_busy_for_mv_and_cp(void)
+{
+    seed_file("a", (const uint8_t *)"x", 1u);
+    reset_capture();
+    capture.reentry_at = 1u;
+    capture.reentry_shell = &shell;
+    capture.reentry_line = (const uint8_t *)"ls";
+    capture.reentry_length = 2u;
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("mv a b"));
+    TEST_ASSERT_TRUE(capture.reentry_done);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SHELL_BUSY, capture.reentry_result,
+                                  "a reentrant call from putc must see BUSY");
+    TEST_ASSERT_EQUAL_UINT32(0u, capture.reentry_output_delta);
+    expect_output("OK mv\r\n");
+
+    reset_capture();
+    capture.reentry_at = 1u;
+    capture.reentry_shell = &shell;
+    capture.reentry_line = (const uint8_t *)"stat b";
+    capture.reentry_length = 6u;
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("cp b c"));
+    TEST_ASSERT_TRUE(capture.reentry_done);
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_BUSY, capture.reentry_result);
+    TEST_ASSERT_EQUAL_UINT32(0u, capture.reentry_output_delta);
+    expect_output("OK cp\r\n");
+}
+
+static void reentrant_block_callback_gets_busy_for_mv_and_cp(void)
+{
+    seed_file("a", (const uint8_t *)"x", 1u);
+    reset_capture();
+    io_probe_enabled = true;
+    io_probe_shell = &shell;
+    io_probe_line = (const uint8_t *)"cp a b";
+    io_probe_length = 6u;
+    io_probe_count = 0u;
+    io_probe_result = YAN_SHELL_OK;
+    io_probe_output = 1u;
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("mv a m"));
+    io_probe_enabled = false;
+    TEST_ASSERT_TRUE(io_probe_count > 0u);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SHELL_BUSY, io_probe_result,
+                                  "a reentrant call from a block callback must see BUSY");
+    TEST_ASSERT_EQUAL_UINT32(0u, io_probe_output);
+    expect_output("OK mv\r\n");
+
+    /* A cp outer command also owns the shell across its data callbacks. */
+    reset_capture();
+    io_probe_enabled = true;
+    io_probe_shell = &shell;
+    io_probe_line = (const uint8_t *)"mv m n";
+    io_probe_length = 6u;
+    io_probe_count = 0u;
+    io_probe_result = YAN_SHELL_OK;
+    io_probe_output = 1u;
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("cp m c"));
+    io_probe_enabled = false;
+    TEST_ASSERT_TRUE(io_probe_count > 0u);
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_BUSY, io_probe_result);
+    TEST_ASSERT_EQUAL_UINT32(0u, io_probe_output);
+    expect_output("OK cp\r\n");
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1497,5 +2077,28 @@ int main(void)
     RUN_TEST(line_rejection_precedes_the_filesystem_health_guard);
     RUN_TEST(fatal_filesystem_stops_null_and_non_null_empty_lines);
     RUN_TEST(health_guard_reads_mounted_state_without_a_filesystem_call);
+    RUN_TEST(mv_and_cp_wrong_arity_reports_usage_without_io);
+    RUN_TEST(mv_and_cp_allow_leading_trailing_and_multiple_spaces);
+    RUN_TEST(mv_renames_and_reports_exact_ok);
+    RUN_TEST(cp_copies_and_reports_exact_ok);
+    RUN_TEST(selfsame_mv_is_ok_and_selfsame_cp_is_exists);
+    RUN_TEST(mv_and_cp_missing_source_reports_not_found);
+    RUN_TEST(mv_and_cp_existing_target_reports_exists_without_io);
+    RUN_TEST(invalid_target_precedes_missing_source_for_both);
+    RUN_TEST(missing_source_precedes_existing_target);
+    RUN_TEST(cp_creates_independent_name_slot_and_data);
+    RUN_TEST(cp_directory_full_reports_and_continues);
+    RUN_TEST(mv_renames_in_a_full_directory);
+    RUN_TEST(cp_nospace_reports_and_continues);
+    RUN_TEST(mv_and_cp_busy_reports_busy_and_continues);
+    RUN_TEST(cp_data_read_fault_is_fatal_without_ok);
+    RUN_TEST(cp_data_write_fault_is_fatal_without_ok);
+    RUN_TEST(cp_write_protocol_fault_maps_protocol);
+    RUN_TEST(mv_metadata_write_fault_is_fatal_without_ok);
+    RUN_TEST(mv_output_failure_first_middle_last_keeps_rename);
+    RUN_TEST(cp_output_failure_first_middle_last_keeps_copy);
+    RUN_TEST(invalid_line_control_and_length_prevent_mv_cp_mutations);
+    RUN_TEST(reentrant_output_callback_gets_busy_for_mv_and_cp);
+    RUN_TEST(reentrant_block_callback_gets_busy_for_mv_and_cp);
     return UNITY_END();
 }

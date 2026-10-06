@@ -1009,3 +1009,160 @@ YanFsResult yan_fs_stat(YanFs *fs, const char *name, YanFsInfo *out)
     out->size_bytes = load_le32(entry + FS_ENTRY_SIZE_OFFSET);
     return YAN_FS_OK;
 }
+
+/* 0024 rename: move the stored name of an existing file inside its own
+ * physical slot. Both caller names are validated before the source is looked
+ * up, so a missing source with an invalid companion name is INVALID rather
+ * than NOT_FOUND. size, start, count, every other slot and every data block
+ * survive; only the name field and the block CRC change. A self rename returns
+ * before the first callback, and the only callback of a real rename is the
+ * single block-0 write inside commit_metadata. */
+static YanFsResult rename_locked(YanFs *fs, const char *old_name,
+                                 const char *new_name)
+{
+    uint32_t old_length = 0;
+    uint32_t new_length = 0;
+    if (old_name == NULL ||
+        !caller_name_allowed(fs, old_name, &old_length) ||
+        name_overlaps_context(fs, old_name, old_length) ||
+        new_name == NULL ||
+        !caller_name_allowed(fs, new_name, &new_length) ||
+        name_overlaps_context(fs, new_name, new_length)) {
+        return YAN_FS_INVALID;
+    }
+
+    uint32_t slot = 0;
+    if (!find_entry(fs, old_name, old_length, &slot)) {
+        return YAN_FS_NOT_FOUND;
+    }
+    uint32_t target = 0;
+    if (find_entry(fs, new_name, new_length, &target)) {
+        if (target == slot) {
+            return YAN_FS_OK; /* the same name is a no-op, not a write */
+        }
+        return YAN_FS_EXISTS;
+    }
+
+    /* Read the surviving fields from the cache before scratch is reused. */
+    const uint8_t *entry = entry_at(fs->metadata, slot);
+    uint32_t size_bytes = load_le32(entry + FS_ENTRY_SIZE_OFFSET);
+    uint32_t start_block = load_le32(entry + FS_ENTRY_START_OFFSET);
+    uint32_t block_count = load_le32(entry + FS_ENTRY_COUNT_OFFSET);
+
+    for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
+        fs->scratch[i] = fs->metadata[i];
+    }
+    entry_set(fs->scratch, slot, (const uint8_t *)new_name, new_length,
+              size_bytes, start_block, block_count);
+    return commit_metadata(fs);
+}
+
+/* 0024 copy: keep the source slot and its extent, and build an independent file
+ * in the first empty slot on the lowest contiguous free extent. The source
+ * description comes from the metadata cache before scratch is used; every
+ * source block is read into scratch and written to its target before the next
+ * read; only the bytes past the logical end of the final block are cleared.
+ * commit_metadata is reached only after every data write succeeded, so the
+ * cache is published only once block 0 has been written. An empty source skips
+ * the data loop entirely. */
+static YanFsResult copy_locked(YanFs *fs, const char *source_name,
+                               const char *destination_name)
+{
+    uint32_t source_length = 0;
+    uint32_t destination_length = 0;
+    if (source_name == NULL ||
+        !caller_name_allowed(fs, source_name, &source_length) ||
+        name_overlaps_context(fs, source_name, source_length) ||
+        destination_name == NULL ||
+        !caller_name_allowed(fs, destination_name, &destination_length) ||
+        name_overlaps_context(fs, destination_name, destination_length)) {
+        return YAN_FS_INVALID;
+    }
+
+    uint32_t source_slot = 0;
+    if (!find_entry(fs, source_name, source_length, &source_slot)) {
+        return YAN_FS_NOT_FOUND;
+    }
+    uint32_t destination_slot = 0;
+    if (find_entry(fs, destination_name, destination_length, &destination_slot)) {
+        return YAN_FS_EXISTS; /* the same name, or any existing file */
+    }
+
+    /* Capture the source description from the cache before the data loop
+     * overwrites scratch on every block. block_count is the exact extent a
+     * mounted, validated directory recorded for this size. */
+    const uint8_t *source_entry = entry_at(fs->metadata, source_slot);
+    uint32_t size_bytes = load_le32(source_entry + FS_ENTRY_SIZE_OFFSET);
+    uint32_t start_block = load_le32(source_entry + FS_ENTRY_START_OFFSET);
+    uint32_t block_count = load_le32(source_entry + FS_ENTRY_COUNT_OFFSET);
+
+    uint32_t slot = 0;
+    if (!find_free_slot(fs, &slot)) {
+        return YAN_FS_DIRECTORY_FULL;
+    }
+    uint32_t destination_start = 0;
+    if (block_count > 0u &&
+        !allocate_extent(fs, block_count, &destination_start)) {
+        return YAN_FS_NOSPACE;
+    }
+
+    /* Index/count arithmetic, not length + 4095 and not an accumulating
+     * done += 4096: block_index stays below the validated block_count, whose
+     * ceiling is 1048576 for UINT32_MAX, so every product fits in uint32_t. */
+    for (uint32_t block_index = 0; block_index < block_count; ++block_index) {
+        uint32_t offset = block_index * YAN_FS_BLOCK_SIZE;
+        uint32_t remaining = size_bytes - offset;
+        uint32_t chunk = remaining < YAN_FS_BLOCK_SIZE ? remaining
+                                                       : YAN_FS_BLOCK_SIZE;
+        YanFsIoResult io = fs->io.read_block(fs->io.context,
+                                             start_block + block_index,
+                                             fs->scratch);
+        if (io != YAN_FS_IO_OK) {
+            return fault_io(fs, io);
+        }
+        /* Only the final logical tail is cleared; a full final block is data. */
+        for (uint32_t j = chunk; j < YAN_FS_BLOCK_SIZE; ++j) {
+            fs->scratch[j] = 0u;
+        }
+        io = fs->io.write_block(fs->io.context,
+                                destination_start + block_index, fs->scratch);
+        if (io != YAN_FS_IO_OK) {
+            return fault_io(fs, io);
+        }
+    }
+
+    for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
+        fs->scratch[i] = fs->metadata[i];
+    }
+    entry_set(fs->scratch, slot, (const uint8_t *)destination_name,
+              destination_length, size_bytes, destination_start, block_count);
+    return commit_metadata(fs);
+}
+
+/* Both public entry points hold busy across the whole call, so a device
+ * callback that reenters either primitive (or any other file operation) sees
+ * BUSY, and busy is cleared on every exit path. */
+YanFsResult yan_fs_rename(YanFs *fs, const char *old_name, const char *new_name)
+{
+    YanFsResult state = operation_guard(fs);
+    if (state != YAN_FS_OK) {
+        return state;
+    }
+    fs->busy = true;
+    YanFsResult result = rename_locked(fs, old_name, new_name);
+    fs->busy = false;
+    return result;
+}
+
+YanFsResult yan_fs_copy(YanFs *fs, const char *source_name,
+                        const char *destination_name)
+{
+    YanFsResult state = operation_guard(fs);
+    if (state != YAN_FS_OK) {
+        return state;
+    }
+    fs->busy = true;
+    YanFsResult result = copy_locked(fs, source_name, destination_name);
+    fs->busy = false;
+    return result;
+}

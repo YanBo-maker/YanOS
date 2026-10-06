@@ -1,5 +1,14 @@
 # 项目状态
 
+当前推进：文件重命名与复制，[0024](specs/0024-file-rename-copy.md) 于2026-10-05 18:22 +08:00获项目所有者整体批准并锁定，任务分支为 `codex/file-rename-copy`。
+
+- 规格批准：mv/cp拒覆盖；rename原槽、同名零I/O；copy新槽新extent逐块复制任意二进制并清零尾块，数据成功后发布目录；状态顺序与故障边界沿既有契约，编辑态不执行两命令。
+- 实现：文件系统rename/copy、终端mv/cp、真实Guest与故障验收已完成，磁盘格式、块协议及编辑模式保持。
+- 验证：本机Windows默认29/29（2.27 s）、Linux Release默认49/49（19.29 s）、ASan/UBSan默认49/49（36.98 s）、十组实际变异10/10（97.01 s），0失败、0SKIP；当前Linux注册49默认、开启实际变异后59组。分项与边界见「重命名与复制验收」。
+- 用户审查：整体SPEC已批准，实现交付待维护者审查；学习与理解程度仍由项目所有者判断。
+
+### 已交付多行编辑基线
+
 当前能力：多行文本编辑整体实现与验证完成，[0023](specs/0023-multiline-text-editor.md) 于2026-10-05 09:22 +08:00经项目所有者批准并锁定，交付提交为 `1009c61`。项目所有者已批准整合能力合入main，PR #16的merge提交为 `dc7f8fe`；学习与理解程度仍由项目所有者判断。交付阶段分支 `codex/multiline-editor` 和基线read状态优先修复 `1daae9f` 保留，功能行为与规格不变。
 
 - 规格批准：edit NAME、a/r/d/p/w/q、16KiB静态草稿、合法UTF-8文本与已有TAB、保留LF/CRLF/无末LF、一次save和取消不写盘；普通保存错误留稿，FS或输出fatal沿0022。项目所有者已认可形成规格并继续实现。
@@ -52,9 +61,21 @@ YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0
 - `yan_gen` 随机 RV32IM 指令流生成器（给定种子确定输出），以及 5 个手写 Guest 用例。
 - C17 / CMake 构建、Unity 单元测试、CTest 及 GitHub Actions。
 
-详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前0023配置默认47组、开实际变异后57组；0022的43/52组与0020于2026-10-03的32/39组保留在本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；各组的通过情况以本页「验证」一节为准。
+详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前0024配置默认49组、开实际变异后59组；0023的47/57组、0022的43/52组与0020于2026-10-03的32/39组保留在本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；各组的通过情况以本页「验证」一节为准。
 
 ## 验证
+
+### 重命名与复制验收（2026-10-05）
+
+Linux Release默认49/49（19.29 s）、ASan/UBSan默认49/49（36.98 s）、Windows MSVC默认29/29（2.27 s），均0失败、0SKIP。Linux启用工具与实际变异时注册59=49默认+10实际变异；十组实际变异10/10（97.01 s，-j3），FS19个、终端24个具名缺陷均命中指定owner和具体断言，0存活、0harness error。Windows配置不包含Linux工具与真实Guest验收，本机验证不代替远端CI或维护者审查。
+
+证据为 `build/file-management-final-release-tests.log`、`file-management-final-asan-tests.log`、`file-management-final-windows-tests.log`、`file-management-final-mutations.log` 与保存的 `file-management-final-mutations-detail.log`；注册见 `file-management-registration.log`。Release用 `ctest --test-dir build/editor-release -E '_mutation$' -j3 --output-on-failure`，ASan配置默认49组，实际变异用 `-R '_mutation$'`；保留默认三个puregate，不把它们算实际变异组。
+
+核心105例、shell89例、真实Guest14项、故障Guest16项通过。BUILD_TESTING=OFF的生产构建及其ELF完整14项也通过，没有宣称不同构建ELF字节相同。Guest RV32检查两名称位置的地址上界、context邻接和状态顺序，原wholeimage验收保持；输入审计15项控制通过，缺仓库source/script/ELF硬失败，真实缺外部编译器才77。
+
+首轮故障验收曾14通过、2失败：注入阈值位于最后echo字节的输出后检查，实际命令未执行，应为LINE_UNAVAILABLE和原镜像；修正验收后16项通过。终端首轮实际变异23检出、1wrong-owner是owner名称拼写错误，门禁未误计检出；修正后24检出。后验三项CTest均通过，记录在 `file-management-corrections-tests.log`；这些失败与修正保留，没有把首轮写成通过。
+
+native覆盖提交后回执首/中/末字节失败，真实Guest覆盖echo-boundary与回执中/末字节，物理首回执字节未单独注入。Guest I/O注入只针对下一请求；协议错配覆盖rename目录响应和copy响应3–7，metadata写后的错tag可留下已写新目录，不承诺回滚。最大u32大小仅验证NOSPACE、无I/O，未实跑4GiB成功复制。Guest静态栈单帧rename64、copy112、allocate528字节，不是完整调用链或ISR嵌套水位证明。实现与本机验证已完成，交付待维护者审查，学习理解仍由项目所有者判断。
 
 ### Git整合与Windows兼容复测（2026-10-05）
 
@@ -240,7 +261,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-审阅已实现的0023编辑流程、保存与取消的实际字节变化，由项目所有者选择下一项能力。编辑器、终端与文件系统已获PR #16合入批准，学习与理解程度仍由项目所有者判断；尚无新能力规格锁定。
+通过PR审查0024整体实现与验证，结合name、目录槽和数据块变化学习rename与copy；本能力尚未合入main。既有编辑器、终端与文件系统已获PR #16合入批准；学习与理解程度仍由项目所有者判断。
 
 ### 历史推进记录（M1a / M2a）
 

@@ -11,7 +11,9 @@
  * This file fixes the dispatcher side of 0022: one caller-supplied line of
  * raw bytes in, command output out, and a small result enum that tells the
  * caller whether to keep running, stop healthily, or stop because the
- * filesystem or the output channel can no longer be trusted.
+ * filesystem or the output channel can no longer be trusted. 0024 extends the
+ * command set with the two-name `mv OLD NEW` and `cp SRC DEST`; the interface
+ * below is unchanged by that stage.
  *
  * The layer performs no Host I/O of its own. Every produced byte goes through
  * the borrowed YanShellOutput callback; every file operation goes through a

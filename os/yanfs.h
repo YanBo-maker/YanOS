@@ -4,9 +4,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* YanFS core. The contract is docs/specs/0021-yanfs.md, and this header
- * repeats the constants, enums, structures and entry points fixed by its
- * "接口" section and nothing else.
+/* YanFS core. The contract for the format and the original file API is
+ * docs/specs/0021-yanfs.md; this header repeats the constants, enums,
+ * structures and entry points fixed by its "接口" section. 0024 extends the
+ * public surface with yan_fs_rename and yan_fs_copy and adds no enum value and
+ * no context field, so the rest of the header is unchanged by that stage.
  *
  * The core owns the on-disk format and the metadata cache. It reaches a block
  * device only through YanFsBlockIo, whose callbacks are synchronous: they may
@@ -77,6 +79,19 @@ YanFsResult yan_fs_read(YanFs *, const char *name, uint32_t offset,
 YanFsResult yan_fs_create(YanFs *, const char *name, const uint8_t *bytes, uint32_t length);
 YanFsResult yan_fs_replace(YanFs *, const char *name, const uint8_t *bytes, uint32_t length);
 YanFsResult yan_fs_remove(YanFs *, const char *name);
+
+/* 0024 file management primitives. Both share the file-API state order
+ * (context/initialized, BUSY, FAULTED, MOUNTED) and then validate both
+ * caller-supplied names before they look anything up, so a missing source with
+ * an invalid companion name is INVALID, not NOT_FOUND. The two name ranges are
+ * read-only and may overlap each other (including sharing one string), but the
+ * bytes actually read, terminator included, must not overlap the YanFs object.
+ * yan_fs_rename rewrites the name field of the source's existing physical slot;
+ * yan_fs_copy keeps the source slot and extent and allocates a new slot and a
+ * new contiguous extent. */
+YanFsResult yan_fs_rename(YanFs *, const char *old_name, const char *new_name);
+YanFsResult yan_fs_copy(YanFs *, const char *source_name,
+                       const char *destination_name);
 
 /* Pure encoding helpers: no I/O and no instance state. yan_fs_format_metadata
  * builds a canonical empty directory for a device of capacity_blocks and

@@ -34,8 +34,9 @@
 
 #include <stddef.h>
 
-/* Help text, ending before the final OK line. It lists the eight commands, the
- * 1023-byte line limit, exit and the cat display rules. Tests pin these bytes. */
+/* Help text, ending before the final OK line. It lists the commands, the
+ * 1023-byte line limit, exit and the cat display rules. Tests pin these bytes;
+ * 0024 adds the two-name commands after rm. */
 static const char HELP_TEXT[] =
     "help: show commands and limits\r\n"
     "ls: list files as <size> <name>\r\n"
@@ -44,6 +45,8 @@ static const char HELP_TEXT[] =
     "create NAME [TEXT]: create a new file\r\n"
     "write NAME [TEXT]: replace an existing file\r\n"
     "rm NAME: remove a file\r\n"
+    "mv OLD NEW: rename a file\r\n"
+    "cp SRC DEST: copy a file\r\n"
     "exit: end the session\r\n"
     "line: at most 1023 bytes, ended by CR or LF\r\n"
     "separators: ASCII spaces; commands and names are case sensitive\r\n"
@@ -457,6 +460,40 @@ static bool parse_name_and_text(const uint8_t *line, uint32_t length,
     return true;
 }
 
+/* 0024 mv/cp: exactly two non-empty names separated by ASCII spaces, with only
+ * spaces allowed after the second. A missing or extra token is refused here,
+ * before the command reaches the filesystem, so the arity error does no I/O.
+ * The two ranges are only reported; the callers copy them into bounded local
+ * name buffers, so overlapping names are harmless. */
+static bool parse_two_names(const uint8_t *line, uint32_t length,
+                            uint32_t position, uint32_t *first_start,
+                            uint32_t *first_length, uint32_t *second_start,
+                            uint32_t *second_length)
+{
+    position = skip_spaces(line, length, position);
+    if (position == length) {
+        return false;
+    }
+    uint32_t start = position;
+    while (position < length && line[position] != (uint8_t)' ') {
+        ++position;
+    }
+    *first_start = start;
+    *first_length = position - start;
+
+    position = skip_spaces(line, length, position);
+    if (position == length) {
+        return false;
+    }
+    start = position;
+    while (position < length && line[position] != (uint8_t)' ') {
+        ++position;
+    }
+    *second_start = start;
+    *second_length = position - start;
+    return rest_is_spaces(line, length, position);
+}
+
 /* --------------------------------------------------------------- commands */
 
 static YanShellResult run_ls(YanShell *shell)
@@ -577,6 +614,41 @@ static YanShellResult run_rm(YanShell *shell, const uint8_t *line,
     return emit_ok(shell, "rm") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
 }
 
+/* 0024 mv/cp: parse two bounded names, run the filesystem primitive, then
+ * print OK only after it returned OK. An ordinary error reuses finish_fs_error
+ * and keeps the session alive; an output failure is fatal. */
+static YanShellResult run_mv(YanShell *shell, const uint8_t *line,
+                             uint32_t old_start, uint32_t old_length,
+                             uint32_t new_start, uint32_t new_length)
+{
+    char old_name[YAN_FS_NAME_MAX + 2u];
+    char new_name[YAN_FS_NAME_MAX + 2u];
+    copy_name(line, old_start, old_length, old_name);
+    copy_name(line, new_start, new_length, new_name);
+    YanFsResult result = yan_fs_rename(shell->fs, old_name, new_name);
+    if (result != YAN_FS_OK) {
+        return finish_fs_error(shell, result);
+    }
+    return emit_ok(shell, "mv") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
+}
+
+static YanShellResult run_cp(YanShell *shell, const uint8_t *line,
+                             uint32_t source_start, uint32_t source_length,
+                             uint32_t destination_start,
+                             uint32_t destination_length)
+{
+    char source_name[YAN_FS_NAME_MAX + 2u];
+    char destination_name[YAN_FS_NAME_MAX + 2u];
+    copy_name(line, source_start, source_length, source_name);
+    copy_name(line, destination_start, destination_length, destination_name);
+    YanFsResult result =
+        yan_fs_copy(shell->fs, source_name, destination_name);
+    if (result != YAN_FS_OK) {
+        return finish_fs_error(shell, result);
+    }
+    return emit_ok(shell, "cp") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
+}
+
 static YanShellResult run_line(YanShell *shell, const uint8_t *line,
                                uint32_t length)
 {
@@ -643,6 +715,22 @@ static YanShellResult run_line(YanShell *shell, const uint8_t *line,
             return emit_status(shell, "ERROR USAGE\r\n");
         }
         return run_rm(shell, line, name_start, name_length);
+    }
+    bool mv = token_is(line, command_start, command_length, "mv");
+    bool cp = token_is(line, command_start, command_length, "cp");
+    if (mv || cp) {
+        uint32_t first_start = 0u;
+        uint32_t first_length = 0u;
+        uint32_t second_start = 0u;
+        uint32_t second_length = 0u;
+        if (!parse_two_names(line, length, position, &first_start, &first_length,
+                             &second_start, &second_length)) {
+            return emit_status(shell, "ERROR USAGE\r\n");
+        }
+        return mv ? run_mv(shell, line, first_start, first_length, second_start,
+                           second_length)
+                  : run_cp(shell, line, first_start, first_length, second_start,
+                           second_length);
     }
     if (token_is(line, command_start, command_length, "exit")) {
         if (!rest_is_spaces(line, length, position)) {

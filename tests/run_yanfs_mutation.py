@@ -80,6 +80,33 @@ OWNING_ASSERTIONS = {
     "replace_borrows_old_extent":
         ("replace_cannot_borrow_its_own_extent_at_peak",
          "a replacement cannot reuse the extent it is replacing"),
+    "rename_changes_extent":
+        ("rename_moves_name_in_original_slot_with_single_metadata_write",
+         "a rename must keep the original extent start"),
+    "self_rename_rewrites_metadata":
+        ("rename_same_name_is_zero_io_even_with_full_directory_and_disk",
+         "a same-name rename must not write the device, even with a full directory"),
+    "rename_pointer_equal_shortcut":
+        ("rename_validates_both_names_before_source_existence",
+         "a missing source must not succeed as a same-name rename"),
+    "copy_pointer_equal_shortcut":
+        ("copy_validates_both_names_before_source_existence",
+         "a missing source must not report EXISTS for a same-name copy"),
+    "copy_borrows_source_extent":
+        ("copy_reports_nospace_for_fragmented_free_space",
+         "a copy must not borrow or split a non-contiguous free extent"),
+    "copy_skips_final_tail_zero":
+        ("copy_zeroes_target_tail_while_source_padding_survives",
+         "the copy must zero its tail even when the source padding is non-zero"),
+    "copy_publishes_candidate_before_write":
+        ("copy_metadata_write_failure_keeps_old_cache",
+         "a failed directory write must keep the previous directory in the cache"),
+    "copy_reads_neighbour_block":
+        ("copy_allocates_first_slot_and_low_first_fit_extent",
+         "the copy's first data block must hold the source bytes"),
+    "copy_ignores_source_read_error":
+        ("copy_read_failure_faults_without_writing_metadata",
+         "a source read error must surface as YAN_FS_IO"),
 }
 
 MUTATIONS = [
@@ -223,6 +250,139 @@ MUTATIONS = [
     if (needed > 0u) {
         start_block = load_le32(previous + FS_ENTRY_START_OFFSET);
     }
+""",
+    },
+    {
+        "name": "rename_changes_extent",
+        "file": "os/yanfs.c",
+        "old": "              size_bytes, start_block, block_count);\n",
+        "new": "              size_bytes, start_block + 1u, block_count);\n",
+    },
+    {
+        "name": "self_rename_rewrites_metadata",
+        "file": "os/yanfs.c",
+        "old": """        if (target == slot) {
+            return YAN_FS_OK; /* the same name is a no-op, not a write */
+        }
+""",
+        "new": """        if (target == slot) {
+            /* mutant: rewrite the directory even for a self rename */
+            for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
+                fs->scratch[i] = fs->metadata[i];
+            }
+            return commit_metadata(fs);
+        }
+""",
+    },
+    {
+        "name": "rename_pointer_equal_shortcut",
+        "file": "os/yanfs.c",
+        "old": """    uint32_t slot = 0;
+    if (!find_entry(fs, old_name, old_length, &slot)) {
+        return YAN_FS_NOT_FOUND;
+    }
+""",
+        "new": """    if (old_name == new_name) {
+        return YAN_FS_OK; /* mutant: a pointer-equal shortcut before the lookup */
+    }
+    uint32_t slot = 0;
+    if (!find_entry(fs, old_name, old_length, &slot)) {
+        return YAN_FS_NOT_FOUND;
+    }
+""",
+    },
+    {
+        "name": "copy_pointer_equal_shortcut",
+        "file": "os/yanfs.c",
+        "old": """    uint32_t source_slot = 0;
+    if (!find_entry(fs, source_name, source_length, &source_slot)) {
+        return YAN_FS_NOT_FOUND;
+    }
+""",
+        "new": """    if (source_name == destination_name) {
+        return YAN_FS_EXISTS; /* mutant: a pointer-equal shortcut before the lookup */
+    }
+    uint32_t source_slot = 0;
+    if (!find_entry(fs, source_name, source_length, &source_slot)) {
+        return YAN_FS_NOT_FOUND;
+    }
+""",
+    },
+    {
+        "name": "copy_borrows_source_extent",
+        "file": "os/yanfs.c",
+        "old": """    uint32_t destination_start = 0;
+    if (block_count > 0u &&
+        !allocate_extent(fs, block_count, &destination_start)) {
+        return YAN_FS_NOSPACE;
+    }
+""",
+        "new": """    uint32_t destination_start = start_block; /* mutant: borrow the source extent */
+""",
+    },
+    {
+        "name": "copy_skips_final_tail_zero",
+        "file": "os/yanfs.c",
+        "old": """        for (uint32_t j = chunk; j < YAN_FS_BLOCK_SIZE; ++j) {
+            fs->scratch[j] = 0u;
+        }
+""",
+        "new": """        for (uint32_t j = chunk; j < chunk; ++j) {
+            fs->scratch[j] = 0u; /* mutant: the final tail is not cleared */
+        }
+""",
+    },
+    {
+        "name": "copy_publishes_candidate_before_write",
+        "file": "os/yanfs.c",
+        "old": """    entry_set(fs->scratch, slot, (const uint8_t *)destination_name,
+              destination_length, size_bytes, destination_start, block_count);
+    return commit_metadata(fs);
+""",
+        "new": """    entry_set(fs->scratch, slot, (const uint8_t *)destination_name,
+              destination_length, size_bytes, destination_start, block_count);
+    for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
+        fs->metadata[i] = fs->scratch[i]; /* mutant: candidates published first */
+    }
+    return commit_metadata(fs);
+""",
+    },
+    {
+        "name": "copy_reads_neighbour_block",
+        "file": "os/yanfs.c",
+        "old": """        uint32_t chunk = remaining < YAN_FS_BLOCK_SIZE ? remaining
+                                                       : YAN_FS_BLOCK_SIZE;
+        YanFsIoResult io = fs->io.read_block(fs->io.context,
+                                             start_block + block_index,
+                                             fs->scratch);
+""",
+        "new": """        uint32_t chunk = remaining < YAN_FS_BLOCK_SIZE ? remaining
+                                                       : YAN_FS_BLOCK_SIZE;
+        YanFsIoResult io = fs->io.read_block(fs->io.context,
+                                             start_block + block_index + 1u,
+                                             fs->scratch);
+""",
+    },
+    {
+        "name": "copy_ignores_source_read_error",
+        "file": "os/yanfs.c",
+        "old": """        uint32_t chunk = remaining < YAN_FS_BLOCK_SIZE ? remaining
+                                                       : YAN_FS_BLOCK_SIZE;
+        YanFsIoResult io = fs->io.read_block(fs->io.context,
+                                             start_block + block_index,
+                                             fs->scratch);
+        if (io != YAN_FS_IO_OK) {
+            return fault_io(fs, io);
+        }
+""",
+        "new": """        uint32_t chunk = remaining < YAN_FS_BLOCK_SIZE ? remaining
+                                                       : YAN_FS_BLOCK_SIZE;
+        YanFsIoResult io = fs->io.read_block(fs->io.context,
+                                             start_block + block_index,
+                                             fs->scratch);
+        if (io != YAN_FS_IO_OK) {
+            (void)io; /* mutant: a source read error is ignored */
+        }
 """,
     },
 ]
