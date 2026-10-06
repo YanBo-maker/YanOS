@@ -16,7 +16,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 上述能力已于2026-10-05经项目所有者批准，通过 [PR #16](https://github.com/YanBo-maker/YanOS/pull/16) 合入main，保留阶段提交。学习与理解程度仍由项目所有者判断。
 
-[重命名与复制](docs/specs/0024-file-rename-copy.md) 已实现并完成本机验证，交付待维护者审查：mv保留原目录槽和数据块，cp新建独立副本，均拒绝覆盖已有目标。复制支持任意二进制文件，不受编辑草稿容量限制；文件系统接口扩充与终端两命令见0024。
+[重命名与复制](docs/specs/0024-file-rename-copy.md) 已实现并完成本机验证，经项目所有者批准，通过 [PR #18](https://github.com/YanBo-maker/YanOS/pull/18) 合入main：mv保留原目录槽和数据块，cp新建独立副本，均拒绝覆盖已有目标。复制支持任意二进制文件，不受编辑草稿容量限制；文件系统接口扩充与终端两命令见0024。
 
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
