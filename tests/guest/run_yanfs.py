@@ -7,11 +7,13 @@ One freshly formatted 16-block image, then the same Guest source
 (tests/guest/yanfs_check.c) built for three roles and run through the
 production executor `yan_run --disk-image`:
 
-  writer   runs the whole document sequence -- create/read/stat/list, guard
-           file, fold hello.txt up to 5000 bytes across blocks, EOF checks,
-           remove, persist/empty/reuse, the duplicate and absent-name errors,
-           and the two real 32-bit pointer-range negative controls -- then
-           unmounts and exits through tohost;
+  writer   runs the whole document sequence -- mounted RV32 public-API
+           pointer/state checks before any file exists (its own
+           "yanfs: rv32 public-api checks PASS" fragment is required), then
+           create/read/stat/list, guard file, fold hello.txt up to 5000 bytes
+           across blocks, EOF checks, remove, persist/empty/reuse, the duplicate
+           and absent-name errors, and the two real 32-bit pointer-range
+           negative controls -- then unmounts and exits through tohost;
   reader   is a *fresh process* on the writer's image: read/list/stat of the
            terminal state, no write;
   corrupt  mounts a deliberately damaged image and must return the exact error
@@ -359,7 +361,7 @@ def writer_check_self_test(case):
     expect_check_rejects(case, "tail", tail, "a non-zero last-block tail")
 
 
-def run_pass(run_exe, elf, image, trace, marker, label):
+def run_pass(run_exe, elf, image, trace, marker, label, extra_marker=None):
     result, steps = run_guest(run_exe, elf, image, trace)
     blob = result.stdout + b"\n" + result.stderr
     if result.returncode < 0:
@@ -381,6 +383,12 @@ def run_pass(run_exe, elf, image, trace, marker, label):
         raise HarnessError("%s printed a FAIL line but exited 0" % label)
     if marker not in result.stdout:
         raise HarnessError("%s exited 0 without its PASS marker" % label)
+    if extra_marker is not None and extra_marker not in result.stdout:
+        # A distinct fragment only the writer's new checks print: if the checks
+        # were compiled out or unreachable, this fails instead of passing on the
+        # role marker alone.
+        raise HarnessError("%s exited 0 without its required fragment %r"
+                           % (label, extra_marker))
     return steps
 
 
@@ -431,7 +439,8 @@ def run_cases(args, source, case, run_exe, mkfs_exe, traces):
     disk = case / "disk.img"
     disk.write_bytes(base.read_bytes())
     steps = run_pass(run_exe, writer_elf, disk, traces / "writer.trace",
-                     b"yanfs writer PASS", "writer")
+                     b"yanfs writer PASS", "writer",
+                     extra_marker=b"yanfs: rv32 public-api checks PASS")
     try:
         check_writer_image(disk)
     except AssertionError as error:

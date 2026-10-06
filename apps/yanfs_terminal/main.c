@@ -6,8 +6,8 @@
  * the interrupt line reader (os/line.c) and the UART terminal (os/terminal.c),
  * and it owns the whole storage stack (os/yanfs.c over os/yanfs_block.c). It
  * references nothing under tests/, so the production image and the validation
- * corpus stay separate. The original shell module is unchanged and still
- * carries exactly its eight commands.
+ * corpus stay separate. The shell now carries the original eight commands plus
+ * the 0024 `mv` and `cp`.
  *
  * Layout:
  *   main          runs on the boot stack from os/trap_entry.S, configures the
@@ -24,7 +24,8 @@
  *                 a task stack; no entry point builds a large automatic object.
  *
  * Routing: the application has a SHELL mode and an EDITING mode. SHELL keeps
- * the original eight commands; the application inspects only the first token,
+ * the shell's commands (the original eight plus the 0024 `mv` and `cp`); the
+ * application inspects only the first token,
  * routes `edit NAME` to the editor, adds a short editor hint before a
  * standalone `help`, and passes every other line to yan_shell_execute. EDITING
  * routes every line to yan_editor_execute and never to the shell; a healthy

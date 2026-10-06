@@ -56,7 +56,9 @@ ISA 行为遵循 Spec → Test → Implementation：先写用例并确认预期�
 3. 文档自洽核对：由总审核角色核对状态行、规格索引、计数与链接。
 4. **新增或改动被忽略扩展名的工件时，确认它真的能进提交**：判据是 `git add --dry-run <路径>` 是否列出该文件，**不是** `git check-ignore` 的返回码——命中取反规则时它也返回 0。仓库已经踩过一次：golden 基准的 `.jsonl` / `.hex` 被"验证产物不提交"的规则吃掉，基准进不了仓库，测试会在别的机器上静默 SKIP。
 
-变异检查默认关闭，合并前显式运行。2026-10-05 Git整合与兼容复测：Windows MSVC Debug本机29/29（4.02 s）；Linux Release默认47/47（17.67 s）、ASan/UBSan默认47/47（31.65 s）、十组实际变异10/10（88.14 s，均-j3），0失败、0SKIP。Linux注册仍为默认47组、开实际变异57组，Windows本机配置不包含Linux工具与真实Guest验收；本机通过不代替远端CI或PR审核。命令与证据见 [STATUS](docs/STATUS.md)。
+变异检查默认关闭，合并前显式运行。0024重命名与复制本机验收：Linux默认49组、开启实际变异后59组；Release49/49（19.29 s）、ASan/UBSan49/49（36.98 s），十组实际变异10/10（97.01 s，-j3），Windows MSVC默认29/29（2.27 s），均0失败、0SKIP。FS19个与终端24个实际缺陷均命中指定owner及具体断言，0存活、0harness error。新默认Guest文件管理及故障验收由Linux工具配置注册，Windows计数不能直接与其比较；边界与证据见 [STATUS](docs/STATUS.md)。`-E '_mutation$'`保留默认puregate，`-R '_mutation$'`只选十组实际变异。
+
+历史Git整合测量：2026-10-05 Git整合与兼容复测：Windows MSVC Debug本机29/29（4.02 s）；Linux Release默认47/47（17.67 s）、ASan/UBSan默认47/47（31.65 s）、十组实际变异10/10（88.14 s，均-j3），0失败、0SKIP。Linux注册仍为默认47组、开实际变异57组，Windows本机配置不包含Linux工具与真实Guest验收；本机通过不代替远端CI或PR审核。命令与证据见 [STATUS](docs/STATUS.md)。
 
 编辑器交付测量：2026-10-05多行编辑配置注册默认 **47组**、开启实际变异后 **57组**；Release默认 **47/47（28.88 s）**，Debug ASan/UBSan默认 **47/47（48.86 s）**。十组实际变异一次运行 **10/10（130.76 s，-j3）**；编辑器11个非等价缺陷均命中指定owner及具体断言，0存活、0harness error。三个默认puregate核分类纪律，原生同owner无关断言控制已补齐。以上均无失败、无SKIP，命令与证据见 [STATUS](docs/STATUS.md)。
 

@@ -256,6 +256,18 @@ if(BUILD_TESTING)
                             --mkfs "$<TARGET_FILE:yan_mkfs>"
                             --guest "${YAN_TERMINAL_ELF}")
                 set_tests_properties(guest_editor PROPERTIES TIMEOUT 600)
+                # 0024 two-name file management on the same production ELF; the
+                # script returns 1 on any missing in-repo input and 2 on a
+                # harness error, so it has no skip code.
+                add_test(NAME guest_file_management
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_file_management.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-file-management"
+                            --run "$<TARGET_FILE:yan_run>"
+                            --mkfs "$<TARGET_FILE:yan_mkfs>"
+                            --guest "${YAN_TERMINAL_ELF}")
+                set_tests_properties(guest_file_management PROPERTIES TIMEOUT 600)
                 set(_yan_terminal_runtime_args)
                 if(YAN_ENABLE_SANITIZERS)
                     list(APPEND _yan_terminal_runtime_args --sanitizers)
@@ -280,6 +292,21 @@ if(BUILD_TESTING)
                             --guest "${YAN_TERMINAL_ELF}"
                             ${_yan_terminal_runtime_args})
                 set_tests_properties(guest_editor_faults PROPERTIES
+                                     SKIP_RETURN_CODE 77 TIMEOUT 600)
+                # 0024 file-management fault surface on the same production ELF:
+                # output refusal on the success receipt, the first IO request and
+                # the scheduled corrupt-response protocol faults. It reuses the
+                # runtime acceptance driver and oracle, and only the host C
+                # compiler is external, hence the 77 skip code.
+                add_test(NAME guest_file_management_faults
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_file_management_faults.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-file-management-faults"
+                            --cc "${CMAKE_C_COMPILER}"
+                            --guest "${YAN_TERMINAL_ELF}"
+                            ${_yan_terminal_runtime_args})
+                set_tests_properties(guest_file_management_faults PROPERTIES
                                      SKIP_RETURN_CODE 77 TIMEOUT 600)
             endif()
         endif()

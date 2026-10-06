@@ -16,6 +16,8 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 上述能力已于2026-10-05经项目所有者批准，通过 [PR #16](https://github.com/YanBo-maker/YanOS/pull/16) 合入main，保留阶段提交。学习与理解程度仍由项目所有者判断。
 
+[重命名与复制](docs/specs/0024-file-rename-copy.md) 已实现并完成本机验证，交付待维护者审查：mv保留原目录槽和数据块，cp新建独立副本，均拒绝覆盖已有目标。复制支持任意二进制文件，不受编辑草稿容量限制；文件系统接口扩充与终端两命令见0024。
+
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
 ## 构建与测试
@@ -71,10 +73,14 @@ r 2 修订
 p
 w
 cat note.txt
+mv note.txt diary.txt
+cp diary.txt backup.txt
 exit
 ```
 
 编辑时提示符为 `edit> `。`a`追加LF行，`r N TEXT`替换第N行并保留原行终止符，`d N`删除一行；`p`只显示内存稿。`w`一次保存并返回shell，`q`取消且不写盘。草稿最多16384字节，命令行最多1023字节；容量或输入错误保留原稿。仅载入合法UTF-8文本，允许已有TAB和LF/CRLF，二进制仍用cat查看。公开接口见 [编辑核心](os/editor.h)。
+
+回到shell后可用 `mv OLD NEW` 改名、`cp SRC DEST` 复制。mv源存在且新旧名称相同时成功而不写盘，cp同名报EXISTS；已有目标均不会被覆盖。复制需要新的连续空闲extent，目录满或碎片可能使其失败。编辑态须先w成功或q退出，才能执行两命令。
 
 生产入口见 [应用](apps/yanfs_terminal/main.c)，公共接口见 [shell](os/shell.h)、[读行器](os/line.h) 和 [UART 终端](os/terminal.h)。应用依赖 `os/`，不依赖 `tests/`。
 
@@ -117,7 +123,7 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 
 ## 开发
 
-参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)、[控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)、[块请求协议规格](docs/specs/0018-block-protocol.md)、[协作式运行时规格](docs/specs/0019-cooperative-runtime.md)、[持久化块镜像规格](docs/specs/0020-persistent-block-image.md)、[YanFS 规格](docs/specs/0021-yanfs.md) 、[终端文件操作规格](docs/specs/0022-terminal-file-operations.md) 和 [多行文本编辑规格](docs/specs/0023-multiline-text-editor.md)。
+参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)、[控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)、[块请求协议规格](docs/specs/0018-block-protocol.md)、[协作式运行时规格](docs/specs/0019-cooperative-runtime.md)、[持久化块镜像规格](docs/specs/0020-persistent-block-image.md)、[YanFS 规格](docs/specs/0021-yanfs.md) 、[终端文件操作规格](docs/specs/0022-terminal-file-operations.md) 、[多行文本编辑规格](docs/specs/0023-multiline-text-editor.md) 和 [重命名与复制规格](docs/specs/0024-file-rename-copy.md)。
 
 ## 许可证
 

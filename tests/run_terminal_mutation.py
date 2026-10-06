@@ -380,6 +380,52 @@ NATIVE_MUTATIONS = [
         "new": "            return shell_put_bytes(shell, &byte, 1u);\n",
         "owner": "cat_escapes_backslash_and_c0_and_del",
     },
+    {
+        "name": "mv_performs_a_copy",
+        "suite": "shell",
+        "file": "os/shell.c",
+        "old": "    YanFsResult result = yan_fs_rename(shell->fs, old_name, new_name);\n",
+        "new": "    YanFsResult result = yan_fs_copy(shell->fs, old_name, new_name);\n",
+        "owner": "mv_and_cp_allow_leading_trailing_and_multiple_spaces",
+    },
+    {
+        "name": "cp_performs_a_rename",
+        "suite": "shell",
+        "file": "os/shell.c",
+        "old": "        yan_fs_copy(shell->fs, source_name, destination_name);\n",
+        "new": "        yan_fs_rename(shell->fs, source_name, destination_name);\n",
+        "owner": "cp_creates_independent_name_slot_and_data",
+    },
+    {
+        "name": "cp_io_swallowed",
+        "suite": "shell",
+        "file": "os/shell.c",
+        "old": """    YanFsResult result =
+        yan_fs_copy(shell->fs, source_name, destination_name);
+    if (result != YAN_FS_OK) {
+        return finish_fs_error(shell, result);
+    }
+    return emit_ok(shell, "cp") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
+""",
+        "new": """    (void)yan_fs_copy(shell->fs, source_name, destination_name);
+    return emit_ok(shell, "cp") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
+""",
+        "owner": "cp_data_read_fault_is_fatal_without_ok",
+    },
+    {
+        "name": "two_name_arity_ignores_extra",
+        "suite": "shell",
+        "file": "os/shell.c",
+        "old": """    *second_start = start;
+    *second_length = position - start;
+    return rest_is_spaces(line, length, position);
+""",
+        "new": """    *second_start = start;
+    *second_length = position - start;
+    return true; /* mutant: extra tokens are ignored */
+""",
+        "owner": "mv_and_cp_wrong_arity_reports_usage_without_io",
+    },
 ]
 
 RUNTIME_MUTATIONS = [
@@ -489,6 +535,11 @@ NATIVE_ASSERTIONS = {
     "create_replace_swapped": "TML create_replace_swapped",
     "text_gets_implicit_lf": "TML text_gets_implicit_lf",
     "cat_ascii_controls_raw": "TML cat_ascii_controls_raw",
+    "mv_performs_a_copy": "an mv must remove the old name, not leave a copy",
+    "cp_performs_a_rename": "a copy must keep the source file",
+    "cp_io_swallowed": "a data read fault must end the session",
+    "two_name_arity_ignores_extra":
+        "an mv or cp with missing or extra arguments must be a USAGE error",
 }
 
 
