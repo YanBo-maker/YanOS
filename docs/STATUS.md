@@ -1,11 +1,11 @@
 # 项目状态
 
-当前推进：知识检索基础设施，[0025](specs/0025-knowledge-search.md) 于2026-10-06 13:10 +08:00经项目所有者批准并锁定。
+当前交付：知识检索基础设施，[0025](specs/0025-knowledge-search.md) 于2026-10-06 13:10 +08:00经项目所有者批准并锁定。
 
 - 规格批准：grep通过Search API与backend vtable检索，字面byte匹配、完整长行、NUL预检整文件跳过；语法、流式reader、稳定借用前提与错误传播见0025。
 - 实现：Search facade、线性backend、grep前端和生产应用注入已完成；不建立索引或修改磁盘格式。任务分支为 `codex/knowledge-search`。
 - 验证：Linux Release默认55/55（32.50 s）、ASan/UBSan默认55/55（51.39 s）、Windows MSVC默认32/32（4.25 s）；十一组实际变异11/11（142.77 s），0失败、0SKIP。Linux注册66=55默认+11实际；分项和边界见「知识检索验收」。
-- 用户审查：整体SPEC已批准；实现交付与远端CI待审阅，学习与理解程度仍由项目所有者判断。
+- 用户审查：整体SPEC与PR #20合入均已获项目所有者批准；2026-10-07经PR #20合入main，merge为 `9b8a01f`，树与已验交付一致。原交付 `061b0aa` 与路径修补 `2d41afe` 保留。修后[CI运行37559213922](https://github.com/YanBo-maker/YanOS/actions/runs/37559213922) 三项成功；学习与理解程度仍由项目所有者判断。
 
 ### 已交付文件管理基线
 
@@ -80,7 +80,7 @@ Linux Release默认55/55（32.50 s）、ASan/UBSan默认55/55（51.39 s）、Win
 
 核心92例、shell122例、真实Guest健康9项和故障13项通过；RV32公开API探针要求实际四字节tohost为1及SEARCH_API_PASS标记。BUILD_TESTING=OFF、工具开启的全新原生构建不依赖Unity，所产ELF健康9项通过，见 `search-production-native-configure.log`、`search-production-native-build.log` 与 `search-production-native-guest.log`。健康场景核目录空洞顺序、中文跨块、非法UTF-8安全显示、late NUL零结果、20KiB完整行和edit/mv/cp跨进程读回；只读镜像逐字节保持。
 
-首次交付提交 `061b0aa` 保留；[PR #20](https://github.com/YanBo-maker/YanOS/pull/20) 首轮远端Windows为31/32，仅 `search_guest_gate` 失败。被测缺源脚本已正确返回1，失败来自门禁预期的临时路径拼写与脚本规范化后的路径不同。门禁在建树后统一resolve，并永久用Windows混合大小写别名复现，精确消息与硬失败1、外部依赖77的检查保持。修前21条路径控制失败，修后44条控制通过及上述三套默认回归通过；生产代码和实际变异组未受影响，十一组142.77 s与17缺陷证据沿用已实跑记录。修后远端CI仍待重新验证，本机成功不覆盖首轮CI失败。
+首次交付提交 `061b0aa` 保留；[PR #20](https://github.com/YanBo-maker/YanOS/pull/20) 首轮远端Windows为31/32，仅 `search_guest_gate` 失败。被测缺源脚本已正确返回1，失败来自门禁预期的临时路径拼写与脚本规范化后的路径不同。门禁在建树后统一resolve，并永久用Windows混合大小写别名复现，精确消息与硬失败1、外部依赖77的检查保持。修前21条路径控制失败，修后44条控制通过及上述三套默认回归通过；生产代码和实际变异组未受影响，十一组142.77 s与17缺陷证据沿用已实跑记录。修后CI运行37559213922三项成功，随后经项目所有者批准合入；本机与新CI成功不覆盖首轮失败记录。
 
 Search实际17个缺陷（线性7、facade5、shell5）均命中指定owner的具体断言，0存活、0harness error。修后独立执行记录为 `search-mutation-final-detail-fixed.log`：strict双suite baseline及真实no-effect、wrong-owner、同owner wrong-assertion控制均符合预期。CTest的LastTest.log在随后pure运行时被覆盖；`search-final-mutation-details.log`复制时已只含pure记录，不能作为actual明细。纯门禁显式PASS标记、同owner无关断言、duplicate/footer与异常优先控制已复验；Guest gate的缺输入和分类控制也通过。
 
@@ -284,7 +284,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-对照0025与原始笔记字节审阅Search、grep结果和故障边界，完成交付PR审查与远端CI；合入仍待项目所有者批准。下一能力待对齐，学习与理解程度由项目所有者判断。
+0025已批准合入，供阅读Search、grep结果与故障边界。下一能力待对齐，后续方向准备不表示新行为已获批准；学习与理解程度由项目所有者判断。
 
 ### 历史推进记录（M1a / M2a）
 
