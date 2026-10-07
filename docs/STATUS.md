@@ -4,8 +4,10 @@
 
 - 规格批准：search词项组、同一行AND、倒排位置索引、top20排序与摘要、rebuild/status/clear、source身份与完整scan回退按整体交付；grep旧literal保持。
 - 实现：term facade、流式参考backend、RAM索引、排序摘要和shell管理已完成，任务分支 `codex/knowledge-index`；grep字面基线保持。
-- 验证：本机Release67/67（37.91 s）、ASan/UBSan67/67（75.33 s）、Windows MSVC41/41（20.19 s）；统一十二组实际变异12/12（203.40 s），均0失败、0SKIP。Linux现注册默认67/开变异79；独立实现审查已完成，无阻塞发现；远端CI待执行。
+- 验证：本机Release67/67（37.91 s）、ASan/UBSan67/67（75.33 s）、Windows MSVC41/41（20.19 s）；统一十二组实际变异12/12（203.40 s），均0失败、0SKIP。Linux现注册默认67/开变异79；独立实现审查已完成，无阻塞发现；功能提交77f03fd的 [CI运行37568965627](https://github.com/YanBo-maker/YanOS/actions/runs/37568965627) 三项成功。
 - 用户审查：整体方案已批准，实现交付待审查，学习与理解程度由项目所有者判断。
+
+功能实现提交 `77f03fd4334b2d5a8fbcf90f6feab93cb4b46c62` 已推送并建立 [PR #22](https://github.com/YanBo-maker/YanOS/pull/22)，前置规格提交 `fd0e3c1` 保留。上述CI对应这一功能head：Linux Release43/43（13.43 s）、Debug ASan43/43（27.83 s）、Windows41/41（30.12 s）。CI采用默认TOOLS OFF配置，不等同本机67组工具/Guest及十二组实际变异验收；两类记录分别保留。用户整体规格已批，实现交付与功能合入仍待维护者批准，不以CI成功替代审查。
 
 ### 0026 锁定后查询组数补齐
 
@@ -315,7 +317,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-完成提交前检查，再通过PR核远端CI并请维护者审查0026实现与合入；供阅读实际search结果、索引状态与故障边界。学习理解由项目所有者判断，下一能力另行对齐。
+请维护者审查PR #22的0026实现与合入；供阅读实际search结果、索引状态与故障边界。学习理解由项目所有者判断，下一能力另行对齐。
 
 ### 历史推进记录（M1a / M2a）
 

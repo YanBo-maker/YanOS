@@ -180,4 +180,4 @@ FTS5 trigram 的全文查询不能匹配少于三个 Unicode 字符的子串。�
 
 ### 本机 VERIFY 记录（2026-10-07）
 
-Linux注册默认67/开启实际变异79，Windows41；Release67/67（37.91 s）、ASan/UBSan67/67（75.33 s）、MSVC41/41（20.19 s），统一十二组实际变异12/12（203.40 s），均0失败、0SKIP。scan/index/index-repeat独立oracle各320例；真实Guest8健康、17故障、RV32 facade61唯一检查码通过。新term20缺陷及指定suite/owner/具体断言与三类实际负控已验证。布局、输入门禁、首次harness失败和覆盖限制见 [STATUS](../STATUS.md)。本机通过不表示远端CI完成或用户批准实现合入；独立实现审核已完成，远端CI待执行。
+Linux注册默认67/开启实际变异79，Windows41；Release67/67（37.91 s）、ASan/UBSan67/67（75.33 s）、MSVC41/41（20.19 s），统一十二组实际变异12/12（203.40 s），均0失败、0SKIP。scan/index/index-repeat独立oracle各320例；真实Guest8健康、17故障、RV32 facade61唯一检查码通过。新term20缺陷及指定suite/owner/具体断言与三类实际负控已验证。布局、输入门禁、首次harness失败和覆盖限制见 [STATUS](../STATUS.md)。独立实现审核已完成；功能提交77f03fd的PR #22三项CI已通过，具体配置和运行见 [STATUS](../STATUS.md)。用户实现审查与功能合入批准仍待，不由本机或CI通过替代。
