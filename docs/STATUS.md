@@ -1,5 +1,14 @@
 # 项目状态
 
+当前推进：知识检索基础设施，[0025](specs/0025-knowledge-search.md) 于2026-10-06 13:10 +08:00经项目所有者批准并锁定。
+
+- 规格批准：grep通过Search API与backend vtable检索，字面byte匹配、完整长行、NUL预检整文件跳过；语法、流式reader、稳定借用前提与错误传播见0025。
+- 实现：Search facade、线性backend、grep前端和生产应用注入已完成；不建立索引或修改磁盘格式。任务分支为 `codex/knowledge-search`。
+- 验证：Linux Release默认55/55（32.50 s）、ASan/UBSan默认55/55（51.39 s）、Windows MSVC默认32/32（4.25 s）；十一组实际变异11/11（142.77 s），0失败、0SKIP。Linux注册66=55默认+11实际；分项和边界见「知识检索验收」。
+- 用户审查：整体SPEC已批准；实现交付与远端CI待审阅，学习与理解程度仍由项目所有者判断。
+
+### 已交付文件管理基线
+
 当前交付：文件重命名与复制，[0024](specs/0024-file-rename-copy.md) 于2026-10-05 18:22 +08:00获项目所有者整体批准并锁定，交付提交为 `8e1bcbd`，项目所有者于2026-10-06批准 [PR #18](https://github.com/YanBo-maker/YanOS/pull/18) 合入main，merge提交为 `9ab2488`，树与已验收交付一致。任务分支 `codex/file-rename-copy` 保留。
 
 - 规格批准：mv/cp拒覆盖；rename原槽、同名零I/O；copy新槽新extent逐块复制任意二进制并清零尾块，数据成功后发布目录；状态顺序与故障边界沿既有契约，编辑态不执行两命令。
@@ -61,9 +70,23 @@ YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0
 - `yan_gen` 随机 RV32IM 指令流生成器（给定种子确定输出），以及 5 个手写 Guest 用例。
 - C17 / CMake 构建、Unity 单元测试、CTest 及 GitHub Actions。
 
-详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前0024配置默认49组、开实际变异后59组；0023的47/57组、0022的43/52组与0020于2026-10-03的32/39组保留在本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；各组的通过情况以本页「验证」一节为准。
+详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前0025配置默认55组、开实际变异后66组；0024的49/59组、0023的47/57组、0022的43/52组与0020于2026-10-03的32/39组保留在本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；各组的通过情况以本页「验证」一节为准。
 
 ## 验证
+
+### 知识检索验收（2026-10-07）
+
+Linux Release默认55/55（32.50 s）、ASan/UBSan默认55/55（51.39 s）、Windows MSVC默认32/32（4.25 s），均0失败、0SKIP。Linux工具配置注册66=55默认+11实际变异，Windows不包含Linux工具与真实Guest验收。默认使用 `-E '_mutation$'`，保留四个 mutation puregate 和 `search_guest_gate`；实际使用 `-R '_mutation$'`，十一组11/11（142.77 s）。证据为 `build/search-portability-release.log`、`search-portability-asan.log`、`search-portability-windows.log`、`search-final-mutations.log`，总审核注册快照为 `search-chief-registration-release.json`、`search-chief-registration-asan.json`、`search-chief-registration-windows.json`。
+
+核心92例、shell122例、真实Guest健康9项和故障13项通过；RV32公开API探针要求实际四字节tohost为1及SEARCH_API_PASS标记。BUILD_TESTING=OFF、工具开启的全新原生构建不依赖Unity，所产ELF健康9项通过，见 `search-production-native-configure.log`、`search-production-native-build.log` 与 `search-production-native-guest.log`。健康场景核目录空洞顺序、中文跨块、非法UTF-8安全显示、late NUL零结果、20KiB完整行和edit/mv/cp跨进程读回；只读镜像逐字节保持。
+
+首次交付提交 `061b0aa` 保留；[PR #20](https://github.com/YanBo-maker/YanOS/pull/20) 首轮远端Windows为31/32，仅 `search_guest_gate` 失败。被测缺源脚本已正确返回1，失败来自门禁预期的临时路径拼写与脚本规范化后的路径不同。门禁在建树后统一resolve，并永久用Windows混合大小写别名复现，精确消息与硬失败1、外部依赖77的检查保持。修前21条路径控制失败，修后44条控制通过及上述三套默认回归通过；生产代码和实际变异组未受影响，十一组142.77 s与17缺陷证据沿用已实跑记录。修后远端CI仍待重新验证，本机成功不覆盖首轮CI失败。
+
+Search实际17个缺陷（线性7、facade5、shell5）均命中指定owner的具体断言，0存活、0harness error。修后独立执行记录为 `search-mutation-final-detail-fixed.log`：strict双suite baseline及真实no-effect、wrong-owner、同owner wrong-assertion控制均符合预期。CTest的LastTest.log在随后pure运行时被覆盖；`search-final-mutation-details.log`复制时已只含pure记录，不能作为actual明细。纯门禁显式PASS标记、同owner无关断言、duplicate/footer与异常优先控制已复验；Guest gate的缺输入和分类控制也通过。
+
+故障Guest在response3..8注入协议错误，覆盖预检、scan与match回读；实际IO错误注入预检首请求，核心测试另外覆盖三相位九个读请求。输出注入覆盖echo首/末、内容中/末及OK末，要求精确已交付前缀和fatal原因；来源错误时隔离前缀并显示诊断，不输出OK或继续exit。首次故障脚本遗漏既有ERROR SHELL_FATAL尾导致11通过2失败，修后要求精确suffix；重复执行曾因旧自有镜像被mkfs拒覆盖产生3个HARNESS错误，定点重建fixture后2/2通过，旧失败日志保留。API两次编译错误不作语义RED；真实缺外部Unity的77也不记通过。
+
+线性查询借用FS和pattern期间必须保持稳定，这一前置条件不构成快照或全查询锁。预检与扫描两遍，匹配行另行回读；遇首个NUL即短路该文件。固定缓冲容纳任意长行，当前公开接口和线性context在RV32的sizeof分别为48和10316字节，静态持有；单函数帧最大528字节、线性query160字节、grep match80字节不证明完整调用链或ISR峰值。UINT32_MAX稀疏probe验证运算和地址边界，不表示4GiB全文实跑。不承诺所有Unicode不可见字符安全、索引性能、并发快照或故障后的完整结果集。本机验证与远端CI、维护者审查分别记录。
 
 ### 重命名与复制验收（2026-10-05）
 
@@ -261,7 +284,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-阅读已交付的0024整体实现与验证，结合name、目录槽和数据块变化学习rename与copy；下一项能力待与项目所有者对齐。0024已获PR #18合入批准；学习与理解程度仍由项目所有者判断。
+对照0025与原始笔记字节审阅Search、grep结果和故障边界，完成交付PR审查与远端CI；合入仍待项目所有者批准。下一能力待对齐，学习与理解程度由项目所有者判断。
 
 ### 历史推进记录（M1a / M2a）
 

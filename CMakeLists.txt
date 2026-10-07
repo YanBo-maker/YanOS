@@ -60,8 +60,17 @@ add_library(yan_fs STATIC os/yanfs.c)
 target_include_directories(yan_fs PUBLIC os)
 target_compile_options(yan_fs PRIVATE ${YAN_WARNINGS})
 
+# The unified knowledge-search facade plus its no-index linear backend. The
+# facade is filesystem-independent; only the linear backend borrows a YanFs, so
+# the whole library is the one link edge to yan_fs.
+add_library(yan_search STATIC os/search.c os/search_linear.c)
+target_link_libraries(yan_search PUBLIC yan_fs)
+target_compile_options(yan_search PRIVATE ${YAN_WARNINGS})
+
+# The shell consumes the unified Search facade and never instantiates or
+# selects a backend, so it links yan_search rather than yan_fs directly.
 add_library(yan_shell STATIC os/shell.c)
-target_link_libraries(yan_shell PUBLIC yan_fs)
+target_link_libraries(yan_shell PUBLIC yan_search)
 target_compile_options(yan_shell PRIVATE ${YAN_WARNINGS})
 
 add_library(yan_line STATIC os/line.c)
@@ -107,6 +116,8 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         "${CMAKE_CURRENT_SOURCE_DIR}/os/terminal.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/shell.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/editor.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/search.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/search_linear.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/block.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/yanfs.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/yanfs_block.c")
@@ -114,7 +125,7 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         list(APPEND _yan_terminal_sources "${CMAKE_CURRENT_SOURCE_DIR}/os/memory.c")
     endif()
     set(_yan_terminal_headers)
-    foreach(_header block console editor line platform shell task terminal yanfs yanfs_block)
+    foreach(_header block console editor line platform search search_linear shell task terminal yanfs yanfs_block)
         list(APPEND _yan_terminal_headers "${CMAKE_CURRENT_SOURCE_DIR}/os/${_header}.h")
     endforeach()
     add_custom_command(OUTPUT "${YAN_TERMINAL_ELF}"
@@ -167,6 +178,12 @@ if(BUILD_TESTING)
     target_compile_options(test_editor PRIVATE ${YAN_WARNINGS})
     add_test(NAME editor COMMAND test_editor)
     set_tests_properties(editor PROPERTIES TIMEOUT 30)
+
+    add_executable(test_search tests/test_search.c)
+    target_link_libraries(test_search PRIVATE yan_search unity::framework)
+    target_compile_options(test_search PRIVATE ${YAN_WARNINGS})
+    add_test(NAME search COMMAND test_search)
+    set_tests_properties(search PROPERTIES TIMEOUT 30)
 
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # Native platform/framing doubles exercise the actual adapter source;
@@ -236,6 +253,42 @@ if(BUILD_TESTING)
                         --launcher "${CMAKE_CURRENT_SOURCE_DIR}/tools/yan_shell.py"
                         --work "${CMAKE_BINARY_DIR}/shell-launcher")
             set_tests_properties(shell_launcher PROPERTIES TIMEOUT 180)
+            if(TARGET yanfs_terminal AND TARGET yan_mkfs AND TARGET yan_run)
+                # 0025 healthy grep acceptance on the same production ELF: the
+                # approved grammar, byte/line/NUL semantics, long lines and the
+                # two-process edit -> rename/copy -> grep lifecycle. The real
+                # ELF is provided, so there is no skip code.
+                add_test(NAME guest_search
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_search.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-search"
+                            --run "$<TARGET_FILE:yan_run>"
+                            --mkfs "$<TARGET_FILE:yan_mkfs>"
+                            --guest "${YAN_TERMINAL_ELF}")
+                set_tests_properties(guest_search PROPERTIES TIMEOUT 600)
+            endif()
+            if(TARGET yanfs_terminal)
+                set(_yan_search_fault_args)
+                if(YAN_ENABLE_SANITIZERS)
+                    list(APPEND _yan_search_fault_args --sanitizers)
+                endif()
+                # 0025 fault surface: the protocol tag faults at the exact
+                # preflight/scan/reader block requests, the first IO after the
+                # prompt, and the output boundaries. It reuses the runtime
+                # acceptance driver and classifier; only the host C compiler is
+                # external, hence the 77 skip code.
+                add_test(NAME guest_search_faults
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_search_faults.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-search-faults"
+                            --cc "${CMAKE_C_COMPILER}"
+                            --guest "${YAN_TERMINAL_ELF}"
+                            ${_yan_search_fault_args})
+                set_tests_properties(guest_search_faults PROPERTIES
+                                     SKIP_RETURN_CODE 77 TIMEOUT 600)
+            endif()
             if(TARGET yanfs_terminal AND TARGET yan_mkfs AND TARGET yan_run_disk_close_fault)
                 add_test(NAME guest_terminal_files
                     COMMAND "${Python3_EXECUTABLE}" -B
@@ -322,6 +375,20 @@ if(BUILD_TESTING)
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_editor_mutation_gate.py")
         set_tests_properties(editor_mutation_gate PROPERTIES TIMEOUT 120)
+        # Pure classifier/CLI guard for the 0025 search mutation gate: no
+        # compiler, so it is in the default suite on every configuration.
+        add_test(NAME search_mutation_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_search_mutation_gate.py")
+        set_tests_properties(search_mutation_gate PROPERTIES TIMEOUT 180)
+        # Pure CLI guard for the 0025 Guest search scripts: missing in-repo
+        # inputs and the provided ELF must be hard failures before any external
+        # tool is consulted. No compiler is needed, so it is in the default
+        # suite on every configuration.
+        add_test(NAME search_guest_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_search_guest_gate.py")
+        set_tests_properties(search_guest_gate PROPERTIES TIMEOUT 180)
         if(TARGET yan_mkfs_fault)
             add_test(NAME yanfs_mkfs
                 COMMAND "${Python3_EXECUTABLE}"
@@ -394,6 +461,20 @@ if(BUILD_TESTING)
                     --work "${CMAKE_BINARY_DIR}/trap-env")
         set_tests_properties(guest_trap_env PROPERTIES SKIP_RETURN_CODE 77
                                                      TIMEOUT 300)
+
+        # 0025 public-API probe on RV32IM: the unified Search facade over a fake
+        # backend with no filesystem. It links only search.c plus the shared
+        # Guest start/memory, emits the SEARCH_API_PASS signature and ends with
+        # tohost 1. Only the cross compiler and the symbol tool are external.
+        add_test(NAME guest_search_api
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_search_api.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${CMAKE_BINARY_DIR}/search-api")
+        set_tests_properties(guest_search_api PROPERTIES SKIP_RETURN_CODE 77
+                                                       TIMEOUT 300)
     endif()
 
     # The console needs the UART terminal backend, which lives on the Host; the
@@ -531,6 +612,18 @@ if(BUILD_TESTING)
                     --unity "${unity_SOURCE_DIR}"
                     --work "${YAN_MUTATION_WORK_ROOT}/editor")
         set_tests_properties(editor_mutation PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+        # 0025 search mutation: the two native suites only (the search core and
+        # the shell front end over it), so it needs the host compiler and Unity
+        # but no cross toolchain.
+        add_test(NAME search_mutation
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_search_mutation.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --cc "${CMAKE_C_COMPILER}"
+                    --unity "${unity_SOURCE_DIR}"
+                    --work "${YAN_MUTATION_WORK_ROOT}/search")
+        set_tests_properties(search_mutation PROPERTIES
+                             SKIP_RETURN_CODE 77 TIMEOUT 900)
         add_test(NAME persistent_block_mutation
             COMMAND "${Python3_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_persistent_mutation.py"

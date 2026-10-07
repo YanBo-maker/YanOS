@@ -1,3 +1,4 @@
+#include "search_linear.h"
 #include "shell.h"
 #include "unity.h"
 
@@ -46,6 +47,10 @@ typedef struct {
 static TestDevice device;
 static YanFs fs;
 static YanShell shell;
+/* The shell borrows a unified Search; the fixture owns the linear context it
+ * was built from. Both are static and zero-initialized before yan_shell_init. */
+static YanSearchLinear shell_linear;
+static YanSearch shell_search;
 
 typedef struct {
     uint8_t bytes[CAPTURE_CAPACITY];
@@ -88,6 +93,7 @@ static const char HELP_EXPECTED[] =
     "rm NAME: remove a file\r\n"
     "mv OLD NEW: rename a file\r\n"
     "cp SRC DEST: copy a file\r\n"
+    "grep TOKEN: print matching lines as FILE:LINE:CONTENT\r\n"
     "exit: end the session\r\n"
     "line: at most 1023 bytes, ended by CR or LF\r\n"
     "separators: ASCII spaces; commands and names are case sensitive\r\n"
@@ -246,10 +252,19 @@ static void fixture(void)
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, io));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
     memset(&shell, 0, sizeof shell);
+    memset(&shell_linear, 0, sizeof shell_linear);
+    memset(&shell_search, 0, sizeof shell_search);
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SEARCH_OK, yan_search_linear_init(&shell_linear, &fs));
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SEARCH_OK,
+        yan_search_init(&shell_search, yan_search_linear_backend(&shell_linear)));
     YanShellOutput output;
     output.context = &capture;
     output.putc = capture_putc;
-    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, yan_shell_init(&shell, &fs, output));
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SHELL_OK,
+        yan_shell_init(&shell, &fs, &shell_search, output));
 }
 
 void setUp(void)
@@ -1317,24 +1332,30 @@ static void init_validates_arguments_and_does_no_filesystem_io(void)
     output.putc = capture_putc;
     reset_counters();
     reset_capture();
-    TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID, yan_shell_init(NULL, &fs, output));
-    TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID, yan_shell_init(&local, NULL, output));
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
+                          yan_shell_init(NULL, &fs, &shell_search, output));
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
+                          yan_shell_init(&local, NULL, &shell_search, output));
     YanShellOutput bad;
     bad.context = &capture;
     bad.putc = NULL;
-    TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID, yan_shell_init(&local, &fs, bad));
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
+                          yan_shell_init(&local, &fs, &shell_search, bad));
     TEST_ASSERT_EQUAL_UINT32(0u, device.reads);
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
     TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
 
-    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, yan_shell_init(&local, &fs, output));
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK,
+                          yan_shell_init(&local, &fs, &shell_search, output));
     TEST_ASSERT_TRUE(local.initialized);
     TEST_ASSERT_FALSE(local.busy);
     /* An idle instance may be re-initialized; one that is inside a call may
      * not, and the state below is exactly what yan_shell_execute sets. */
-    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, yan_shell_init(&local, &fs, output));
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK,
+                          yan_shell_init(&local, &fs, &shell_search, output));
     local.busy = true;
-    TEST_ASSERT_EQUAL_INT(YAN_SHELL_BUSY, yan_shell_init(&local, &fs, output));
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_BUSY,
+                          yan_shell_init(&local, &fs, &shell_search, output));
 }
 
 /* The borrowed filesystem and the shell must not overlap; init rejects that
@@ -1353,7 +1374,8 @@ static void init_rejects_a_filesystem_that_overlaps_the_shell(void)
     output.putc = capture_putc;
     reset_capture();
     TEST_ASSERT_EQUAL_INT(
-        YAN_SHELL_INVALID, yan_shell_init(&overlap.shell, &overlap.fs, output));
+        YAN_SHELL_INVALID,
+        yan_shell_init(&overlap.shell, &overlap.fs, &shell_search, output));
     TEST_ASSERT_EQUAL_MEMORY(before, &overlap, sizeof overlap);
     TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
 }
@@ -1375,9 +1397,261 @@ static void init_rejects_an_alias_region_with_non_boolean_bytes(void)
     output.putc = capture_putc;
     reset_capture();
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
-                          yan_shell_init(aliased, &probe, output));
+                          yan_shell_init(aliased, &probe, &shell_search, output));
     TEST_ASSERT_EQUAL_MEMORY(before, &probe, sizeof probe);
     TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
+}
+
+/* The injected Search itself, and the two protected spans its backend
+ * declares, join the Shell and the filesystem in the alias guard. Every check
+ * is pure address arithmetic and must leave the rejected storage untouched. */
+
+static void init_rejects_a_search_that_overlaps_the_shell(void)
+{
+    static union {
+        YanShell shell;
+        YanSearch search;
+    } overlap;
+    static uint8_t before[sizeof overlap];
+    memset(&overlap, 0, sizeof overlap);
+    memcpy(before, &overlap, sizeof overlap);
+    YanShellOutput output;
+    output.context = &capture;
+    output.putc = capture_putc;
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SHELL_INVALID,
+        yan_shell_init(&overlap.shell, &fs, &overlap.search, output));
+    TEST_ASSERT_EQUAL_MEMORY(before, &overlap, sizeof overlap);
+    TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
+}
+
+static void init_rejects_a_search_that_overlaps_the_filesystem(void)
+{
+    static union {
+        YanSearch search;
+        YanFs fs;
+    } overlap;
+    static uint8_t before[sizeof overlap];
+    memset(&overlap, 0, sizeof overlap);
+    memcpy(before, &overlap, sizeof overlap);
+    YanShell local;
+    memset(&local, 0, sizeof local);
+    YanShellOutput output;
+    output.context = &capture;
+    output.putc = capture_putc;
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SHELL_INVALID,
+        yan_shell_init(&local, &overlap.fs, &overlap.search, output));
+    TEST_ASSERT_EQUAL_MEMORY(before, &overlap, sizeof overlap);
+    TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
+}
+
+static void init_rejects_a_backend_context_that_overlaps_the_shell(void)
+{
+    YanShell local;
+    YanSearch forged;
+    static uint8_t before[sizeof(YanShell)];
+    memset(&local, 0, sizeof local);
+    memset(&forged, 0, sizeof forged);
+    forged.initialized = true;
+    forged.backend.context = &local;
+    forged.backend.context_size = sizeof local;
+    memcpy(before, &local, sizeof before);
+    YanShellOutput output;
+    output.context = &capture;
+    output.putc = capture_putc;
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
+                          yan_shell_init(&local, &fs, &forged, output));
+    TEST_ASSERT_EQUAL_MEMORY(before, &local, sizeof before);
+    TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
+}
+
+static void init_rejects_a_backend_source_that_overlaps_the_shell(void)
+{
+    YanShell local;
+    YanSearch forged;
+    static uint8_t before[sizeof(YanShell)];
+    memset(&local, 0, sizeof local);
+    memset(&forged, 0, sizeof forged);
+    forged.initialized = true;
+    forged.backend.source_context = &local;
+    forged.backend.source_size = sizeof local;
+    memcpy(before, &local, sizeof before);
+    YanShellOutput output;
+    output.context = &capture;
+    output.putc = capture_putc;
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
+                          yan_shell_init(&local, &fs, &forged, output));
+    TEST_ASSERT_EQUAL_MEMORY(before, &local, sizeof before);
+    TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
+}
+
+static void init_rejects_an_uninitialized_search(void)
+{
+    YanShell local;
+    YanSearch fresh;
+    memset(&local, 0, sizeof local);
+    memset(&fresh, 0, sizeof fresh);
+    YanShellOutput output;
+    output.context = &capture;
+    output.putc = capture_putc;
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
+                          yan_shell_init(&local, &fs, &fresh, output));
+    TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
+}
+
+static void init_rejects_a_nonempty_span_with_a_null_base(void)
+{
+    YanShell local;
+    YanSearch forged;
+    memset(&local, 0, sizeof local);
+    memset(&forged, 0, sizeof forged);
+    forged.initialized = true;
+    forged.backend.context = NULL;
+    forged.backend.context_size = 8u;
+    YanShellOutput output;
+    output.context = &capture;
+    output.putc = capture_putc;
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
+                          yan_shell_init(&local, &fs, &forged, output));
+    TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
+}
+
+static void init_rejects_a_span_that_leaves_uintptr(void)
+{
+    YanShell local;
+    YanSearch forged;
+    memset(&local, 0, sizeof local);
+    memset(&forged, 0, sizeof forged);
+    forged.initialized = true;
+    forged.backend.source_context =
+        (void *)(uintptr_t)(UINTPTR_MAX - (uintptr_t)3u);
+    forged.backend.source_size = 8u;
+    YanShellOutput output;
+    output.context = &capture;
+    output.putc = capture_putc;
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
+                          yan_shell_init(&local, &fs, &forged, output));
+    TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
+}
+
+/* The command line may not alias the injected Search or its backend context
+ * either; both are borrowed for the whole call. */
+static void execute_rejects_a_line_that_aliases_the_search_or_backend(void)
+{
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SHELL_INVALID,
+        yan_shell_execute(&shell, (const uint8_t *)&shell_search, 8u));
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SHELL_INVALID,
+        yan_shell_execute(&shell, (const uint8_t *)&shell_linear, 8u));
+    expect_output("");
+}
+
+/* A fake Search backend with no filesystem at all: grep must run it through
+ * the unified API and perform no filesystem read, which is what proves the
+ * front end really is backend-replaceable. */
+typedef struct {
+    uint32_t queries;
+    uint32_t reads;
+    bool fail_reads;
+} FakeGrepBackend;
+
+static FakeGrepBackend fake_grep_state;
+static YanSearch fake_grep_search;
+static const uint8_t fake_grep_body[6] = {'n', 'e', 'e', 'd', 'l', 'e'};
+
+static YanSearchResult fake_grep_read(void *context, uint32_t offset,
+                                      uint32_t capacity,
+                                      const uint8_t **bytes,
+                                      uint32_t *length)
+{
+    FakeGrepBackend *self = (FakeGrepBackend *)context;
+    ++self->reads;
+    if (self->fail_reads) {
+        return YAN_SEARCH_IO;
+    }
+    if (offset >= 6u) {
+        *bytes = NULL;
+        *length = 0u;
+        return YAN_SEARCH_OK;
+    }
+    uint32_t want = capacity < (6u - offset) ? capacity : (6u - offset);
+    *bytes = fake_grep_body + offset;
+    *length = want;
+    return YAN_SEARCH_OK;
+}
+
+static YanSearchResult fake_grep_query(void *context, const uint8_t *pattern,
+                                       uint32_t pattern_length,
+                                       YanSearchMatchFn match,
+                                       void *match_context)
+{
+    FakeGrepBackend *self = (FakeGrepBackend *)context;
+    (void)pattern;
+    (void)pattern_length;
+    ++self->queries;
+    YanSearchMatch value;
+    value.name = "fake";
+    value.line_number = 7u;
+    value.content_length = 6u;
+    (void)match(match_context, &value);
+    return YAN_SEARCH_OK;
+}
+
+static void fake_grep_install(bool fail_reads)
+{
+    memset(&fake_grep_state, 0, sizeof fake_grep_state);
+    fake_grep_state.fail_reads = fail_reads;
+    memset(&fake_grep_search, 0, sizeof fake_grep_search);
+    YanSearchBackend backend;
+    backend.context = &fake_grep_state;
+    backend.context_size = sizeof fake_grep_state;
+    backend.source_context = NULL;
+    backend.source_size = 0u;
+    backend.query = fake_grep_query;
+    backend.read_match = fake_grep_read;
+    TEST_ASSERT_EQUAL_INT(YAN_SEARCH_OK,
+                          yan_search_init(&fake_grep_search, backend));
+    YanShellOutput output;
+    output.context = &capture;
+    output.putc = capture_putc;
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SHELL_OK,
+        yan_shell_init(&shell, &fs, &fake_grep_search, output));
+}
+
+static void grep_uses_the_injected_backend_without_filesystem_io(void)
+{
+    fake_grep_install(false);
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep needle"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1u, fake_grep_state.queries,
+                                     "grep must query the injected backend");
+    expect_output("fake:7:needle\r\nOK grep\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.reads);
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_EQUAL_UINT32(1u, fake_grep_state.queries);
+    TEST_ASSERT_EQUAL_UINT32(1u, fake_grep_state.reads);
+}
+
+static void grep_fake_backend_reader_failure_is_a_source_error(void)
+{
+    fake_grep_install(true);
+    reset_counters();
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_FATAL, execute_text("grep needle"));
+    expect_output("fake:7:\r\nERROR IO\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.reads);
 }
 
 /* A healthy exit is only healthy if the filesystem is still usable. */
@@ -2008,6 +2282,346 @@ static void reentrant_block_callback_gets_busy_for_mv_and_cp(void)
     expect_output("OK cp\r\n");
 }
 
+/* 0025 front-end tests, written before grep implementation to pin the approved
+ * command behavior independently of the Search backend. */
+static uint8_t grep_source[24576];
+static uint8_t grep_expected[30000];
+
+static void grep_expect_record(const uint8_t *content, uint32_t length)
+{
+    uint32_t at = 0u;
+    append_text(grep_expected, &at, "f:1:");
+    memcpy(grep_expected + at, content, length);
+    at += length;
+    append_text(grep_expected, &at, "\r\nOK grep\r\n");
+    expect_bytes(grep_expected, at);
+}
+
+static void grep_empty_directory_is_success(void)
+{
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep needle"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(9u, capture.length,
+        "a zero-match query must end with the success receipt");
+    expect_output("OK grep\r\n");
+}
+
+static void grep_miss_is_success_without_a_fake_result(void)
+{
+    seed_file("f", (const uint8_t *)"other", 5u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep needle"));
+    expect_output("OK grep\r\n");
+}
+
+static void grep_literal_is_case_sensitive(void)
+{
+    seed_file("f", (const uint8_t *)"Needle\nneedle\n", 14u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep needle"));
+    expect_output("f:2:needle\r\nOK grep\r\n");
+}
+
+static void grep_emits_a_matching_line_once(void)
+{
+    seed_file("f", (const uint8_t *)"abcabc\nabc", 10u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep abc"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(30u, capture.length,
+        "multiple occurrences must yield one record per logical line");
+    expect_output("f:1:abcabc\r\nf:2:abc\r\nOK grep\r\n");
+}
+
+static void grep_follows_directory_slots_after_a_hole(void)
+{
+    seed_file("a", (const uint8_t *)"x", 1u);
+    seed_file("b", (const uint8_t *)"x", 1u);
+    seed_file("c", (const uint8_t *)"x", 1u);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_remove(&fs, "b"));
+    seed_file("d", (const uint8_t *)"x", 1u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep x"));
+    expect_output("a:1:x\r\nd:1:x\r\nc:1:x\r\nOK grep\r\n");
+}
+
+static void grep_quoted_phrase_preserves_internal_spaces(void)
+{
+    seed_file("f", (const uint8_t *)"trap handler\ntrap  handler\n", 27u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep \"trap  handler\""));
+    expect_output("f:2:trap  handler\r\nOK grep\r\n");
+}
+
+static void grep_quoted_space_and_option_prefix_are_literal(void)
+{
+    seed_file("f", (const uint8_t *)"-i here\nplain", 13u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep \" \""));
+    expect_output("f:1:-i here\r\nOK grep\r\n");
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep \"-i\""));
+    expect_output("f:1:-i here\r\nOK grep\r\n");
+}
+
+static void grep_spacing_outside_pattern_does_not_change_it(void)
+{
+    seed_file("f", (const uint8_t *)"needle", 6u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("  grep   needle   "));
+    expect_output("f:1:needle\r\nOK grep\r\n");
+}
+
+static void grep_bad_grammar_is_usage_without_io(void)
+{
+    static const char *cases[] = {
+        "grep", "grep   ", "grep \"\"", "grep needle f", "grep needle *.md",
+        "grep -i", "grep -r", "grep \"needle", "grep \"needle\"tail",
+        "grep \"needle\" \"other\"", "grep nee\"dle", "grep \"a\"b\""
+    };
+    seed_file("f", (const uint8_t *)"needle", 6u);
+    snapshot_medium();
+    for (uint32_t i = 0u; i < sizeof cases / sizeof cases[0]; ++i) {
+        reset_capture();
+        reset_counters();
+        TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text(cases[i]));
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(13u, capture.length,
+            "invalid grep grammar must produce USAGE rather than search");
+        expect_output("ERROR USAGE\r\n");
+        TEST_ASSERT_EQUAL_UINT32(0u, device.reads);
+        TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+        TEST_ASSERT_TRUE(medium_unchanged());
+    }
+}
+
+static void grep_does_not_interpret_backslash_or_regex(void)
+{
+    seed_file("f", (const uint8_t *)"a\\b\na.b\naxb", 11u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep a\\b"));
+    expect_output("f:1:a\\\\b\r\nOK grep\r\n");
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep a.b"));
+    expect_output("f:2:a.b\r\nOK grep\r\n");
+}
+
+static void grep_crlf_bare_cr_and_final_line_are_displayed_safely(void)
+{
+    static const uint8_t body[] = "x\r\nx\rx\nx";
+    seed_file("f", body, sizeof body - 1u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep x"));
+    expect_output("f:1:x\r\nf:2:x\\x0Dx\r\nf:3:x\r\nOK grep\r\n");
+}
+
+static void grep_binary_with_a_late_nul_yields_no_record(void)
+{
+    memset(grep_source, 'x', 9000u);
+    memcpy(grep_source, "needle\n", 7u);
+    grep_source[8999] = 0u;
+    seed_file("binary", grep_source, 9000u);
+    seed_file("f", (const uint8_t *)"needle", 6u);
+    snapshot_medium();
+    reset_capture();
+    reset_counters();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep needle"));
+    expect_output("f:1:needle\r\nOK grep\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+}
+
+static void grep_chinese_split_across_blocks_is_a_complete_record(void)
+{
+    static const uint8_t word[] = {0xe4u, 0xb8u, 0xadu, 0xe6u, 0x96u, 0xadu};
+    static const uint8_t command[] = {'g','r','e','p',' ',0xe4u,0xb8u,0xadu,
+                                     0xe6u,0x96u,0xadu};
+    memset(grep_source, 'x', 4200u);
+    memcpy(grep_source + 4095u, word, sizeof word);
+    seed_file("f", grep_source, 4200u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_bytes(command, sizeof command));
+    grep_expect_record(grep_source, 4200u);
+}
+
+static void grep_long_line_exceeding_editor_capacity_is_not_truncated(void)
+{
+    memset(grep_source, 'A', 20480u);
+    memcpy(grep_source + 20474u, "needle", 6u);
+    seed_file("f", grep_source, 20480u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep needle"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(20495u, capture.length,
+        "grep must display the complete line beyond the editor capacity");
+    grep_expect_record(grep_source, 20480u);
+}
+
+static void grep_control_and_invalid_utf8_bytes_use_cat_escapes(void)
+{
+    static const uint8_t body[] = {'a',0x1bu,'[','2','J','\\',9u,0xffu,0xc2u,0x85u,'\n'};
+    seed_file("f", body, sizeof body);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep a"));
+    expect_output("f:1:a\\x1B[2J\\\\\\x09\\xFF\\xC2\\x85\r\nOK grep\r\n");
+}
+
+static void grep_total_input_limit_allows_1018_bare_and_1016_quoted(void)
+{
+    static uint8_t command[1025];
+    memset(grep_source, 'A', 1018u);
+    seed_file("f", grep_source, 1018u);
+    memcpy(command, "grep ", 5u);
+    memset(command + 5u, 'A', 1018u);
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_bytes(command, 1023u));
+    grep_expect_record(grep_source, 1018u);
+    command[1023] = 'A';
+    reset_capture();
+    reset_counters();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_bytes(command, 1024u));
+    expect_output("ERROR LINE_TOO_LONG\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.reads);
+
+    command[5] = '"';
+    memset(command + 6u, 'A', 1016u);
+    command[1022] = '"';
+    reset_capture();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_bytes(command, 1023u));
+    grep_expect_record(grep_source, 1018u);
+}
+
+static void grep_invalid_input_control_rejects_the_whole_line(void)
+{
+    static const uint8_t command[] = {'g','r','e','p',' ', 'a', 0u, 'b'};
+    snapshot_medium();
+    reset_capture();
+    reset_counters();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_bytes(command, sizeof command));
+    expect_output("ERROR INVALID_INPUT\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.reads);
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+}
+
+static void grep_read_errors_in_preflight_scan_and_match_are_fatal(void)
+{
+    seed_file("f", (const uint8_t *)"needle", 6u);
+    snapshot_medium();
+    for (uint32_t phase = 1u; phase <= 3u; ++phase) {
+        if (phase > 1u) {
+            TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_unmount(&fs));
+            reset_counters();
+            TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
+        }
+        reset_counters();
+        reset_capture();
+        device.read_fail_at = phase;
+        device.read_fail_code = YAN_FS_IO_ERROR;
+        TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SHELL_FATAL, execute_text("grep needle"),
+            "an error in any search read phase must terminate without OK");
+        if (phase == 3u) {
+            expect_output("f:1:\r\nERROR IO\r\n");
+        } else {
+            expect_output("ERROR IO\r\n");
+        }
+        TEST_ASSERT_EQUAL_UINT32(phase, device.reads);
+        TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+        TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
+        TEST_ASSERT_TRUE(medium_unchanged());
+    }
+}
+
+static void grep_read_error_accounts_for_pending_utf8_before_diagnostic(void)
+{
+    static const uint8_t command[] = {'g','r','e','p',' ',0xe4u,0xb8u,0xadu};
+    memset(grep_source, 'x', 5000u);
+    grep_source[4095] = 0xe4u;
+    grep_source[4096] = 0xb8u;
+    grep_source[4097] = 0xadu;
+    seed_file("f", grep_source, 5000u);
+    reset_counters();
+    reset_capture();
+    /* Two preflight reads, two scan reads, then two match-reader requests. */
+    device.read_fail_at = 6u;
+    device.read_fail_code = YAN_FS_IO_ERROR;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SHELL_FATAL,
+        execute_bytes(command, sizeof command),
+        "a read error after a split UTF-8 lead must terminate grep");
+    uint32_t at = 0u;
+    append_text(grep_expected, &at, "f:1:");
+    memcpy(grep_expected + at, grep_source, 4095u);
+    at += 4095u;
+    append_text(grep_expected, &at, "\\xE4\r\nERROR IO\r\n");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        at, capture.length,
+        "a split UTF-8 lead must be flushed before the diagnostic");
+    expect_bytes(grep_expected, at);
+    TEST_ASSERT_EQUAL_UINT32(6u, device.reads);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
+}
+
+static void grep_protocol_failure_is_not_a_zero_result(void)
+{
+    seed_file("f", (const uint8_t *)"needle", 6u);
+    reset_counters();
+    reset_capture();
+    device.read_fail_at = 2u;
+    device.read_fail_code = YAN_FS_IO_PROTOCOL;
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_FATAL, execute_text("grep needle"));
+    expect_output("ERROR PROTOCOL\r\n");
+    TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
+}
+
+static void grep_output_failure_stops_immediately_and_never_writes(void)
+{
+    static const uint32_t positions[] = {1u, 6u, 12u, 13u, 17u, 21u};
+    static const char complete[] = "f:1:needle\r\nOK grep\r\n";
+    seed_file("f", (const uint8_t *)"needle", 6u);
+    snapshot_medium();
+    for (uint32_t i = 0u; i < sizeof positions / sizeof positions[0]; ++i) {
+        reset_counters();
+        reset_capture();
+        capture.fail_at = positions[i];
+        TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SHELL_FATAL, execute_text("grep needle"),
+            "refusing any record or success byte must stop grep immediately");
+        TEST_ASSERT_TRUE(capture.fail_seen);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(positions[i], capture.calls,
+            "a refused grep byte must end all output calls");
+        TEST_ASSERT_EQUAL_UINT32(positions[i] - 1u, capture.length);
+        if (capture.length > 0u) {
+            TEST_ASSERT_EQUAL_MEMORY(complete, capture.bytes, capture.length);
+        }
+        TEST_ASSERT_EQUAL_UINT32(i == 0u ? 2u : 3u, device.reads);
+        TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+        TEST_ASSERT_TRUE(medium_unchanged());
+    }
+}
+
+static void grep_output_reentry_is_busy_without_extra_output(void)
+{
+    seed_file("f", (const uint8_t *)"needle", 6u);
+    reset_capture();
+    capture.reentry_at = 1u;
+    capture.reentry_shell = &shell;
+    capture.reentry_line = (const uint8_t *)"grep needle";
+    capture.reentry_length = 11u;
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep needle"));
+    TEST_ASSERT_TRUE(capture.reentry_done);
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_BUSY, capture.reentry_result);
+    TEST_ASSERT_EQUAL_UINT32(0u, capture.reentry_output_delta);
+    expect_output("f:1:needle\r\nOK grep\r\n");
+}
+
+static void grep_does_not_modify_the_image_or_file_bytes(void)
+{
+    seed_file("f", (const uint8_t *)"needle", 6u);
+    snapshot_medium();
+    reset_capture();
+    reset_counters();
+    TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, execute_text("grep needle"));
+    expect_output("f:1:needle\r\nOK grep\r\n");
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+    TEST_ASSERT_TRUE(medium_unchanged());
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -2072,6 +2686,16 @@ int main(void)
     RUN_TEST(init_validates_arguments_and_does_no_filesystem_io);
     RUN_TEST(init_rejects_a_filesystem_that_overlaps_the_shell);
     RUN_TEST(init_rejects_an_alias_region_with_non_boolean_bytes);
+    RUN_TEST(init_rejects_a_search_that_overlaps_the_shell);
+    RUN_TEST(init_rejects_a_search_that_overlaps_the_filesystem);
+    RUN_TEST(init_rejects_a_backend_context_that_overlaps_the_shell);
+    RUN_TEST(init_rejects_a_backend_source_that_overlaps_the_shell);
+    RUN_TEST(init_rejects_an_uninitialized_search);
+    RUN_TEST(init_rejects_a_nonempty_span_with_a_null_base);
+    RUN_TEST(init_rejects_a_span_that_leaves_uintptr);
+    RUN_TEST(execute_rejects_a_line_that_aliases_the_search_or_backend);
+    RUN_TEST(grep_uses_the_injected_backend_without_filesystem_io);
+    RUN_TEST(grep_fake_backend_reader_failure_is_a_source_error);
     RUN_TEST(healthy_exit_requires_a_mounted_filesystem);
     RUN_TEST(faulted_filesystem_stops_output_only_commands);
     RUN_TEST(line_rejection_precedes_the_filesystem_health_guard);
@@ -2100,5 +2724,28 @@ int main(void)
     RUN_TEST(invalid_line_control_and_length_prevent_mv_cp_mutations);
     RUN_TEST(reentrant_output_callback_gets_busy_for_mv_and_cp);
     RUN_TEST(reentrant_block_callback_gets_busy_for_mv_and_cp);
+    RUN_TEST(grep_empty_directory_is_success);
+    RUN_TEST(grep_miss_is_success_without_a_fake_result);
+    RUN_TEST(grep_literal_is_case_sensitive);
+    RUN_TEST(grep_emits_a_matching_line_once);
+    RUN_TEST(grep_follows_directory_slots_after_a_hole);
+    RUN_TEST(grep_quoted_phrase_preserves_internal_spaces);
+    RUN_TEST(grep_quoted_space_and_option_prefix_are_literal);
+    RUN_TEST(grep_spacing_outside_pattern_does_not_change_it);
+    RUN_TEST(grep_bad_grammar_is_usage_without_io);
+    RUN_TEST(grep_does_not_interpret_backslash_or_regex);
+    RUN_TEST(grep_crlf_bare_cr_and_final_line_are_displayed_safely);
+    RUN_TEST(grep_binary_with_a_late_nul_yields_no_record);
+    RUN_TEST(grep_chinese_split_across_blocks_is_a_complete_record);
+    RUN_TEST(grep_long_line_exceeding_editor_capacity_is_not_truncated);
+    RUN_TEST(grep_control_and_invalid_utf8_bytes_use_cat_escapes);
+    RUN_TEST(grep_total_input_limit_allows_1018_bare_and_1016_quoted);
+    RUN_TEST(grep_invalid_input_control_rejects_the_whole_line);
+    RUN_TEST(grep_read_errors_in_preflight_scan_and_match_are_fatal);
+    RUN_TEST(grep_read_error_accounts_for_pending_utf8_before_diagnostic);
+    RUN_TEST(grep_protocol_failure_is_not_a_zero_result);
+    RUN_TEST(grep_output_failure_stops_immediately_and_never_writes);
+    RUN_TEST(grep_output_reentry_is_busy_without_extra_output);
+    RUN_TEST(grep_does_not_modify_the_image_or_file_bytes);
     return UNITY_END();
 }

@@ -263,7 +263,9 @@ def cli_missing_controls():
         # only used for input classification, never built.
         placeholder_cc = sys.executable
         absent_cc = str(Path(base) / "no-such-compiler")
-        for rel in ("os/shell.c", "os/shell.h", "tests/test_line.c",
+        for rel in ("os/shell.c", "os/shell.h", "os/search.c", "os/search.h",
+                    "os/search_linear.c", "os/search_linear.h",
+                    "tests/test_line.c",
                     "tests/guest/guest.h", "tests/terminal_runtime_driver.c",
                     "tests/guest/run_terminal_runtime.py",
                     "tests/run_yanfs_mutation.py"):
@@ -285,6 +287,23 @@ def cli_missing_controls():
         rc, _blob = run_runtime_cli(tree, work, placeholder_cc, "gcc", guest,
                                     ["--fixture-scenario", "blocked"])
         check("runtime-cli", "fixture-scenario-requires-only-fixtures", rc, 2)
+        # An existing production ELF must not hide a removed compiled input.
+        # Missing external tools make the required order visible: repository
+        # failure is 1, while an intact repository may legitimately return 77.
+        Path(guest).write_bytes(b"guard-only ELF placeholder")
+        for rel in ("os/search.c", "os/search_linear.c", "os/shell.c",
+                    "os/editor.c", "os/yanfs.c", "apps/yanfs_terminal/main.c"):
+            victim = tree / rel
+            saved = victim.read_bytes()
+            victim.unlink()
+            rc, blob = run_runtime_cli(tree, work, absent_cc, absent_cc,
+                                       guest, [])
+            victim.write_bytes(saved)
+            check("runtime-cli", "stale-elf-missing-" + rel, rc, 1)
+            check("runtime-cli", "missing-diagnostic-" + rel,
+                  b"missing required input" in blob, True)
+        rc, _blob = run_runtime_cli(tree, work, absent_cc, absent_cc, guest, [])
+        check("runtime-cli", "intact-inputs-missing-tools-77", rc, 77)
     except Exception as error:  # noqa: BLE001 - the control harness itself
         FAILURES.append("cli: control harness failed: %r" % error)
     finally:

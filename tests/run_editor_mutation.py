@@ -4,9 +4,9 @@
 What this does
 --------------
 It copies a minimal tree out of the repository into a scratch directory
-(os/editor.{h,c}, os/yanfs.{h,c}, os/shell.h, tests/test_editor.c and the host
-Unity sources), builds tests/test_editor.c against the real editor and
-filesystem with the repository's strict C17 warning bar
+(os/editor.{h,c}, os/yanfs.{h,c}, os/shell.h, os/search.h, tests/test_editor.c
+and the host Unity sources), builds tests/test_editor.c against the real editor
+and filesystem with the repository's strict C17 warning bar
 (-std=c17 -O2 -Wall -Wextra -Wpedantic -Werror), runs it, then applies one
 exact, single-occurrence source replacement per mutation and repeats the
 build/run. A mutation counts as *detected* only when the owning test named in
@@ -77,7 +77,7 @@ BUILD_TIMEOUT = 180
 
 # The whole tree the editor suite needs. Every one is a hard repository input.
 EDITOR_SOURCES = ["tests/test_editor.c", "os/editor.c", "os/yanfs.c"]
-EDITOR_OS = ["editor.h", "editor.c", "yanfs.h", "yanfs.c", "shell.h"]
+EDITOR_OS = ["editor.h", "editor.c", "yanfs.h", "yanfs.c", "shell.h", "search.h"]
 REQUIRED_REPO = (
     ["os/" + name for name in EDITOR_OS]
     + ["tests/test_editor.c", "tests/run_yanfs_mutation.py"]
