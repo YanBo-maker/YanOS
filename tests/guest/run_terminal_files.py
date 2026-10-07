@@ -567,7 +567,12 @@ def require_inputs(source, args):
                 "os/yanfs_block.c", "os/shell.c", "os/search.c",
                 "os/search_linear.c", "os/line.c", "os/terminal.c",
                 "os/memory.c", "os/editor.c", "os/editor.h", "os/guest.ld",
-                "os/search.h", "os/search_linear.h", "tools/yan_shell.py"):
+                "os/search.h", "os/search_linear.h", "tools/yan_shell.py",
+                "os/memory.h", "os/search_terms.h", "os/search_terms.c",
+                "os/search_terms_core.h", "os/search_terms_core.c",
+                "os/search_terms_linear.h", "os/search_terms_linear.c",
+                "os/search_terms_index.h", "os/search_terms_index.c",
+                "os/search_text.h", "os/search_text.c"):
         path = source / rel
         if not path.is_file():
             missing.append(str(path))

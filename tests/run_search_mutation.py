@@ -39,11 +39,18 @@ RUN_TIMEOUT = 120
 
 # Headers copied for the two suites. platform/task/block/console/editor/line/
 # terminal are carried even where a suite does not include them today, so a new
-# include in the compiled sources cannot silently become an unfound header.
+# include in the compiled sources cannot silently become an unfound header. The
+# 0026 term headers and the freestanding memory declarations are needed because
+# os/shell.c now consumes the term facade; os/memory.c itself is not compiled
+# here because the native C library supplies memcpy/memset/memcmp/strlen.
 OS_HEADERS = ["search.h", "search_linear.h", "yanfs.h", "shell.h", "platform.h",
               "task.h", "block.h", "console.h", "editor.h", "line.h",
-              "terminal.h", "yanfs_block.h"]
-OS_SOURCES = ["search.c", "search_linear.c", "yanfs.c", "shell.c"]
+              "terminal.h", "yanfs_block.h", "memory.h", "search_terms.h",
+              "search_terms_core.h", "search_terms_index.h",
+              "search_terms_linear.h", "search_text.h"]
+OS_SOURCES = ["search.c", "search_linear.c", "yanfs.c", "shell.c",
+              "search_terms.c", "search_terms_linear.c", "search_terms_core.c",
+              "search_terms_index.c", "search_text.c"]
 TEST_FILES = ["test_search.c", "test_shell.c"]
 REQUIRED_FILES = TEST_FILES + ["run_search_mutation.py"]
 
@@ -56,7 +63,9 @@ SUITES = {
     },
     "shell": {
         "sources": ["tests/test_shell.c", "os/shell.c", "os/search.c",
-                    "os/search_linear.c", "os/yanfs.c"],
+                    "os/search_linear.c", "os/search_terms.c",
+                    "os/search_terms_linear.c", "os/search_terms_core.c",
+                    "os/search_terms_index.c", "os/search_text.c", "os/yanfs.c"],
         "target": "test_shell",
         "test": "tests/test_shell.c",
     },

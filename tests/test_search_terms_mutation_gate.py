@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthetic controls for the search mutation gate (no compiler needed).
+"""Synthetic controls for the 0026 search-term mutation gate (no compiler).
 
 The gate's verdict is only trustworthy if its classifiers are. This exercises
 the pure decode and classification that the real mutation run depends on,
@@ -11,6 +11,7 @@ them:
     wrong-owner, a same-owner wrong assertion, a duplicated record, a
     duplicated/malformed footer, and every shape that must be a harness error
     (signal, timeout, sanitizer, fixture abort, rc/summary disagreement);
+  * the gate's own mocked run_one precedence controls;
   * the shared two-suite precedence self-test (self_test_run_suites).
 
 It then runs the real mutation CLI on a temporary copy of the repository: a
@@ -42,9 +43,9 @@ def load(name, path):
 
 
 try:
-    RUN = load("search_mutation_gate", HERE / "run_search_mutation.py")
+    RUN = load("search_terms_mutation_gate", HERE / "run_search_terms_mutation.py")
 except Exception as error:  # a broken gate script is a hard failure, not a skip
-    print("FAIL search-mutation-gate: cannot import the mutation gate: %r"
+    print("FAIL search-terms-mutation-gate: cannot import the mutation gate: %r"
           % error, file=sys.stderr)
     sys.exit(1)
 
@@ -71,8 +72,6 @@ def classifier_controls():
     classify = YANFS.classify_run
     pass_out = suite([("a", "PASS"), ("b", "PASS")])
     owner_out = suite([("owner", "FAIL", MARKER)])
-    # unity_suite omits PASS messages, so add the marker to an actual PASS
-    # record explicitly and assert the fixture contains that record.
     marker_only_in_pass = suite([("owner", "PASS"), ("other", "FAIL", "other")])
     marker_only_in_pass = marker_only_in_pass.replace(
         b":owner:PASS\n", b":owner:PASS: " + MARKER.encode() + b"\n")
@@ -90,9 +89,9 @@ def classifier_controls():
     other_owner = suite([("other", "FAIL", MARKER)])
     dup_record = owner_out.replace(
         b"-----------------------",
-        b"tests/test_search.c:9:owner:PASS\n-----------------------")
+        b"tests/test_search_terms.c:9:owner:PASS\n-----------------------")
     dup_footer = owner_out + owner_out
-    no_footer = b"tests/test_search.c:1:owner:FAIL: " + MARKER.encode() + b"\n"
+    no_footer = b"tests/test_search_terms.c:1:owner:FAIL: " + MARKER.encode() + b"\n"
     no_breaker = owner_out.replace(b"-----------------------\n", b"")
 
     check("classifier-pass", classify(0, pass_out, b"", "owner", MARKER), "pass")
@@ -139,12 +138,17 @@ def classifier_controls():
     except YANFS.HarnessError as error:
         FAILURES.append("two-suite: %s" % error)
 
+    try:
+        RUN.self_test_verdict_precedence()
+    except RUN.HarnessError as error:
+        FAILURES.append("run_one precedence: %s" % error)
+
 
 # ------------------------------------------------------- real CLI missing inputs
 
 def run_cli(tree, work, unity, cc):
     command = [sys.executable, "-B",
-               str(tree / "tests" / "run_search_mutation.py"),
+               str(tree / "tests" / "run_search_terms_mutation.py"),
                "--source", str(tree), "--work", str(work), "--cc", cc,
                "--unity", str(unity)]
     try:
@@ -156,7 +160,7 @@ def run_cli(tree, work, unity, cc):
 
 def cli_missing_controls():
     source = HERE.parent
-    base = tempfile.mkdtemp(prefix="search-gate-cli-")
+    base = tempfile.mkdtemp(prefix="search-terms-gate-cli-")
     try:
         tree = Path(base) / "source"
         shutil.copytree(source, tree,
@@ -170,10 +174,9 @@ def cli_missing_controls():
         placeholder_cc = sys.executable
         absent_cc = str(Path(base) / "no-such-compiler")
 
-        for rel in ("os/search.c", "os/search.h", "os/search_linear.c",
-                    "os/search_linear.h", "os/search_terms.c",
+        for rel in ("os/search_terms_core.c", "os/search_terms.h",
                     "os/search_terms_index.c", "os/memory.h",
-                    "tests/test_search.c", "tests/test_shell.c",
+                    "tests/test_search_terms.c",
                     "tests/run_yanfs_mutation.py"):
             victim = tree / rel
             saved = victim.read_bytes()
@@ -202,11 +205,11 @@ def main():
     cli_missing_controls()
     if FAILURES:
         for line in FAILURES:
-            print("FAIL search-mutation-gate: %s" % line, file=sys.stderr)
-        print("search-mutation-gate: %d control(s) disagreed" % len(FAILURES),
-              file=sys.stderr)
+            print("FAIL search-terms-mutation-gate: %s" % line, file=sys.stderr)
+        print("search-terms-mutation-gate: %d control(s) disagreed"
+              % len(FAILURES), file=sys.stderr)
         return 1
-    print("PASS search-mutation-gate: all synthetic controls agree")
+    print("PASS search-terms-mutation-gate: all synthetic controls agree")
     return 0
 
 
@@ -214,5 +217,6 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as error:  # noqa: BLE001 - a control harness failure
-        print("HARNESS-ERROR: search-mutation-gate: %r" % error, file=sys.stderr)
+        print("HARNESS-ERROR: search-terms-mutation-gate: %r" % error,
+              file=sys.stderr)
         sys.exit(2)

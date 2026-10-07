@@ -30,6 +30,7 @@ INPUTS = [
     "tests/guest/start.S",
     "tests/guest/guest.h",
     "os/memory.c",
+    "os/memory.h",
     "tests/guest/link.ld",
     "tests/guest/run_search_api.py",
 ]

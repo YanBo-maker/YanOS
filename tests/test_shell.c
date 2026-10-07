@@ -1,4 +1,5 @@
 #include "search_linear.h"
+#include "search_terms_linear.h"
 #include "shell.h"
 #include "unity.h"
 
@@ -48,9 +49,13 @@ static TestDevice device;
 static YanFs fs;
 static YanShell shell;
 /* The shell borrows a unified Search; the fixture owns the linear context it
- * was built from. Both are static and zero-initialized before yan_shell_init. */
+ * was built from. Both are static and zero-initialized before yan_shell_init.
+ * A second, independent term facade is borrowed as well; the old grep cases
+ * never use it, but it must be a valid initialized facade. */
 static YanSearchLinear shell_linear;
 static YanSearch shell_search;
+static YanSearchTermsLinear shell_terms_linear;
+static YanSearchTerms shell_terms;
 
 typedef struct {
     uint8_t bytes[CAPTURE_CAPACITY];
@@ -94,6 +99,9 @@ static const char HELP_EXPECTED[] =
     "mv OLD NEW: rename a file\r\n"
     "cp SRC DEST: copy a file\r\n"
     "grep TOKEN: print matching lines as FILE:LINE:CONTENT\r\n"
+    "search QUERY: print term matches as FILE:LINE:SNIPPET\r\n"
+    "rebuild: rebuild the term index\r\n"
+    "index status|clear: show or drop the term index\r\n"
     "exit: end the session\r\n"
     "line: at most 1023 bytes, ended by CR or LF\r\n"
     "separators: ASCII spaces; commands and names are case sensitive\r\n"
@@ -254,17 +262,27 @@ static void fixture(void)
     memset(&shell, 0, sizeof shell);
     memset(&shell_linear, 0, sizeof shell_linear);
     memset(&shell_search, 0, sizeof shell_search);
+    memset(&shell_terms_linear, 0, sizeof shell_terms_linear);
+    memset(&shell_terms, 0, sizeof shell_terms);
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_OK, yan_search_linear_init(&shell_linear, &fs));
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_OK,
         yan_search_init(&shell_search, yan_search_linear_backend(&shell_linear)));
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SEARCH_TERMS_OK,
+        yan_search_terms_linear_init(&shell_terms_linear, &fs));
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SEARCH_TERMS_OK,
+        yan_search_terms_init(&shell_terms,
+                              yan_search_terms_linear_backend(
+                                  &shell_terms_linear)));
     YanShellOutput output;
     output.context = &capture;
     output.putc = capture_putc;
     TEST_ASSERT_EQUAL_INT(
         YAN_SHELL_OK,
-        yan_shell_init(&shell, &fs, &shell_search, output));
+        yan_shell_init(&shell, &fs, &shell_search, &shell_terms, output));
 }
 
 void setUp(void)
@@ -1333,29 +1351,29 @@ static void init_validates_arguments_and_does_no_filesystem_io(void)
     reset_counters();
     reset_capture();
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
-                          yan_shell_init(NULL, &fs, &shell_search, output));
+                          yan_shell_init(NULL, &fs, &shell_search, &shell_terms, output));
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
-                          yan_shell_init(&local, NULL, &shell_search, output));
+                          yan_shell_init(&local, NULL, &shell_search, &shell_terms, output));
     YanShellOutput bad;
     bad.context = &capture;
     bad.putc = NULL;
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
-                          yan_shell_init(&local, &fs, &shell_search, bad));
+                          yan_shell_init(&local, &fs, &shell_search, &shell_terms, bad));
     TEST_ASSERT_EQUAL_UINT32(0u, device.reads);
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
     TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
 
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK,
-                          yan_shell_init(&local, &fs, &shell_search, output));
+                          yan_shell_init(&local, &fs, &shell_search, &shell_terms, output));
     TEST_ASSERT_TRUE(local.initialized);
     TEST_ASSERT_FALSE(local.busy);
     /* An idle instance may be re-initialized; one that is inside a call may
      * not, and the state below is exactly what yan_shell_execute sets. */
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK,
-                          yan_shell_init(&local, &fs, &shell_search, output));
+                          yan_shell_init(&local, &fs, &shell_search, &shell_terms, output));
     local.busy = true;
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_BUSY,
-                          yan_shell_init(&local, &fs, &shell_search, output));
+                          yan_shell_init(&local, &fs, &shell_search, &shell_terms, output));
 }
 
 /* The borrowed filesystem and the shell must not overlap; init rejects that
@@ -1375,7 +1393,7 @@ static void init_rejects_a_filesystem_that_overlaps_the_shell(void)
     reset_capture();
     TEST_ASSERT_EQUAL_INT(
         YAN_SHELL_INVALID,
-        yan_shell_init(&overlap.shell, &overlap.fs, &shell_search, output));
+        yan_shell_init(&overlap.shell, &overlap.fs, &shell_search, &shell_terms, output));
     TEST_ASSERT_EQUAL_MEMORY(before, &overlap, sizeof overlap);
     TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
 }
@@ -1397,7 +1415,7 @@ static void init_rejects_an_alias_region_with_non_boolean_bytes(void)
     output.putc = capture_putc;
     reset_capture();
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
-                          yan_shell_init(aliased, &probe, &shell_search, output));
+                          yan_shell_init(aliased, &probe, &shell_search, &shell_terms, output));
     TEST_ASSERT_EQUAL_MEMORY(before, &probe, sizeof probe);
     TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
 }
@@ -1421,7 +1439,7 @@ static void init_rejects_a_search_that_overlaps_the_shell(void)
     reset_capture();
     TEST_ASSERT_EQUAL_INT(
         YAN_SHELL_INVALID,
-        yan_shell_init(&overlap.shell, &fs, &overlap.search, output));
+        yan_shell_init(&overlap.shell, &fs, &overlap.search, &shell_terms, output));
     TEST_ASSERT_EQUAL_MEMORY(before, &overlap, sizeof overlap);
     TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
 }
@@ -1443,7 +1461,7 @@ static void init_rejects_a_search_that_overlaps_the_filesystem(void)
     reset_capture();
     TEST_ASSERT_EQUAL_INT(
         YAN_SHELL_INVALID,
-        yan_shell_init(&local, &overlap.fs, &overlap.search, output));
+        yan_shell_init(&local, &overlap.fs, &overlap.search, &shell_terms, output));
     TEST_ASSERT_EQUAL_MEMORY(before, &overlap, sizeof overlap);
     TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
 }
@@ -1464,7 +1482,7 @@ static void init_rejects_a_backend_context_that_overlaps_the_shell(void)
     output.putc = capture_putc;
     reset_capture();
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
-                          yan_shell_init(&local, &fs, &forged, output));
+                          yan_shell_init(&local, &fs, &forged, &shell_terms, output));
     TEST_ASSERT_EQUAL_MEMORY(before, &local, sizeof before);
     TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
 }
@@ -1485,7 +1503,7 @@ static void init_rejects_a_backend_source_that_overlaps_the_shell(void)
     output.putc = capture_putc;
     reset_capture();
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
-                          yan_shell_init(&local, &fs, &forged, output));
+                          yan_shell_init(&local, &fs, &forged, &shell_terms, output));
     TEST_ASSERT_EQUAL_MEMORY(before, &local, sizeof before);
     TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
 }
@@ -1500,8 +1518,9 @@ static void init_rejects_an_uninitialized_search(void)
     output.context = &capture;
     output.putc = capture_putc;
     reset_capture();
-    TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
-                          yan_shell_init(&local, &fs, &fresh, output));
+    TEST_ASSERT_EQUAL_INT(
+        YAN_SHELL_INVALID,
+        yan_shell_init(&local, &fs, &fresh, &shell_terms, output));
     TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
 }
 
@@ -1519,7 +1538,7 @@ static void init_rejects_a_nonempty_span_with_a_null_base(void)
     output.putc = capture_putc;
     reset_capture();
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
-                          yan_shell_init(&local, &fs, &forged, output));
+                          yan_shell_init(&local, &fs, &forged, &shell_terms, output));
     TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
 }
 
@@ -1538,7 +1557,7 @@ static void init_rejects_a_span_that_leaves_uintptr(void)
     output.putc = capture_putc;
     reset_capture();
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_INVALID,
-                          yan_shell_init(&local, &fs, &forged, output));
+                          yan_shell_init(&local, &fs, &forged, &shell_terms, output));
     TEST_ASSERT_EQUAL_UINT32(0u, capture.calls);
 }
 
@@ -1626,7 +1645,7 @@ static void fake_grep_install(bool fail_reads)
     output.putc = capture_putc;
     TEST_ASSERT_EQUAL_INT(
         YAN_SHELL_OK,
-        yan_shell_init(&shell, &fs, &fake_grep_search, output));
+        yan_shell_init(&shell, &fs, &fake_grep_search, &shell_terms, output));
 }
 
 static void grep_uses_the_injected_backend_without_filesystem_io(void)

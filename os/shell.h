@@ -2,6 +2,7 @@
 #define YAN_OS_SHELL_H
 
 #include "search.h"
+#include "search_terms.h"
 #include "yanfs.h"
 
 #include <stdbool.h>
@@ -16,14 +17,18 @@
  * command set with the two-name `mv OLD NEW` and `cp SRC DEST`. 0025 adds the
  * `grep` front end: the shell parses the pattern and formats results, and the
  * literal byte search itself comes from the injected unified Search facade.
+ * 0026 adds the `search`, `rebuild` and `index status|clear` front ends over a
+ * second, independent term facade.
  *
  * The layer performs no Host I/O of its own. Every produced byte goes through
  * the borrowed YanShellOutput callback; every file operation goes through a
- * borrowed YanFs; every grep query goes through a borrowed YanSearch. A
- * YanShell therefore owns neither the device, the terminal, the search backend
- * nor the filesystem, and it is usable from the Guest as well as from a native
- * test. This header deliberately includes search.h, never search_linear.h: the
- * shell must not instantiate, select or enumerate a backend.
+ * borrowed YanFs; every grep query goes through a borrowed YanSearch; every
+ * term query and index management call goes through a borrowed YanSearchTerms.
+ * A YanShell therefore owns neither the device, the terminal, the search
+ * backend nor the filesystem, and it is usable from the Guest as well as from a
+ * native test. This header deliberately includes search.h and search_terms.h,
+ * never search_linear.h or search_terms_index.h: the shell must not
+ * instantiate, select or enumerate a backend.
  *
  * Lifetime and stack: a YanShell is long-lived (static storage or a
  * caller-owned object). Its 256-byte scratch is the fixed read chunk of cat,
@@ -35,7 +40,7 @@
  * or from inside a filesystem block callback returns YAN_SHELL_BUSY without
  * emitting a byte or touching the filesystem. The caller, not this layer, is
  * responsible for keeping those callbacks from reordering or editing the
- * borrowed YanFs, YanSearch and the line buffer. */
+ * borrowed YanFs, YanSearch, YanSearchTerms and the line buffer. */
 
 /* A line longer than this is refused as LINE_TOO_LONG before any parse. The
  * limit counts every byte of the line, and the line is not NUL-terminated:
@@ -79,30 +84,33 @@ typedef struct {
 typedef struct {
     YanFs *fs;
     YanSearch *search;
+    YanSearchTerms *terms;
     YanShellOutput output;
     bool initialized;
     bool busy;
     uint8_t scratch[YAN_SHELL_SCRATCH_SIZE];
 } YanShell;
 
-/* Validates shell, fs, search, output.putc and the protected-span boundaries
- * of the borrowed Search, then records the borrowed objects. No filesystem I/O,
- * no search I/O and no output.
+/* Validates shell, fs, search, terms, output.putc and the protected-span
+ * boundaries of both borrowed facades, then records the borrowed objects. No
+ * filesystem I/O, no search I/O and no output.
  *
  * Every alias decision is pure address arithmetic and runs before any bool
- * field of the Shell is read: the Shell, filesystem, Search and backend context
- * must be disjoint. The backend's borrowed source may be that same filesystem,
- * but must not overlap the other contexts. A nonempty protected span must have a
- * non-NULL base whose range does not leave uintptr_t. A shell placed inside any
- * of them is rejected without a load that could be undefined, and the rejected
- * regions are left byte-identical.
+ * field of the Shell is read: the Shell, filesystem, literal Search and term
+ * facade, and both backend contexts must be pairwise disjoint. Each backend's
+ * borrowed source may be that same filesystem, and the two sources may overlap
+ * each other read-only, but a source must not overlap a foreign context. A
+ * nonempty protected span must have a non-NULL base whose range does not leave
+ * uintptr_t. A shell placed inside any of them is rejected without a load that
+ * could be undefined, and the rejected regions are left byte-identical.
  *
- * A null shell, fs or search, an uninitialized Search, a malformed span, an
- * overlapping pair or a null putc returns YAN_SHELL_INVALID. Re-initializing an
- * instance that is currently inside yan_shell_execute returns YAN_SHELL_BUSY;
+ * A null shell, fs, search or terms, an uninitialized facade, a malformed span,
+ * an overlapping pair or a null putc returns YAN_SHELL_INVALID. Re-initializing
+ * an instance that is currently inside yan_shell_execute returns YAN_SHELL_BUSY;
  * an idle instance may be re-initialized, which is how a caller swaps in a
  * different backend. */
-YanShellResult yan_shell_init(YanShell *, YanFs *, YanSearch *, YanShellOutput);
+YanShellResult yan_shell_init(YanShell *, YanFs *, YanSearch *,
+                              YanSearchTerms *, YanShellOutput);
 
 /* Runs one net line, already stripped of CR/LF by the caller's line reader.
  *
@@ -137,7 +145,25 @@ YanShellResult yan_shell_init(YanShell *, YanFs *, YanSearch *, YanShellOutput);
  * (no escapes or single-quote interpretation, no inner double quote).
  * `grep " "` is a valid
  * one-space query and `grep "-i"` is a literal query for `-i`. Any other form
- * prints ERROR USAGE and performs no Search or filesystem call. */
+ * prints ERROR USAGE and performs no Search or filesystem call.
+ *
+ * 0026 `search`: the whole query after the command, optionally wrapped in one
+ * outer pair of double quotes; the quoted interior bytes are literal. A bare
+ * query may not start with `-`, and an inner double quote, an empty query, an
+ * extra token after a quoted query and a facade INVALID answer all print ERROR
+ * USAGE with zero filesystem I/O. A successful query prints FILE:LINE: followed
+ * by the escaped raw snippet (with `...` on a truncated side) and then
+ * `OK search total= shown= skipped= mode=index|scan`. `rebuild` takes no
+ * argument and prints `OK rebuild` or maps the source error; `index status`
+ * prints one `INDEX state= source= terms= postings=` line then `OK index`, and
+ * `index clear` prints `OK index`.
+ *
+ * `index status` and `index clear` are pure memory operations and are accepted
+ * even when the borrowed filesystem is unmounted, faulted or uninitialized:
+ * after the line length/control/range checks, an exact valid management line is
+ * routed before the filesystem health guard. Every other command, including an
+ * invalid `index` grammar and an empty or `exit` line, keeps the original health
+ * priority. */
 YanShellResult yan_shell_execute(YanShell *, const uint8_t *line, uint32_t length);
 
 #endif

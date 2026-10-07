@@ -83,7 +83,9 @@ except Exception as error:
 
 NATIVE_SUITES = {
     "shell": {"sources": ["tests/test_shell.c", "os/shell.c", "os/search.c",
-                          "os/search_linear.c", "os/yanfs.c"],
+                          "os/search_linear.c", "os/search_terms.c",
+                          "os/search_terms_linear.c", "os/search_terms_core.c",
+                          "os/search_terms_index.c", "os/search_text.c", "os/yanfs.c"],
               "includes": ["os"], "target": "test_shell"},
     "line": {"sources": ["tests/test_line.c", "os/line.c"],
              "includes": ["os"], "target": "test_line"},
@@ -97,6 +99,8 @@ NATIVE_HEADERS = [
     "os/line.h", "os/platform.h", "os/block.h",
     "os/task.h", "os/console.h", "os/terminal.h", "os/yanfs_block.h",
     "tests/run_yanfs_mutation.py", "os/editor.h",
+    "os/memory.h", "os/search_terms.h", "os/search_terms_core.h",
+    "os/search_terms_linear.h", "os/search_terms_index.h", "os/search_text.h",
 ]
 
 # runtime production build recipe (the app plus the platform it links).
@@ -106,6 +110,8 @@ PRODUCTION_SOURCES = [
     "os/yanfs_block.c", "os/shell.c", "os/search.c", "os/search_linear.c",
     "os/line.c", "os/terminal.c",
     "os/memory.c", "os/editor.c",
+    "os/search_terms.c", "os/search_terms_core.c", "os/search_terms_linear.c",
+    "os/search_terms_index.c", "os/search_text.c",
 ]
 CROSS_FLAGS = [
     "-march=rv32im", "-mabi=ilp32", "-mcmodel=medany", "-nostdlib",

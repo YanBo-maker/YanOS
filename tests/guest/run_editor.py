@@ -463,6 +463,11 @@ PRODUCTION_INPUTS = (
     "os/shell.h", "os/search.h", "os/search_linear.h", "os/line.h",
     "os/terminal.h", "os/yanfs.h",
     "os/yanfs_block.h", "tests/guest/run_terminal_files.py",
+    "os/memory.h", "os/search_terms.h", "os/search_terms.c",
+    "os/search_terms_core.h", "os/search_terms_core.c",
+    "os/search_terms_linear.h", "os/search_terms_linear.c",
+    "os/search_terms_index.h", "os/search_terms_index.c",
+    "os/search_text.h", "os/search_text.c",
 )
 
 

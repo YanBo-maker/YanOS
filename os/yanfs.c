@@ -37,6 +37,40 @@
 
 #include <stddef.h>
 
+/* 0026 source identity allocator seed. The process-global allocator keeps its
+ * last handed-out identity in a file-static uint64 counter that starts from
+ * this value, so the first identity is SEED + 1: the production default 0 gives
+ * 1, 2, 3, ... and UINT64_MAX is the last cacheable identity, after which the
+ * next allocation returns 0 with cacheable=false and no later allocation wraps
+ * back to a small value. The near-exhaustion test build overrides the value so
+ * one run crosses UINT64_MAX. */
+#ifndef YAN_FS_SOURCE_TOKEN_SEED
+#define YAN_FS_SOURCE_TOKEN_SEED UINT64_C(0)
+#endif
+
+/* The process-global allocator. It starts from the seed above and hands out
+ * SEED + 1, SEED + 2, ... as long as the value is below UINT64_MAX. UINT64_MAX
+ * itself is still a valid, cacheable identity; the *next* allocation sets the
+ * exhausted flag, returns token 0 with cacheable=false, and every later
+ * allocation keeps returning 0/false. There is deliberately no reset and no
+ * setter: the only way to cross the ceiling is the separate test build that
+ * overrides the seed. */
+static uint64_t source_serial = YAN_FS_SOURCE_TOKEN_SEED;
+static bool source_exhausted = false;
+
+static void source_identity_allocate(YanFs *fs)
+{
+    if (source_exhausted || source_serial == UINT64_MAX) {
+        source_exhausted = true;
+        fs->source_token = 0u;
+        fs->source_cacheable = false;
+        return;
+    }
+    ++source_serial;
+    fs->source_token = source_serial;
+    fs->source_cacheable = true;
+}
+
 /* Block 0 offsets, from the layout table in 0021. */
 #define FS_MAGIC_OFFSET 0u
 #define FS_MAGIC_SIZE 8u
@@ -516,6 +550,9 @@ static void entry_clear(uint8_t *block, uint32_t slot)
 static YanFsResult fault_io(YanFs *fs, YanFsIoResult io)
 {
     fs->state = YAN_FS_STATE_FAULTED;
+    /* 0026: really entering FAULTED is a source change, so it gets a fresh
+     * identity. A rejected mount (CORRUPT/UNSUPPORTED) never reaches here. */
+    source_identity_allocate(fs);
     return io == YAN_FS_IO_ERROR ? YAN_FS_IO : YAN_FS_PROTOCOL;
 }
 
@@ -557,6 +594,9 @@ static YanFsResult commit_metadata(YanFs *fs)
     for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
         fs->metadata[i] = fs->scratch[i];
     }
+    /* 0026: a successfully published directory is a source change. Every
+     * create/replace/remove/rename/copy reaches this single publish point. */
+    source_identity_allocate(fs);
     return YAN_FS_OK;
 }
 
@@ -583,6 +623,9 @@ YanFsResult yan_fs_init(YanFs *fs, YanFsBlockIo io)
     fs->state = YAN_FS_UNMOUNTED;
     fs->busy = false;
     fs->capacity_blocks = 0;
+    /* 0026: a successful init is a source change and takes a fresh identity. The
+     * metadata and scratch blocks are cleared to a deterministic zero image. */
+    source_identity_allocate(fs);
     for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
         fs->metadata[i] = 0;
         fs->scratch[i] = 0;
@@ -618,6 +661,7 @@ YanFsResult yan_fs_mount(YanFs *fs)
         /* Unknown callback values are protocol violations, not data damage. */
         result = io_result == YAN_FS_IO_ERROR ? YAN_FS_IO : YAN_FS_PROTOCOL;
         fs->state = YAN_FS_STATE_FAULTED;
+        source_identity_allocate(fs);
     } else if (device_blocks < 1u || device_blocks > (uint64_t)UINT32_MAX) {
         result = YAN_FS_UNSUPPORTED;
     } else {
@@ -625,6 +669,7 @@ YanFsResult yan_fs_mount(YanFs *fs)
         if (io_result != YAN_FS_IO_OK) {
             result = io_result == YAN_FS_IO_ERROR ? YAN_FS_IO : YAN_FS_PROTOCOL;
             fs->state = YAN_FS_STATE_FAULTED;
+            source_identity_allocate(fs);
         } else {
             result = validate_metadata(fs->scratch, (uint32_t)device_blocks);
             if (result == YAN_FS_OK) {
@@ -635,6 +680,7 @@ YanFsResult yan_fs_mount(YanFs *fs)
                 }
                 fs->capacity_blocks = (uint32_t)device_blocks;
                 fs->state = YAN_FS_MOUNTED;
+                source_identity_allocate(fs);
             }
         }
     }
@@ -661,6 +707,39 @@ YanFsResult yan_fs_unmount(YanFs *fs)
         fs->metadata[i] = 0;
         fs->scratch[i] = 0;
     }
+    /* 0026: every successful unmount, including a repeated one, is a source
+     * change and takes a fresh identity. */
+    source_identity_allocate(fs);
+    return YAN_FS_OK;
+}
+
+/* 0026 pure observation of the in-memory source identity. The order is fixed by
+ * the spec: context + initialized, then BUSY, then the output holder's range,
+ * overflow and context alias. It is deliberately not operation_guard: UNMOUNTED
+ * and FAULTED are valid observations, not errors, and no path here touches the
+ * device, allocates a token or changes any field. The range check reuses
+ * context_overlap, so a holder that would run past UINTPTR_MAX is rejected in
+ * the target's own pointer domain and *out is never written on an error. */
+YanFsResult yan_fs_source(const YanFs *fs, YanFsSource *out)
+{
+    if (fs == NULL) {
+        return YAN_FS_INVALID;
+    }
+    if (!fs->initialized) {
+        return YAN_FS_INVALID;
+    }
+    if (fs->busy) {
+        return YAN_FS_BUSY;
+    }
+    if (out == NULL) {
+        return YAN_FS_INVALID;
+    }
+    if (context_overlap(fs, out, (uint64_t)sizeof(YanFsSource))) {
+        return YAN_FS_INVALID;
+    }
+    out->state = fs->state;
+    out->token = fs->source_token;
+    out->cacheable = fs->source_cacheable && !source_exhausted;
     return YAN_FS_OK;
 }
 

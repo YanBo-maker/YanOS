@@ -6,8 +6,9 @@
  * the interrupt line reader (os/line.c) and the UART terminal (os/terminal.c),
  * and it owns the whole storage stack (os/yanfs.c over os/yanfs_block.c). It
  * references nothing under tests/, so the production image and the validation
- * corpus stay separate. The shell now carries the original eight commands plus
- * the 0024 `mv` and `cp`.
+ * corpus stay separate. The shell carries the original eight commands, the
+ * 0024 `mv` and `cp`, the 0025 literal `grep`, and the 0026 `search`, `rebuild`
+ * and `index status|clear` front ends.
  *
  * Layout:
  *   main          runs on the boot stack from os/trap_entry.S, configures the
@@ -24,8 +25,8 @@
  *                 a task stack; no entry point builds a large automatic object.
  *
  * Routing: the application has a SHELL mode and an EDITING mode. SHELL keeps
- * the shell's commands (the original eight plus the 0024 `mv` and `cp`); the
- * application inspects only the first token,
+ * the shell's commands (the original eight plus `mv`, `cp`, `grep`, `search`,
+ * `rebuild` and `index`); the application inspects only the first token,
  * routes `edit NAME` to the editor, adds a short editor hint before a
  * standalone `help`, and passes every other line to yan_shell_execute. EDITING
  * routes every line to yan_editor_execute and never to the shell; a healthy
@@ -56,6 +57,8 @@
 #include "platform.h"
 #include "search.h"
 #include "search_linear.h"
+#include "search_terms.h"
+#include "search_terms_index.h"
 #include "shell.h"
 #include "task.h"
 #include "terminal.h"
@@ -97,12 +100,15 @@ static YanFsBlockAdapter adapter;
 static YanShell shell;
 static YanEditor editor;
 static YanTerminal terminal;
-/* The application selects and owns the search backend; the shell only receives
- * the unified Search facade and never sees the filesystem-scoped linear
- * context. The linear buffers exceed a task stack; both borrowed objects live
- * in static storage for the entire session. */
+/* The application selects and owns the search backends; the shell only receives
+ * the two unified facades and never sees the filesystem-scoped linear context
+ * or the in-memory term index. The linear buffers and the index tables exceed a
+ * task stack, so every borrowed object lives in static storage for the entire
+ * session. */
 static YanSearchLinear search_linear;
 static YanSearch search;
+static YanSearchTermsIndex term_index;
+static YanSearchTerms term_terms;
 
 /* --------------------------------------------------------------- reporting */
 
@@ -364,7 +370,16 @@ _Noreturn static void app_session(void)
         YAN_SEARCH_OK) {
         app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
     }
-    if (yan_shell_init(&shell, &fs, &search, output) != YAN_SHELL_OK) {
+    if (yan_search_terms_index_init(&term_index, &fs) != YAN_SEARCH_TERMS_OK) {
+        app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
+    }
+    if (yan_search_terms_init(&term_terms,
+                              yan_search_terms_index_backend(&term_index)) !=
+        YAN_SEARCH_TERMS_OK) {
+        app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
+    }
+    if (yan_shell_init(&shell, &fs, &search, &term_terms, output) !=
+        YAN_SHELL_OK) {
         app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
     }
     if (yan_editor_init(&editor, &fs, output) != YAN_EDITOR_OK) {

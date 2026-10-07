@@ -207,7 +207,7 @@ def cli_missing_controls():
         placeholder_cc = sys.executable
         absent_cc = str(Path(base) / "no-such-compiler")
         for rel in ("os/editor.c", "os/editor.h", "os/yanfs.c", "os/yanfs.h",
-                    "os/shell.h", "os/search.h", "tests/test_editor.c",
+                    "os/shell.h", "os/search.h", "os/search_terms.h", "tests/test_editor.c",
                     "tests/run_yanfs_mutation.py"):
             victim = tree / rel
             saved = victim.read_bytes()

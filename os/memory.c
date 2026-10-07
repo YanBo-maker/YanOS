@@ -9,7 +9,7 @@
  * The validation programs under tests/guest/ carry their own copies because a
  * production app must not include or link anything under tests/. Keeping them
  * here is what lets apps/yanfs_terminal link on its own. */
-#include <stddef.h>
+#include "memory.h"
 #include <stdint.h>
 
 void *memcpy(void *destination, const void *source, size_t size)

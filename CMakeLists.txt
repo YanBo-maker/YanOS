@@ -67,10 +67,22 @@ add_library(yan_search STATIC os/search.c os/search_linear.c)
 target_link_libraries(yan_search PUBLIC yan_fs)
 target_compile_options(yan_search PRIVATE ${YAN_WARNINGS})
 
-# The shell consumes the unified Search facade and never instantiates or
-# selects a backend, so it links yan_search rather than yan_fs directly.
+# 0026 term search: the facade, the shared text primitives, the no-index linear
+# backend and the in-memory index object. The facade is filesystem-independent;
+# the linear and index backends borrow a YanFs, so the library is the one link
+# edge to yan_fs.
+add_library(yan_search_terms STATIC os/search_terms.c os/search_terms_linear.c
+                                 os/search_terms_core.c os/search_text.c
+                                 os/search_terms_index.c)
+target_include_directories(yan_search_terms PUBLIC os)
+target_link_libraries(yan_search_terms PUBLIC yan_fs)
+target_compile_options(yan_search_terms PRIVATE ${YAN_WARNINGS})
+
+# The shell consumes the two unified facades (literal and term) and never
+# instantiates or selects a backend, so it links the facades rather than yan_fs
+# directly. 0026 adds the term facade for search/rebuild/index.
 add_library(yan_shell STATIC os/shell.c)
-target_link_libraries(yan_shell PUBLIC yan_search)
+target_link_libraries(yan_shell PUBLIC yan_search yan_search_terms)
 target_compile_options(yan_shell PRIVATE ${YAN_WARNINGS})
 
 add_library(yan_line STATIC os/line.c)
@@ -118,6 +130,11 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         "${CMAKE_CURRENT_SOURCE_DIR}/os/editor.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_linear.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms_linear.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms_core.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms_index.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/search_text.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/block.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/yanfs.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/yanfs_block.c")
@@ -125,7 +142,7 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         list(APPEND _yan_terminal_sources "${CMAKE_CURRENT_SOURCE_DIR}/os/memory.c")
     endif()
     set(_yan_terminal_headers)
-    foreach(_header block console editor line platform search search_linear shell task terminal yanfs yanfs_block)
+    foreach(_header block console editor memory line platform search search_linear search_terms search_terms_core search_terms_index search_terms_linear search_text shell task terminal yanfs yanfs_block)
         list(APPEND _yan_terminal_headers "${CMAKE_CURRENT_SOURCE_DIR}/os/${_header}.h")
     endforeach()
     add_custom_command(OUTPUT "${YAN_TERMINAL_ELF}"
@@ -161,11 +178,34 @@ if(BUILD_TESTING)
     add_test(NAME yanfs COMMAND test_yanfs)
     set_tests_properties(yanfs PROPERTIES TIMEOUT 30)
 
+    # 0026 source-identity exhaustion: the same os/yanfs.c compiled a second time
+    # with a near-UINT64_MAX allocator seed. It builds its own copy of the source
+    # instead of linking yan_fs, because linking both would define yanfs.c twice.
+    # The seed is a plain integer literal so MSVC's /D parses it the same way as
+    # GCC's -D; the suite is registered on every platform, not only Linux.
+    add_executable(test_yanfs_source_exhaustion
+                   tests/test_yanfs_source_exhaustion.c os/yanfs.c)
+    target_include_directories(test_yanfs_source_exhaustion PRIVATE os)
+    target_compile_definitions(test_yanfs_source_exhaustion PRIVATE
+        "YAN_FS_SOURCE_TOKEN_SEED=18446744073709551551ULL")
+    target_link_libraries(test_yanfs_source_exhaustion PRIVATE unity::framework)
+    target_compile_options(test_yanfs_source_exhaustion PRIVATE ${YAN_WARNINGS})
+    add_test(NAME yanfs_source_exhaustion COMMAND test_yanfs_source_exhaustion)
+    set_tests_properties(yanfs_source_exhaustion PROPERTIES TIMEOUT 30)
+
     add_executable(test_shell tests/test_shell.c)
     target_link_libraries(test_shell PRIVATE yan_shell unity::framework)
     target_compile_options(test_shell PRIVATE ${YAN_WARNINGS})
     add_test(NAME shell COMMAND test_shell)
     set_tests_properties(shell PROPERTIES TIMEOUT 30)
+
+    # 0026 CLI front ends over a real injected index backend plus a fake term
+    # backend for precise output/fault/reentry fixtures.
+    add_executable(test_shell_terms tests/test_shell_terms.c)
+    target_link_libraries(test_shell_terms PRIVATE yan_shell unity::framework)
+    target_compile_options(test_shell_terms PRIVATE ${YAN_WARNINGS})
+    add_test(NAME shell_terms COMMAND test_shell_terms)
+    set_tests_properties(shell_terms PROPERTIES TIMEOUT 30)
 
     add_executable(test_line tests/test_line.c)
     target_link_libraries(test_line PRIVATE yan_line unity::framework)
@@ -184,6 +224,44 @@ if(BUILD_TESTING)
     target_compile_options(test_search PRIVATE ${YAN_WARNINGS})
     add_test(NAME search COMMAND test_search)
     set_tests_properties(search PROPERTIES TIMEOUT 30)
+
+    # 0026 term search: facade lifecycle plus the shared streaming core over a
+    # real in-memory YanFS, with a fake backend for the pure facade contracts.
+    add_executable(test_search_terms tests/test_search_terms.c)
+    target_link_libraries(test_search_terms PRIVATE yan_search_terms
+                                                    unity::framework)
+    target_compile_options(test_search_terms PRIVATE ${YAN_WARNINGS})
+    add_test(NAME search_terms COMMAND test_search_terms)
+    set_tests_properties(search_terms PROPERTIES TIMEOUT 30)
+
+    # 0026 in-memory index contract: the index object, its vtable seam and the
+    # approved physical caps over a real 8 MiB in-memory YanFS. Indexed-only
+    # expectations exercise the implemented index; SCAN parity and the pure
+    # lifecycle/alias cases guard the same public contract.
+    add_executable(test_search_index tests/test_search_index.c)
+    target_link_libraries(test_search_index PRIVATE yan_search_terms
+                                                   unity::framework)
+    target_compile_options(test_search_index PRIVATE ${YAN_WARNINGS})
+    add_test(NAME search_index COMMAND test_search_index)
+    set_tests_properties(search_index PROPERTIES TIMEOUT 60)
+
+    # 0026 index source-exhaustion variant: os/yanfs.c compiled a second time
+    # with a near-UINT64_MAX allocator seed instead of linking yan_fs (which
+    # would define yanfs.c twice). It builds its own copy of the production term
+    # sources plus Unity and is registered on every platform.
+    add_executable(test_search_index_exhaustion
+                   tests/test_search_index_exhaustion.c os/yanfs.c
+                   os/search_terms.c os/search_terms_linear.c
+                   os/search_terms_core.c os/search_text.c
+                   os/search_terms_index.c)
+    target_include_directories(test_search_index_exhaustion PRIVATE os)
+    target_compile_definitions(test_search_index_exhaustion PRIVATE
+        "YAN_FS_SOURCE_TOKEN_SEED=18446744073709551551ULL")
+    target_link_libraries(test_search_index_exhaustion PRIVATE unity::framework)
+    target_compile_options(test_search_index_exhaustion PRIVATE ${YAN_WARNINGS})
+    add_test(NAME search_index_exhaustion
+             COMMAND test_search_index_exhaustion)
+    set_tests_properties(search_index_exhaustion PROPERTIES TIMEOUT 60)
 
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # Native platform/framing doubles exercise the actual adapter source;
@@ -246,6 +324,20 @@ if(BUILD_TESTING)
     # builds anything; registering it here puts it in the default suite as well.
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
+        # Independent Unicode/regex reference checks complete rows, scores,
+        # snippets and summaries. The warm index case also bounds disk reads;
+        # it cannot pass by silently choosing the linear backend.
+        add_executable(test_search_terms_oracle_probe
+                       tests/search_terms_oracle_probe.c)
+        target_link_libraries(test_search_terms_oracle_probe PRIVATE yan_search_terms)
+        target_compile_options(test_search_terms_oracle_probe PRIVATE ${YAN_WARNINGS})
+        foreach(_backend scan index index-repeat)
+            add_test(NAME search_terms_oracle_${_backend}
+                COMMAND "${Python3_EXECUTABLE}" -B
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/search_terms_oracle.py"
+                        "$<TARGET_FILE:test_search_terms_oracle_probe>" "${_backend}")
+            set_tests_properties(search_terms_oracle_${_backend} PROPERTIES TIMEOUT 120)
+        endforeach()
         if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             add_test(NAME shell_launcher
                 COMMAND "${Python3_EXECUTABLE}" -B
@@ -267,6 +359,15 @@ if(BUILD_TESTING)
                             --mkfs "$<TARGET_FILE:yan_mkfs>"
                             --guest "${YAN_TERMINAL_ELF}")
                 set_tests_properties(guest_search PROPERTIES TIMEOUT 600)
+                add_test(NAME guest_search_terms
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_search_terms.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-search-terms"
+                            --run "$<TARGET_FILE:yan_run>"
+                            --mkfs "$<TARGET_FILE:yan_mkfs>"
+                            --guest "${YAN_TERMINAL_ELF}")
+                set_tests_properties(guest_search_terms PROPERTIES TIMEOUT 600)
             endif()
             if(TARGET yanfs_terminal)
                 set(_yan_search_fault_args)
@@ -287,6 +388,16 @@ if(BUILD_TESTING)
                             --guest "${YAN_TERMINAL_ELF}"
                             ${_yan_search_fault_args})
                 set_tests_properties(guest_search_faults PROPERTIES
+                                     SKIP_RETURN_CODE 77 TIMEOUT 600)
+                add_test(NAME guest_search_terms_faults
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_search_terms_faults.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-search-terms-faults"
+                            --cc "${CMAKE_C_COMPILER}"
+                            --guest "${YAN_TERMINAL_ELF}"
+                            ${_yan_search_fault_args})
+                set_tests_properties(guest_search_terms_faults PROPERTIES
                                      SKIP_RETURN_CODE 77 TIMEOUT 600)
             endif()
             if(TARGET yanfs_terminal AND TARGET yan_mkfs AND TARGET yan_run_disk_close_fault)
@@ -381,6 +492,12 @@ if(BUILD_TESTING)
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_search_mutation_gate.py")
         set_tests_properties(search_mutation_gate PROPERTIES TIMEOUT 180)
+        # Pure classifier/CLI guard for the 0026 search-term mutation gate: no
+        # compiler, so it is in the default suite on every configuration.
+        add_test(NAME search_terms_mutation_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_search_terms_mutation_gate.py")
+        set_tests_properties(search_terms_mutation_gate PROPERTIES TIMEOUT 240)
         # Pure CLI guard for the 0025 Guest search scripts: missing in-repo
         # inputs and the provided ELF must be hard failures before any external
         # tool is consulted. No compiler is needed, so it is in the default
@@ -475,6 +592,22 @@ if(BUILD_TESTING)
                     --work "${CMAKE_BINARY_DIR}/search-api")
         set_tests_properties(guest_search_api PROPERTIES SKIP_RETURN_CODE 77
                                                        TIMEOUT 300)
+
+        # 0026 term public-API probe on RV32IM: the term facade, the shared core
+        # and text primitives over a fake backend, with no filesystem and no
+        # index linked. It proves the RV32-only span-wrap, four-byte holder and
+        # busy/sticky rules, emits the SEARCH_TERMS_API_PASS signature and ends
+        # with tohost 1. Only the cross compiler and the symbol tool are
+        # external.
+        add_test(NAME guest_search_terms_api
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_search_terms_api.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${CMAKE_BINARY_DIR}/search-terms-api")
+        set_tests_properties(guest_search_terms_api PROPERTIES SKIP_RETURN_CODE 77
+                                                             TIMEOUT 300)
     endif()
 
     # The console needs the UART terminal backend, which lives on the Host; the
@@ -624,6 +757,17 @@ if(BUILD_TESTING)
                     --work "${YAN_MUTATION_WORK_ROOT}/search")
         set_tests_properties(search_mutation PROPERTIES
                              SKIP_RETURN_CODE 77 TIMEOUT 900)
+        # 0026 term/index/shell mutation: the four native term suites only, so it
+        # needs the host compiler and Unity but no cross toolchain.
+        add_test(NAME search_terms_mutation
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_search_terms_mutation.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --cc "${CMAKE_C_COMPILER}"
+                    --unity "${unity_SOURCE_DIR}"
+                    --work "${YAN_MUTATION_WORK_ROOT}/search-terms")
+        set_tests_properties(search_terms_mutation PROPERTIES
+                             SKIP_RETURN_CODE 77 TIMEOUT 1800)
         add_test(NAME persistent_block_mutation
             COMMAND "${Python3_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_persistent_mutation.py"
