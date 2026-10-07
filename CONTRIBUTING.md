@@ -56,7 +56,7 @@ ISA 行为遵循 Spec → Test → Implementation：先写用例并确认预期�
 3. 文档自洽核对：由总审核角色核对状态行、规格索引、计数与链接。
 4. **新增或改动被忽略扩展名的工件时，确认它真的能进提交**：判据是 `git add --dry-run <路径>` 是否列出该文件，**不是** `git check-ignore` 的返回码——命中取反规则时它也返回 0。仓库已经踩过一次：golden 基准的 `.jsonl` / `.hex` 被"验证产物不提交"的规则吃掉，基准进不了仓库，测试会在别的机器上静默 SKIP。
 
-变异检查默认关闭，合并前显式运行。0025知识检索本机验收（2026-10-07）：Linux默认55组、开启实际变异后66组；Release55/55（32.33 s）、ASan/UBSan55/55（50.93 s）、Windows MSVC32/32（5.70 s），十一组实际变异11/11（142.77 s），均0失败、0SKIP。Search17个缺陷命中指定owner和具体断言；真实no-effect、wrong-owner与同owner wrong-assertion控制均已复验，0存活、0harness error。四个默认mutation puregate及Guest脚本门禁保留在默认套件中，本机通过不代替远端CI或维护者审查。证据与覆盖边界见 [STATUS](docs/STATUS.md)。
+变异检查默认关闭，合并前显式运行。0025知识检索本机验收（2026-10-07）：Linux默认55组、开启实际变异后66组；Release55/55（32.50 s）、ASan/UBSan55/55（51.39 s）、Windows MSVC32/32（4.25 s），十一组实际变异11/11（142.77 s），均0失败、0SKIP。Search17个缺陷命中指定owner和具体断言；真实no-effect、wrong-owner与同owner wrong-assertion控制均已复验，0存活、0harness error。四个默认mutation puregate及Guest脚本门禁保留在默认套件中，本机通过不代替远端CI或维护者审查。证据与覆盖边界见 [STATUS](docs/STATUS.md)。
 
 历史0024重命名与复制本机验收：Linux默认49组、开启实际变异后59组；Release49/49（19.29 s）、ASan/UBSan49/49（36.98 s），十组实际变异10/10（97.01 s，-j3），Windows MSVC默认29/29（2.27 s），均0失败、0SKIP。FS19个与终端24个实际缺陷均命中指定owner及具体断言，0存活、0harness error。新默认Guest文件管理及故障验收由Linux工具配置注册，Windows计数不能直接与其比较；边界与证据见 [STATUS](docs/STATUS.md)。`-E '_mutation$'`保留默认puregate，`-R '_mutation$'`只选十组实际变异。
 

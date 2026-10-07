@@ -104,10 +104,26 @@ def main():
         ok = check("api-classifier-" + name, got == expected, detail) and ok
     with tempfile.TemporaryDirectory(prefix="search-guest-gate-") as base_dir:
         base_path = Path(base_dir)
+        # Windows reproduction of the CI-only failure: File identifiers are
+        # case-insensitive there, so Path equality (and mkdir/read/write) treat
+        # an alternative case spelling of the same directory as identical, but
+        # the scripts canonicalize --source with Path.resolve() and print the
+        # canonical spelling. The fixture is therefore built under an
+        # alternative case spelling of the tempfile base, so the raw string the
+        # gate would otherwise compare against differs from what the scripts
+        # print. Path(name).swapcase() only changes case, never the directory
+        # identity, so this cannot pick a different input.
+        if sys.platform == "win32":
+            base_path = Path(str(base_path).swapcase())
         tree = base_path / "tree"
         work = base_path / "work"
         work.mkdir(parents=True)
         build_tree(tree, sorted(set(HEALTHY_INPUTS + FAULT_INPUTS + api.INPUTS)))
+        # The directory now exists: compare the canonical spelling the real
+        # scripts resolve to, not the raw tempfile spelling. This is a string
+        # comparison of the printed diagnostic, where case matters on Windows
+        # even though pathlib path equality does not.
+        tree = tree.resolve()
         fake_guest = base_path / "guest.elf"
         # An executable Python placeholder reliably fails the guest/mkfs argv
         # on Windows as well as Unix, exercising the real harness-error path.
