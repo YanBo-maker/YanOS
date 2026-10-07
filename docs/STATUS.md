@@ -1,13 +1,13 @@
 # 项目状态
 
-当前推进：词项搜索与可重建索引，[0026](specs/0026-term-search-index.md)于2026-10-07 10:10 +08:00经项目所有者整体批准并锁定。
+当前交付：词项搜索与可重建索引，[0026](specs/0026-term-search-index.md)于2026-10-07 10:10 +08:00经项目所有者整体批准并锁定。
 
 - 规格批准：search词项组、同一行AND、倒排位置索引、top20排序与摘要、rebuild/status/clear、source身份与完整scan回退按整体交付；grep旧literal保持。
 - 实现：term facade、流式参考backend、RAM索引、排序摘要和shell管理已完成，任务分支 `codex/knowledge-index`；grep字面基线保持。
 - 验证：本机Release67/67（37.91 s）、ASan/UBSan67/67（75.33 s）、Windows MSVC41/41（20.19 s）；统一十二组实际变异12/12（203.40 s），均0失败、0SKIP。Linux现注册默认67/开变异79；独立实现审查已完成，无阻塞发现；功能提交77f03fd的 [CI运行37568965627](https://github.com/YanBo-maker/YanOS/actions/runs/37568965627) 三项成功。
-- 用户审查：整体方案已批准，实现交付待审查，学习与理解程度由项目所有者判断。
+- 用户审查：整体方案已批准，项目所有者于2026-10-07明确批准PR #22合入main（c84b2e78ed1e6953bf05f7bd1c3cc93ff730bf58）；学习与理解程度由项目所有者判断。
 
-功能实现提交 `77f03fd4334b2d5a8fbcf90f6feab93cb4b46c62` 已推送并建立 [PR #22](https://github.com/YanBo-maker/YanOS/pull/22)，前置规格提交 `fd0e3c1` 保留。上述CI对应这一功能head：Linux Release43/43（13.43 s）、Debug ASan43/43（27.83 s）、Windows41/41（30.12 s）。CI采用默认TOOLS OFF配置，不等同本机67组工具/Guest及十二组实际变异验收；两类记录分别保留。用户整体规格已批，实现交付与功能合入仍待维护者批准，不以CI成功替代审查。
+功能实现提交 `77f03fd4334b2d5a8fbcf90f6feab93cb4b46c62` 已推送并建立 [PR #22](https://github.com/YanBo-maker/YanOS/pull/22)，前置规格提交 `fd0e3c1` 保留。上述CI对应这一功能head：Linux Release43/43（13.43 s）、Debug ASan43/43（27.83 s）、Windows41/41（30.12 s）。CI采用默认TOOLS OFF配置，不等同本机67组工具/Guest及十二组实际变异验收；两类记录分别保留。用户整体规格与PR #22合入均已明确批准；合并提交c84b2e78ed1e6953bf05f7bd1c3cc93ff730bf58的树与已审1e787a4完全一致，前置规格及实现提交保留。CI成功与所有者合入批准分别记录。
 
 ### 0026 锁定后查询组数补齐
 
@@ -29,7 +29,7 @@
 
 索引仅RAM、重启EMPTY；身份变化使READY/LIMIT失效，标识耗尽永久UNCACHEABLE并scan。整次查询要求调用方保持FS不变，不新增强制锁或跨进程快照；绕过FS直接改镜像不在身份契约内。无持久索引、词典分词、Unicode规范化、短语或模糊检索。 RV32 API验收使用宿主nm读取符号，当前环境已实际通过；存在但不支持该ELF的nm导致HARNESS2，不伪报SKIP。独立最终审查确认交叉alias和指定suite门禁修复已闭合，无阻塞发现；故障脚本说明已同步LIMIT回退及包含挂载的完整响应计数。
 
-上面两条锁定后补齐段保留当时“尚待执行”的历史记录；现已由17重复/17不同组、真实耗尽rebuildOK/零I/O/UNCACHEABLE零计数永久测试验证取代，批准依据和旧原文不删。阅读 [0026](specs/0026-term-search-index.md)、[term接口](../os/search_terms.h)、[index](../os/search_terms_index.c)、[独立oracle](../tests/search_terms_reference.py)。整体规格获批，用户实现审查与合入批准仍待，理解程度由项目所有者判断。
+上面两条锁定后补齐段保留当时“尚待执行”的历史记录；现已由17重复/17不同组、真实耗尽rebuildOK/零I/O/UNCACHEABLE零计数永久测试验证取代，批准依据和旧原文不删。阅读 [0026](specs/0026-term-search-index.md)、[term接口](../os/search_terms.h)、[index](../os/search_terms_index.c)、[独立oracle](../tests/search_terms_reference.py)。整体规格及PR #22合入已获所有者批准，理解程度由项目所有者判断。
 
 ### 已交付字面检索基线
 
@@ -317,7 +317,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-请维护者审查PR #22的0026实现与合入；供阅读实际search结果、索引状态与故障边界。学习理解由项目所有者判断，下一能力另行对齐。
+0026已通过PR #22交付main，供阅读实际search结果、索引状态与故障边界。学习理解由项目所有者判断，下一能力另行对齐。
 
 ### 历史推进记录（M1a / M2a）
 
