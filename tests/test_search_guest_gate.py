@@ -18,12 +18,16 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE / "guest"))
 import run_terminal_files as base  # noqa: E402
 import run_editor as editor  # noqa: E402
 import run_terminal_runtime as runtime  # noqa: E402
 import run_search_api as api  # noqa: E402
+import run_search_terms_api as terms_api  # noqa: E402
 import run_search as healthy  # noqa: E402
+import run_search_terms as terms
+import run_search_terms_faults as terms_faults
 
 HEALTHY_SCRIPT = HERE / "guest" / "run_search.py"
 FAULT_SCRIPT = HERE / "guest" / "run_search_faults.py"
@@ -102,6 +106,24 @@ def main():
         result = subprocess.CompletedProcess([], rc, out, err)
         got, detail = api.classify_probe(result, signature)
         ok = check("api-classifier-" + name, got == expected, detail) and ok
+    # The 0026 term probe gets its own classifier controls: a PASS marker cannot
+    # hide a wrong tohost, a crash, a sanitizer report or an executor/signature
+    # mismatch.
+    term_marker = terms_api.SIGNATURE
+    for name, rc, out, err, signature, expected in (
+        ("healthy", 0, term_marker, b"", b"\x01\0\0\0", 0),
+        ("wrong-tohost-with-marker", 0, term_marker, b"", b"\x02\0\0\0", 1),
+        ("owner-code", 6, b"", b"", b"\x3c\0\0\0", 1),
+        ("missing-marker", 0, b"", b"", b"\x01\0\0\0", 1),
+        ("signal-wins", -11, term_marker, b"", b"\x02\0\0\0", 2),
+        ("sanitizer-wins", 6, b"", b"AddressSanitizer", b"\x02\0\0\0", 2),
+        ("unexpected-exit", 7, term_marker, b"", b"\x01\0\0\0", 2),
+        ("missing-signature", 0, term_marker, b"", b"", 2),
+        ("rc-tohost-mismatch", 6, term_marker, b"", b"\x01\0\0\0", 2),
+    ):
+        result = subprocess.CompletedProcess([], rc, out, err)
+        got, detail = terms_api.classify_probe(result, signature)
+        ok = check("terms-api-classifier-" + name, got == expected, detail) and ok
     with tempfile.TemporaryDirectory(prefix="search-guest-gate-") as base_dir:
         base_path = Path(base_dir)
         # Windows reproduction of the CI-only failure: File identifiers are
@@ -118,7 +140,9 @@ def main():
         tree = base_path / "tree"
         work = base_path / "work"
         work.mkdir(parents=True)
-        build_tree(tree, sorted(set(HEALTHY_INPUTS + FAULT_INPUTS + api.INPUTS)))
+        build_tree(tree, sorted(set(HEALTHY_INPUTS + FAULT_INPUTS + api.INPUTS +
+                                   list(terms_api.INPUTS) + list(terms.INPUTS) +
+                                   list(terms_faults.INPUTS))))
         # The directory now exists: compare the canonical spelling the real
         # scripts resolve to, not the raw tempfile spelling. This is a string
         # comparison of the printed diagnostic, where case matters on Windows
@@ -201,6 +225,60 @@ def main():
         result = run_script(api_script, tree, work, api_extra)
         ok = check("api-cli-intact-missing-tool-77",
                    result.returncode == 77 and b"SKIP:" in result.stdout,
+                   "rc=%d" % result.returncode) and ok
+
+        # The 0026 term API probe declares its own inventory; every missing
+        # in-repo input is a hard 1 even though the tools are absent.
+        terms_api_script = HERE / "guest" / "run_search_terms_api.py"
+        terms_api_extra = ["--gcc", absent_tool, "--nm", absent_tool,
+                           "--run", str(fake_run)]
+        for rel in sorted(set(terms_api.INPUTS)):
+            victim = tree / rel
+            saved = victim.read_bytes()
+            victim.unlink()
+            try:
+                result = run_script(terms_api_script, tree, work, terms_api_extra)
+            finally:
+                victim.write_bytes(saved)
+            message = (":FAIL: missing required input: %s" % (tree / rel)).encode()
+            ok = check("terms-api-cli-missing-" + rel,
+                       result.returncode == 1 and message in result.stdout,
+                       "rc=%d" % result.returncode) and ok
+        result = run_script(terms_api_script, tree, work, terms_api_extra)
+        ok = check("terms-api-cli-intact-missing-tool-77",
+                   result.returncode == 77 and b"SKIP:" in result.stdout,
+                   "rc=%d" % result.returncode) and ok
+
+        # Exercise every declared 0026 input via the real CLI. Even when the
+        # compiler is missing, a missing repository source must be hard 1.
+        term_cases = [
+            ("terms", HERE / "guest/run_search_terms.py", terms.INPUTS,
+             ["--run", str(fake_run), "--mkfs", str(fake_mkfs),
+              "--guest", str(fake_guest)]),
+            ("terms-faults", HERE / "guest/run_search_terms_faults.py",
+             terms_faults.INPUTS,
+             ["--cc", absent_tool, "--guest", str(fake_guest)]),
+        ]
+        for label, script, inputs, extra in term_cases:
+            for rel in sorted(set(inputs)):
+                victim = tree / rel
+                saved = victim.read_bytes()
+                victim.unlink()
+                try:
+                    result = run_script(script, tree, work, extra)
+                finally:
+                    victim.write_bytes(saved)
+                message = (":FAIL: missing required input: %s" % victim).encode()
+                ok = check("cli-missing-%s-%s" % (label, rel),
+                           result.returncode == 1 and message in result.stdout,
+                           "rc=%d" % result.returncode) and ok
+        result = run_script(term_cases[1][1], tree, work, term_cases[1][3])
+        ok = check("terms-fault-cli-intact-missing-compiler-77",
+                   result.returncode == 77 and b"SKIP:" in result.stdout,
+                   "rc=%d" % result.returncode) and ok
+        result = run_script(term_cases[0][1], tree, work, term_cases[0][3])
+        ok = check("terms-cli-intact-reaches-executor",
+                   result.returncode == 2 and b":HARNESS-ERROR:" in result.stdout,
                    "rc=%d" % result.returncode) and ok
 
     print("search-guest-gate: %s" % ("ok" if ok else "failed"), flush=True)

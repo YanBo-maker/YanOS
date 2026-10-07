@@ -89,6 +89,15 @@ static bool probe_copy_null_fs_unchanged;
 static uint32_t probe_copy_null_io;
 static uint32_t probe_cache_crc;
 static bool probe_cache_unpublished;
+/* 0026 source observation run from inside a real device callback: the outer
+ * operation holds busy, so the getter must answer BUSY, leave the whole fs
+ * byte-identical and issue no further device callback. */
+static YanFsResult probe_source_result;
+static YanFsResult probe_source_null_result;
+static YanFsResult probe_source_alias_result;
+static bool probe_source_out_unchanged;
+static bool probe_source_fs_unchanged;
+static uint32_t probe_source_io;
 
 /* Opt-in callback trace. It is disabled unless a test arms it, so the old
  * fixtures keep their exact callback counts. While armed it records, for every
@@ -347,6 +356,24 @@ static void run_callback_probe(void)
 
     probe_create_result = yan_fs_create(probe_fs, "probe", &byte, 1u);
     probe_remove_result = yan_fs_remove(probe_fs, "hello.txt");
+
+    /* 0026 observation while the outer operation still holds busy. */
+    YanFsSource source;
+    memset(&source, 0xa5, sizeof source);
+    uint8_t source_snapshot[sizeof source];
+    memcpy(source_snapshot, &source, sizeof source);
+    memcpy(fs_snapshot, probe_fs, sizeof fs_snapshot);
+    io_before = device.reads + device.writes;
+    probe_source_result = yan_fs_source(probe_fs, &source);
+    probe_source_out_unchanged =
+        memcmp(source_snapshot, &source, sizeof source) == 0;
+    probe_source_null_result = yan_fs_source(probe_fs, NULL);
+    probe_source_alias_result = yan_fs_source(
+        probe_fs, (YanFsSource *)(void *)probe_fs->metadata);
+    probe_source_fs_unchanged =
+        memcmp(fs_snapshot, probe_fs, sizeof fs_snapshot) == 0;
+    probe_source_io = (device.reads + device.writes) - io_before;
+
     probe_cache_crc = yan_fs_metadata_crc(probe_fs->metadata);
     probe_cache_unpublished = probe_fs->state == YAN_FS_UNMOUNTED &&
                               probe_fs->capacity_blocks == 0u &&
@@ -534,6 +561,12 @@ void setUp(void)
     probe_copy_null_io = 0u;
     probe_cache_crc = 0u;
     probe_cache_unpublished = false;
+    probe_source_result = YAN_FS_OK;
+    probe_source_null_result = YAN_FS_OK;
+    probe_source_alias_result = YAN_FS_OK;
+    probe_source_out_unchanged = false;
+    probe_source_fs_unchanged = true;
+    probe_source_io = 0u;
     trace_reset();
 }
 
@@ -3574,6 +3607,465 @@ static void rename_and_copy_accept_name_terminating_before_context(void)
                              (const char *)context_entry(&adjacent.context, 1u));
 }
 
+/* ==================================================== 0026 source identity ===
+ * docs/specs/0026-term-search-index.md, "来源观察与token契约". yan_fs_source is
+ * a pure observation; the in-memory identity changes exactly when a successful
+ * source mutation is published (init, mount, unmount, create, replace, remove,
+ * a different-name rename, copy, or entering FAULTED) and stays put for
+ * ordinary rejections, a same-name rename, read-only calls and the pure format
+ * helper. The tests never compare against a raw counter value: they ask whether
+ * the observation is a live identity (non-zero and cacheable) and whether two
+ * observations of the same instance differ.
+ *
+ * Mutation owners named by the messages below:
+ *   source_identity_changes_on_every_published_directory   create/replace/
+ *       remove/copy/different-name rename each publish a new identity
+ *   source_identity_init_mount_unmount_and_reuse           init/mount/unmount
+ *       and legal address reuse through unmount + memset + init
+ *   source_identity_unchanged_by_rejections_same_name_and_read_only
+ *   source_identity_unchanged_by_pure_format_helper
+ *   source_identity_changes_when_a_real_fault_is_entered
+ *   source_identity_changes_on_mount_protocol_and_unknown_status
+ *   source_identity_unchanged_by_normal_mount_rejection
+ * ========================================================================= */
+
+static YanFsSource source_observe(const YanFs *context)
+{
+    YanFsSource source;
+    memset(&source, 0, sizeof source);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        YAN_FS_OK, yan_fs_source(context, &source),
+        "source observation must succeed on an initialized instance");
+    return source;
+}
+
+static uint64_t source_live_token(const YanFs *context, const char *message)
+{
+    YanFsSource source = source_observe(context);
+    TEST_ASSERT_TRUE_MESSAGE(source.token != 0u, message);
+    TEST_ASSERT_TRUE_MESSAGE(source.cacheable, message);
+    return source.token;
+}
+
+static uint64_t fs_live_token(const char *message)
+{
+    return source_live_token(&fs, message);
+}
+
+static void source_getter_reports_unmounted_and_faulted_without_io(void)
+{
+    fx_device(16u);
+    memset(&fs, 0, sizeof fs);
+    init_fs();
+    uint32_t reads = device.reads;
+    uint32_t writes = device.writes;
+
+    YanFsSource source;
+    memset(&source, 0xa5, sizeof source);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_source(&fs, &source),
+        "an initialized but unmounted instance must be observable");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_UNMOUNTED, source.state,
+        "the observation must report the real unmounted state");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(reads, device.reads,
+        "observing an unmounted source must not read the device");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(writes, device.writes,
+        "observing an unmounted source must not write the device");
+
+    device.capacity_status = YAN_FS_IO_ERROR;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_IO, yan_fs_mount(&fs));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
+    reads = device.reads;
+    writes = device.writes;
+    memset(&source, 0xa5, sizeof source);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_source(&fs, &source),
+        "a faulted instance must still answer OK to the observation");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_STATE_FAULTED, source.state,
+        "the observation must report FAULTED, not silently repair it");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_STATE_FAULTED, fs.state,
+        "the observation must not revive the faulted instance");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(reads, device.reads,
+        "observing a faulted source must not read the device");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(writes, device.writes,
+        "observing a faulted source must not write the device");
+}
+
+static void source_getter_rejects_bad_holders_and_preserves_them(void)
+{
+    YanFsSource source;
+    YanFsSource before;
+
+    /* An uninitialized context is INVALID before the holder is judged. */
+    YanFs virgin;
+    memset(&virgin, 0, sizeof virgin);
+    memset(&source, 0x5a, sizeof source);
+    memcpy(&before, &source, sizeof source);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID, yan_fs_source(&virgin, &source),
+        "an uninitialized context must answer INVALID, not publish a state");
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&before, &source, sizeof source,
+        "a rejected observation must leave the holder untouched");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID, yan_fs_source(&virgin, NULL),
+        "an uninitialized context must win over a NULL holder");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID, yan_fs_source(NULL, &source),
+        "a NULL context must answer INVALID");
+
+    mount_empty(16u);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID, yan_fs_source(&fs, NULL),
+        "a NULL holder is an ordinary parameter error on a healthy instance");
+
+    uint32_t cache_crc = yan_fs_metadata_crc(fs.metadata);
+    memset(&source, 0x5a, sizeof source);
+    memcpy(&before, &source, sizeof source);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID,
+        yan_fs_source(&fs, (YanFsSource *)(void *)fs.metadata),
+        "a holder aliasing the context must be rejected");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID,
+        yan_fs_source(&fs, (YanFsSource *)(void *)(fs.scratch + 4080u)),
+        "a holder in the context tail must be rejected");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID,
+        yan_fs_source(&fs, (YanFsSource *)(uintptr_t)(UINTPTR_MAX - 1u)),
+        "a holder whose range leaves uintptr must be rejected");
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&before, &source, sizeof source,
+        "an aliasing observation must not write the caller holder");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.metadata),
+        "an aliasing observation must not touch the metadata cache");
+}
+
+static void source_getter_answers_busy_from_a_device_callback(void)
+{
+    mount_empty(16u);
+    fill_payload(5u, 0x77);
+    create_ok("hello.txt", payload, 5u);
+    probe_fs = &fs;
+    probe_ran = false;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
+        yan_fs_replace(&fs, "hello.txt", payload, 5u));
+    TEST_ASSERT_TRUE_MESSAGE(probe_ran, "the device callback must run the probe");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_BUSY, probe_source_result,
+        "an observation from inside a callback must answer BUSY");
+    TEST_ASSERT_TRUE_MESSAGE(probe_source_out_unchanged,
+        "a busy observation must leave the output holder byte-identical");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_BUSY, probe_source_null_result,
+        "BUSY must precede the NULL output check");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_BUSY, probe_source_alias_result,
+        "BUSY must precede the aliased output check");
+    TEST_ASSERT_TRUE_MESSAGE(probe_source_fs_unchanged,
+        "a busy observation must leave the whole fs byte-identical");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0u, probe_source_io,
+        "a busy observation must run no device callback");
+}
+
+static void source_identity_changes_on_every_published_directory(void)
+{
+    mount_empty(16u);
+    uint64_t mounted =
+        fs_live_token("a successful mount must yield a live source identity");
+
+    fill_payload(5u, 0xa0);
+    create_ok("created", payload, 5u);
+    uint64_t created =
+        fs_live_token("a published create must yield a new live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(created != mounted,
+        "a published create must invalidate the previous source identity");
+
+    fill_payload(9u, 0xa1);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_replace(&fs, "created", payload, 9u));
+    uint64_t replaced =
+        fs_live_token("a published replace must yield a new live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(replaced != created,
+        "a published replace must invalidate the previous source identity");
+
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_copy(&fs, "created", "copied"));
+    uint64_t copied =
+        fs_live_token("a published copy must yield a new live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(copied != replaced,
+        "a published copy must invalidate the previous source identity");
+
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_rename(&fs, "copied", "renamed"));
+    uint64_t renamed =
+        fs_live_token("a published rename must yield a new live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(renamed != copied,
+        "a published different-name rename must invalidate the previous identity");
+
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_remove(&fs, "renamed"));
+    uint64_t removed =
+        fs_live_token("a published remove must yield a new live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(removed != renamed,
+        "a published remove must invalidate the previous source identity");
+}
+
+static void source_identity_init_mount_unmount_and_reuse_are_distinct(void)
+{
+    fx_device(16u);
+    memset(&fs, 0, sizeof fs);
+    init_fs();
+    uint64_t initialized =
+        fs_live_token("a successful init must yield a live source identity");
+
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
+    uint64_t mounted =
+        fs_live_token("a successful mount must yield a live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(mounted != initialized,
+        "mount must not reuse the identity an init assigned");
+
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_unmount(&fs));
+    YanFsSource unmounted = source_observe(&fs);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_UNMOUNTED, unmounted.state,
+        "unmount must be observable as UNMOUNTED");
+    TEST_ASSERT_TRUE_MESSAGE(unmounted.token != 0u,
+        "a successful unmount must yield a live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(unmounted.token != mounted,
+        "unmount must not reuse the mounted identity");
+
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_unmount(&fs));
+    uint64_t unmounted_again = source_live_token(&fs,
+        "a repeated legal unmount must yield a live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(unmounted_again != unmounted.token,
+        "a repeated legal unmount must not reuse the previous identity");
+}
+
+static void source_identity_address_reuse_after_legal_unmount_is_distinct(void)
+{
+    /* A second context reuses the same address as the first: a legal unmount,
+     * then the caller zeroes the object and initializes it again. The new
+     * source must not be mistaken for the old one. */
+    fx_device(16u);
+    fx_entry(device.blocks[0], 0u, "note", 0u, 0u, 0u);
+    fx_seal(device.blocks[0]);
+
+    YanFs reused;
+    memset(&reused, 0, sizeof reused);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&reused, fx_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&reused));
+    uint64_t first = source_live_token(&reused,
+        "the first mount of a reused address must yield a live identity");
+
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_unmount(&reused));
+    memset(&reused, 0, sizeof reused);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&reused, fx_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&reused));
+    uint64_t second = source_live_token(&reused,
+        "the second mount at the reused address must yield a live identity");
+    TEST_ASSERT_TRUE_MESSAGE(second != first,
+        "a new init at a reused address must not be mistaken for the old source");
+}
+
+static void source_identity_unchanged_by_rejections_same_name_and_read_only(void)
+{
+    mount_empty(16u);
+    fill_payload(5u, 0xa2);
+    create_ok("note", payload, 5u);
+    uint64_t before =
+        fs_live_token("a published create must yield a live source identity");
+
+    /* Ordinary rejections must not allocate a new identity. */
+    TEST_ASSERT_EQUAL_INT(YAN_FS_EXISTS, yan_fs_create(&fs, "note", payload, 5u));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_NOT_FOUND,
+        yan_fs_replace(&fs, "ghost", payload, 5u));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_NOT_FOUND, yan_fs_remove(&fs, "ghost"));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_NOT_FOUND, yan_fs_copy(&fs, "ghost", "copy"));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_EXISTS, yan_fs_copy(&fs, "note", "note"));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID, yan_fs_create(&fs, "bad/name", NULL, 0u));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID, yan_fs_rename(&fs, "note", "bad/name"));
+    /* 0024: a same-name rename is a zero-I/O success, not a source change. */
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_rename(&fs, "note", "note"));
+    /* A declared range one past the context passes the alias guard, and a
+     * 16-block device cannot hold the resulting extent: NOSPACE, no publish. */
+    const uint8_t *huge =
+        (const uint8_t *)(uintptr_t)((uintptr_t)&fs + sizeof fs);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_NOSPACE,
+        yan_fs_create(&fs, "huge", huge, UINT32_MAX));
+
+    TEST_ASSERT_EQUAL_UINT64_MESSAGE(before, fs_live_token(
+        "rejections must leave the source identity live"),
+        "ordinary rejections and a same-name rename must not change the identity");
+
+    /* Read-only success keeps the identity as well. */
+    YanFsInfo info = {0};
+    uint32_t cursor = 0u;
+    uint32_t got = 0u;
+    memset(readback, 0, sizeof readback);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_stat(&fs, "note", &info));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_list(&fs, &cursor, &info));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
+        yan_fs_read(&fs, "note", 0u, readback, 5u, &got));
+    TEST_ASSERT_EQUAL_UINT32(5u, got);
+    TEST_ASSERT_EQUAL_UINT64_MESSAGE(before, fs_live_token(
+        "read-only success must leave the source identity live"),
+        "read-only success must not change the source identity");
+}
+
+static void source_identity_unchanged_by_pure_format_helper(void)
+{
+    mount_empty(16u);
+    uint64_t before =
+        fs_live_token("a successful mount must yield a live source identity");
+    uint32_t cache_crc = yan_fs_metadata_crc(fs.metadata);
+    uint32_t writes = device.writes;
+
+    memset(block, 0xa5, sizeof block);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_format_metadata(block, 16u));
+    TEST_ASSERT_EQUAL_UINT32(fx_block_crc(block), fx_get_le32(block + 60u));
+
+    TEST_ASSERT_EQUAL_UINT64_MESSAGE(before, fs_live_token(
+        "the pure format helper must leave the source identity live"),
+        "the pure format helper must not change any source identity");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.metadata),
+        "the pure format helper must not touch a mounted instance");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(writes, device.writes,
+        "the pure format helper must not write the device");
+}
+
+static void source_identity_changes_when_a_real_fault_is_entered(void)
+{
+    /* A mount that enters FAULTED through a real capacity I/O error. */
+    fx_device(16u);
+    memset(&fs, 0, sizeof fs);
+    init_fs();
+    uint64_t initialized =
+        fs_live_token("a successful init must yield a live source identity");
+    device.capacity_status = YAN_FS_IO_ERROR;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_IO, yan_fs_mount(&fs));
+    YanFsSource after_mount_fault = source_observe(&fs);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_STATE_FAULTED, after_mount_fault.state,
+        "a real mount I/O error must be observable as FAULTED");
+    TEST_ASSERT_TRUE_MESSAGE(after_mount_fault.token != 0u,
+        "entering FAULTED must yield a live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(after_mount_fault.token != initialized,
+        "entering FAULTED from a mount I/O error must invalidate the old identity");
+    device.capacity_status = YAN_FS_IO_OK;
+
+    /* A read that enters FAULTED through a real data I/O error. */
+    fx_device(16u);
+    memset(&fs, 0, sizeof fs);
+    init_fs();
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
+    fill_payload(5000u, 0xa3);
+    create_ok("f", payload, 5000u);
+    uint64_t healthy =
+        fs_live_token("a published create must yield a live source identity");
+    device.reads = 0u;
+    device.read_fail_at = 1u;
+    uint32_t got = 0u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_IO,
+        yan_fs_read(&fs, "f", 0u, readback, 5000u, &got));
+    YanFsSource after_read_fault = source_observe(&fs);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_STATE_FAULTED, after_read_fault.state,
+        "a real read I/O error must be observable as FAULTED");
+    TEST_ASSERT_TRUE_MESSAGE(after_read_fault.token != 0u,
+        "a real read fault must yield a live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(after_read_fault.token != healthy,
+        "a real read fault must invalidate the pre-fault source identity");
+    device.read_fail_at = 0u;
+
+    /* A write that enters FAULTED through a real data I/O error. */
+    fx_device(16u);
+    memset(&fs, 0, sizeof fs);
+    init_fs();
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
+    fill_payload(5u, 0xa4);
+    create_ok("f", payload, 5u);
+    uint64_t before_write_fault =
+        fs_live_token("a published create must yield a live source identity");
+    device.writes = 0u;
+    device.write_fail_at = 1u;
+    device.write_partial = 0u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_IO, yan_fs_replace(&fs, "f", payload, 5u));
+    YanFsSource after_write_fault = source_observe(&fs);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_STATE_FAULTED, after_write_fault.state,
+        "a real write I/O error must be observable as FAULTED");
+    TEST_ASSERT_TRUE_MESSAGE(after_write_fault.token != 0u,
+        "a real write fault must yield a live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(after_write_fault.token != before_write_fault,
+        "a real write fault must invalidate the pre-fault source identity");
+    device.write_fail_at = 0u;
+}
+
+static void source_identity_changes_on_mount_protocol_and_unknown_status(void)
+{
+    /* read_block reports PROTOCOL. */
+    fx_device(16u);
+    memset(&fs, 0, sizeof fs);
+    init_fs();
+    uint64_t before =
+        fs_live_token("a successful init must yield a live source identity");
+    device.read_status = YAN_FS_IO_PROTOCOL;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_PROTOCOL, yan_fs_mount(&fs),
+        "a PROTOCOL read must surface as YAN_FS_PROTOCOL");
+    YanFsSource after = source_observe(&fs);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_STATE_FAULTED, after.state,
+        "a PROTOCOL read must be observable as FAULTED");
+    TEST_ASSERT_TRUE_MESSAGE(after.token != 0u,
+        "a PROTOCOL mount fault must yield a live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(after.token != before,
+        "a PROTOCOL mount fault must invalidate the pre-fault identity");
+    device.read_status = YAN_FS_IO_OK;
+
+    /* read_block reports an unknown status: protocol, and still a fault. */
+    fx_device(16u);
+    memset(&fs, 0, sizeof fs);
+    init_fs();
+    before = fs_live_token("a successful init must yield a live source identity");
+    device.read_status = (YanFsIoResult)9;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_PROTOCOL, yan_fs_mount(&fs),
+        "an unknown read status must map to YAN_FS_PROTOCOL");
+    after = source_observe(&fs);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_STATE_FAULTED, after.state,
+        "an unknown read status must be observable as FAULTED");
+    TEST_ASSERT_TRUE_MESSAGE(after.token != 0u,
+        "an unknown-status mount fault must yield a live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(after.token != before,
+        "an unknown-status mount fault must invalidate the pre-fault identity");
+    device.read_status = YAN_FS_IO_OK;
+
+    /* The capacity callback reports an unknown status. */
+    fx_device(16u);
+    memset(&fs, 0, sizeof fs);
+    init_fs();
+    before = fs_live_token("a successful init must yield a live source identity");
+    device.capacity_status = (YanFsIoResult)200;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_PROTOCOL, yan_fs_mount(&fs),
+        "an unknown capacity status must map to YAN_FS_PROTOCOL");
+    after = source_observe(&fs);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_STATE_FAULTED, after.state,
+        "an unknown capacity status must be observable as FAULTED");
+    TEST_ASSERT_TRUE_MESSAGE(after.token != 0u,
+        "an unknown-capacity mount fault must yield a live source identity");
+    TEST_ASSERT_TRUE_MESSAGE(after.token != before,
+        "an unknown-capacity mount fault must invalidate the pre-fault identity");
+    device.capacity_status = YAN_FS_IO_OK;
+}
+
+static void source_identity_unchanged_by_normal_mount_rejection(void)
+{
+    fx_device(16u);
+    memset(&fs, 0, sizeof fs);
+    init_fs();
+    uint64_t initialized =
+        fs_live_token("a successful init must yield a live source identity");
+
+    /* CORRUPT is an ordinary rejection: no mount identity is published. */
+    fx_put_le32(device.blocks[0] + 60u, fx_block_crc(device.blocks[0]) ^ 1u);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_CORRUPT, yan_fs_mount(&fs),
+        "the fixture must be rejected as CORRUPT");
+    TEST_ASSERT_EQUAL_INT(YAN_FS_UNMOUNTED, fs.state);
+    uint64_t after_corrupt = fs_live_token(
+        "a CORRUPT rejection must leave the pre-mount identity live");
+    TEST_ASSERT_EQUAL_UINT64_MESSAGE(initialized, after_corrupt,
+        "a CORRUPT mount rejection must not publish a new source identity");
+
+    /* UNSUPPORTED (foreign version) is rejected the same way. */
+    fx_device(16u);
+    fx_put_le32(device.blocks[0] + 8u, 2u);
+    fx_seal(device.blocks[0]);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_UNSUPPORTED, yan_fs_mount(&fs),
+        "the fixture must be rejected as UNSUPPORTED");
+    TEST_ASSERT_EQUAL_INT(YAN_FS_UNMOUNTED, fs.state);
+    uint64_t after_unsupported = fs_live_token(
+        "an UNSUPPORTED rejection must leave the pre-mount identity live");
+    TEST_ASSERT_EQUAL_UINT64_MESSAGE(after_corrupt, after_unsupported,
+        "an UNSUPPORTED mount rejection must not publish a new source identity");
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -3682,5 +4174,16 @@ int main(void)
     RUN_TEST(copy_rejects_max_length_nospace_before_data_callbacks);
     RUN_TEST(rename_and_copy_name_length_limits);
     RUN_TEST(rename_and_copy_accept_name_terminating_before_context);
+    RUN_TEST(source_getter_reports_unmounted_and_faulted_without_io);
+    RUN_TEST(source_getter_rejects_bad_holders_and_preserves_them);
+    RUN_TEST(source_getter_answers_busy_from_a_device_callback);
+    RUN_TEST(source_identity_changes_on_every_published_directory);
+    RUN_TEST(source_identity_init_mount_unmount_and_reuse_are_distinct);
+    RUN_TEST(source_identity_address_reuse_after_legal_unmount_is_distinct);
+    RUN_TEST(source_identity_unchanged_by_rejections_same_name_and_read_only);
+    RUN_TEST(source_identity_unchanged_by_pure_format_helper);
+    RUN_TEST(source_identity_changes_when_a_real_fault_is_entered);
+    RUN_TEST(source_identity_changes_on_mount_protocol_and_unknown_status);
+    RUN_TEST(source_identity_unchanged_by_normal_mount_rejection);
     return UNITY_END();
 }

@@ -20,7 +20,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [知识检索基础设施](docs/specs/0025-knowledge-search.md) 已实现并完成本机验证，经项目所有者于2026-10-07批准，通过 [PR #20](https://github.com/YanBo-maker/YanOS/pull/20) 合入main：统一Search API接入无索引线性backend，grep按字面字节子串返回完整匹配行，支持跨块与长行，NUL文件整文件跳过。原始笔记为事实来源，不修改磁盘格式或建立索引。
 
-[词项搜索与可重建索引](docs/specs/0026-term-search-index.md)整体方案已批准，待实现和验证：计划新增search、RAM倒排索引、排序摘要与重建/失效管理；超出索引容量时完整扫描，原始笔记保持为事实来源，既有grep语义不变。
+[词项搜索与可重建索引](docs/specs/0026-term-search-index.md)已实现并完成本机验证：search按词项组做同一行AND查询，返回评分最高的20行及上下文摘要；RAM倒排索引随文件变更失效，超出容量时完整扫描。原始笔记保持为事实来源，grep语义不变；远端CI待执行，实现交付待维护者审查。
 
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
@@ -88,9 +88,21 @@ exit
 
 保存后可用 `grep 修订` 或 `grep "第二行 修订"` 查询字面字节子串。结果按目录槽和行号排列，以 `FILE:LINE:CONTENT` 显示完整匹配行，同一行只显示一次；零匹配仍输出 `OK grep`。LF/CRLF 分行，裸 CR 保留为内容。含 NUL 的文件整文件跳过，检索不写镜像；编辑态须先保存或取消，才能执行 grep。长行不受 16KiB 草稿容量限制。接口见 [Search](os/search.h) 与 [线性 backend](os/search_linear.h)。
 
+保存并退出编辑态后，还可用词项搜索：
+
+```text
+search 修订
+search CPU 中断
+index status
+rebuild
+index clear
+```
+
+ASCII词按完整词匹配、忽略ASCII大小写，interrupt不会命中interruption；中文组内字符必须相邻，“中断”可命中“处理中断”，不能命中“中 foo 断”。空格分隔的组在同一行做AND，去重后最多16组。结果按分数、目录槽、行号排序，显示最多160字符的安全摘要及总匹配数；零匹配也成功。索引只在RAM，重启为EMPTY；clear只丢弃索引，容量不足回退scan，均不修改笔记。接口见 [term facade](os/search_terms.h) 与 [索引backend](os/search_terms_index.h)。
+
 生产入口见 [应用](apps/yanfs_terminal/main.c)，公共接口见 [shell](os/shell.h)、[读行器](os/line.h) 和 [UART 终端](os/terminal.h)。应用依赖 `os/`，不依赖 `tests/`。
 
-变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 可注册十一组：`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
+变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 可注册十二组：`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
 
 `yan_run` 的默认执行路径由 `guest_golden` 用基准工件逐字节守住：改动默认行为会让它失败，先读差异再决定是否有意为之。生成与重生成见 [`tests/guest/golden/README.md`](tests/guest/golden/README.md)。
 

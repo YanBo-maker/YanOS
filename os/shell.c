@@ -48,6 +48,9 @@ static const char HELP_TEXT[] =
     "mv OLD NEW: rename a file\r\n"
     "cp SRC DEST: copy a file\r\n"
     "grep TOKEN: print matching lines as FILE:LINE:CONTENT\r\n"
+    "search QUERY: print term matches as FILE:LINE:SNIPPET\r\n"
+    "rebuild: rebuild the term index\r\n"
+    "index status|clear: show or drop the term index\r\n"
     "exit: end the session\r\n"
     "line: at most 1023 bytes, ended by CR or LF\r\n"
     "separators: ASCII spaces; commands and names are case sensitive\r\n"
@@ -253,6 +256,141 @@ static bool emit_ok(YanShell *shell, const char *command)
 {
     return shell_puts(shell, "OK ") && shell_puts(shell, command) &&
            shell_puts(shell, "\r\n");
+}
+
+/* -------------------------------------------------- 0026 term mapping ------ */
+
+/* Stable suffix of a term result's ERROR line. This is a separate switch, never
+ * a cast of the literal enum: the two are independent types. An unknown
+ * enumerator returns NULL so the caller can report PROTOCOL rather than
+ * inventing an "UNKNOWN" success. */
+static const char *terms_error_suffix(YanSearchTermsResult result)
+{
+    switch (result) {
+    case YAN_SEARCH_TERMS_INVALID: return "INVALID";
+    case YAN_SEARCH_TERMS_BUSY: return "BUSY";
+    case YAN_SEARCH_TERMS_STOPPED: return "STOPPED";
+    case YAN_SEARCH_TERMS_NOT_MOUNTED: return "NOT_MOUNTED";
+    case YAN_SEARCH_TERMS_FAULTED: return "FAULTED";
+    case YAN_SEARCH_TERMS_IO: return "IO";
+    case YAN_SEARCH_TERMS_PROTOCOL: return "PROTOCOL";
+    case YAN_SEARCH_TERMS_CORRUPT: return "CORRUPT";
+    case YAN_SEARCH_TERMS_UNSUPPORTED: return "UNSUPPORTED";
+    case YAN_SEARCH_TERMS_NOT_FOUND: return "NOT_FOUND";
+    case YAN_SEARCH_TERMS_INDEX_LIMIT: return "INDEX_LIMIT";
+    case YAN_SEARCH_TERMS_OK: return "OK";
+    }
+    return NULL;
+}
+
+/* Same trust grouping as the literal and filesystem results: an untrustworthy
+ * source or an actual fault is fatal, an ordinary error continues. */
+static bool terms_error_is_fatal(YanSearchTermsResult result)
+{
+    switch (result) {
+    case YAN_SEARCH_TERMS_NOT_MOUNTED:
+    case YAN_SEARCH_TERMS_FAULTED:
+    case YAN_SEARCH_TERMS_IO:
+    case YAN_SEARCH_TERMS_PROTOCOL:
+    case YAN_SEARCH_TERMS_CORRUPT:
+    case YAN_SEARCH_TERMS_UNSUPPORTED:
+        return true;
+    case YAN_SEARCH_TERMS_OK:
+    case YAN_SEARCH_TERMS_INVALID:
+    case YAN_SEARCH_TERMS_BUSY:
+    case YAN_SEARCH_TERMS_STOPPED:
+    case YAN_SEARCH_TERMS_NOT_FOUND:
+    case YAN_SEARCH_TERMS_INDEX_LIMIT:
+        return false;
+    }
+    return true;
+}
+
+/* Prints "ERROR <suffix>\r\n". An unknown enumerator becomes ERROR PROTOCOL and
+ * is treated as fatal by the caller's verdict check. A false return only means
+ * the output sink refused a byte. */
+static bool emit_terms_error(YanShell *shell, YanSearchTermsResult result)
+{
+    const char *suffix = terms_error_suffix(result);
+    if (suffix == NULL) {
+        suffix = "PROTOCOL";
+    }
+    return shell_puts(shell, "ERROR ") && shell_puts(shell, suffix) &&
+           shell_puts(shell, "\r\n");
+}
+
+static YanShellResult finish_terms_error(YanShell *shell,
+                                         YanSearchTermsResult result)
+{
+    const char *suffix = terms_error_suffix(result);
+    bool known = suffix != NULL;
+    if (!emit_terms_error(shell, result)) {
+        return YAN_SHELL_FATAL;
+    }
+    if (!known) {
+        return YAN_SHELL_FATAL;
+    }
+    return terms_error_is_fatal(result) ? YAN_SHELL_FATAL : YAN_SHELL_OK;
+}
+
+static const char *terms_state_name(YanSearchTermsIndexState state)
+{
+    switch (state) {
+    case YAN_SEARCH_INDEX_EMPTY: return "EMPTY";
+    case YAN_SEARCH_INDEX_READY: return "READY";
+    case YAN_SEARCH_INDEX_STALE: return "STALE";
+    case YAN_SEARCH_INDEX_LIMIT: return "LIMIT";
+    case YAN_SEARCH_INDEX_UNCACHEABLE: return "UNCACHEABLE";
+    case YAN_SEARCH_INDEX_UNAVAILABLE: return "UNAVAILABLE";
+    }
+    return NULL;
+}
+
+static const char *terms_source_name(YanSearchTermsSourceState source)
+{
+    switch (source) {
+    case YAN_SEARCH_SOURCE_MOUNTED: return "MOUNTED";
+    case YAN_SEARCH_SOURCE_UNMOUNTED: return "UNMOUNTED";
+    case YAN_SEARCH_SOURCE_FAULTED: return "FAULTED";
+    case YAN_SEARCH_SOURCE_UNINITIALIZED: return "UNINITIALIZED";
+    }
+    return NULL;
+}
+
+static const char *terms_mode_name(YanSearchTermsMode mode)
+{
+    switch (mode) {
+    case YAN_SEARCH_MODE_INDEX: return "index";
+    case YAN_SEARCH_MODE_SCAN: return "scan";
+    }
+    return NULL;
+}
+
+static bool shell_put_uint64(YanShell *shell, uint64_t value)
+{
+    /* RV32's freestanding link has no 64-bit division helpers. Accumulate
+     * decimal digits one binary bit at a time using only uint32 arithmetic;
+     * 20 digits cover UINT64_MAX and constant shifts need no runtime helper. */
+    uint8_t digits[20] = {0};
+    for (uint32_t bit = 0u; bit < 64u; ++bit) {
+        uint32_t carry = (uint32_t)(value >> 63u);
+        value <<= 1u;
+        for (uint32_t i = 20u; i > 0u; --i) {
+            uint32_t digit = (uint32_t)digits[i - 1u] * 2u + carry;
+            carry = digit / 10u;
+            digits[i - 1u] = (uint8_t)(digit % 10u);
+        }
+    }
+    uint32_t start = 0u;
+    while (start < 19u && digits[start] == 0u) {
+        ++start;
+    }
+    for (uint32_t i = start; i < 20u; ++i) {
+        if (!shell_putc(shell, (uint8_t)('0' + digits[i]))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /* A read-only look at the borrowed filesystem's own state. It reads the public
@@ -877,6 +1015,310 @@ static YanShellResult run_grep(YanShell *shell, const uint8_t *line,
     return search_error_is_fatal(result) ? YAN_SHELL_FATAL : YAN_SHELL_OK;
 }
 
+/* -------------------------------------------------------------- search ---- */
+
+/* Callback state for one indexed search. Like GrepState it lives on the command
+ * frame and is reached through the sink context, so the match callback can
+ * report an output failure or an already-emitted reader diagnostic. */
+typedef struct {
+    YanShell *shell;
+    bool output_failed;
+    bool reader_reported;
+    YanSearchTermsResult reader_result;
+} SearchState;
+
+/* `search` grammar: the whole query after the command, optionally wrapped in
+ * one outer pair of double quotes whose interior bytes and spaces are literal.
+ * The bare form is the complete remainder (spaces included, since they separate
+ * query groups); it may not start with '-' and may not contain a double quote.
+ * A quoted query must be the last thing on the line. Every other form returns
+ * false so the caller prints USAGE before touching the facade. */
+static bool search_parse_query(const uint8_t *line, uint32_t length,
+                               uint32_t position, const uint8_t **query,
+                               uint32_t *query_length)
+{
+    position = skip_spaces(line, length, position);
+    if (position == length) {
+        return false;
+    }
+    if (line[position] == (uint8_t)'"') {
+        uint32_t start = position + 1u;
+        uint32_t end = start;
+        while (end < length && line[end] != (uint8_t)'"') {
+            ++end;
+        }
+        if (end == length || end == start) {
+            return false;
+        }
+        if (!rest_is_spaces(line, length, end + 1u)) {
+            return false;
+        }
+        *query = line + start;
+        *query_length = end - start;
+        return true;
+    }
+    if (line[position] == (uint8_t)'-') {
+        return false;
+    }
+    for (uint32_t i = position; i < length; ++i) {
+        if (line[i] == (uint8_t)'"') {
+            return false;
+        }
+    }
+    *query = line + position;
+    *query_length = length - position;
+    return true;
+}
+
+/* One matched row: FILE:LINE: then, on each truncated side, "...", and the raw
+ * snippet bytes through the same cat display stream as `cat` (safe UTF-8,
+ * escaped invalid bytes, no highlight). A reader failure flushes the pending
+ * UTF-8 prefix, closes the row and prints the source ERROR. An output refusal
+ * stops immediately with no further read or output. */
+static bool search_match(void *context, const YanSearchTermsMatch *match)
+{
+    SearchState *state = (SearchState *)context;
+    YanShell *shell = state->shell;
+    for (uint32_t i = 0u; match->name[i] != '\0'; ++i) {
+        if (!shell_putc(shell, (uint8_t)match->name[i])) {
+            state->output_failed = true;
+            return false;
+        }
+    }
+    if (!shell_putc(shell, (uint8_t)':') ||
+        !shell_put_decimal(shell, match->line_number) ||
+        !shell_putc(shell, (uint8_t)':')) {
+        state->output_failed = true;
+        return false;
+    }
+    if (match->left_truncated && !shell_puts(shell, "...")) {
+        state->output_failed = true;
+        return false;
+    }
+    Utf8Stream stream;
+    stream.pending_len = 0u;
+    stream.expected = 0u;
+    uint32_t offset = 0u;
+    while (offset < match->snippet_length) {
+        const uint8_t *bytes = NULL;
+        uint32_t got = 0u;
+        YanSearchTermsResult result = yan_search_terms_read_snippet(
+            shell->terms, offset, match->snippet_length - offset, &bytes, &got);
+        if (result != YAN_SEARCH_TERMS_OK) {
+            if (!cat_flush(shell, &stream) || !shell_puts(shell, "\r\n") ||
+                !emit_terms_error(shell, result)) {
+                state->output_failed = true;
+                return false;
+            }
+            state->reader_reported = true;
+            state->reader_result = result;
+            return false;
+        }
+        if (got == 0u || got > match->snippet_length - offset) {
+            if (!cat_flush(shell, &stream) || !shell_puts(shell, "\r\n") ||
+                !emit_terms_error(shell, YAN_SEARCH_TERMS_PROTOCOL)) {
+                state->output_failed = true;
+                return false;
+            }
+            state->reader_reported = true;
+            state->reader_result = YAN_SEARCH_TERMS_PROTOCOL;
+            return false;
+        }
+        for (uint32_t i = 0u; i < got; ++i) {
+            if (!cat_feed(shell, &stream, bytes[i])) {
+                state->output_failed = true;
+                return false;
+            }
+        }
+        offset += got;
+    }
+    if (!cat_flush(shell, &stream)) {
+        state->output_failed = true;
+        return false;
+    }
+    if (match->right_truncated && !shell_puts(shell, "...")) {
+        state->output_failed = true;
+        return false;
+    }
+    if (!shell_puts(shell, "\r\n")) {
+        state->output_failed = true;
+        return false;
+    }
+    return true;
+}
+
+/* `search QUERY`: parse the outer-quote grammar, run the injected term facade
+ * and format its ranked rows plus the exact summary. A facade INVALID answer is
+ * the CLI USAGE; a source error keeps the existing trust mapping. */
+static YanShellResult run_search(YanShell *shell, const uint8_t *line,
+                                 uint32_t length, uint32_t position)
+{
+    const uint8_t *query = NULL;
+    uint32_t query_length = 0u;
+    if (!search_parse_query(line, length, position, &query, &query_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    if (shell->terms == NULL) {
+        return emit_status(shell, "ERROR INVALID\r\n");
+    }
+    SearchState state;
+    state.shell = shell;
+    state.output_failed = false;
+    state.reader_reported = false;
+    state.reader_result = YAN_SEARCH_TERMS_OK;
+    YanSearchTermsSink sink;
+    sink.context = &state;
+    sink.match = search_match;
+    sink.chunk = NULL;
+    YanSearchTermsSummary summary;
+    summary.total = 0u;
+    summary.shown = 0u;
+    summary.skipped = 0u;
+    summary.mode = YAN_SEARCH_MODE_INDEX;
+    YanSearchTermsResult result =
+        yan_search_terms(shell->terms, query, query_length, sink, &summary);
+    if (state.output_failed) {
+        return YAN_SHELL_FATAL;
+    }
+    if (state.reader_reported) {
+        if (terms_error_suffix(state.reader_result) == NULL) {
+            return YAN_SHELL_FATAL;
+        }
+        return terms_error_is_fatal(state.reader_result) ? YAN_SHELL_FATAL
+                                                         : YAN_SHELL_OK;
+    }
+    if (result == YAN_SEARCH_TERMS_INVALID) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    if (result == YAN_SEARCH_TERMS_OK) {
+        const char *mode = terms_mode_name(summary.mode);
+        if (mode == NULL) {
+            (void)emit_status(shell, "ERROR PROTOCOL\r\n");
+            return YAN_SHELL_FATAL;
+        }
+        if (!shell_puts(shell, "OK search total=") ||
+            !shell_put_uint64(shell, summary.total) ||
+            !shell_puts(shell, " shown=") ||
+            !shell_put_decimal(shell, summary.shown) ||
+            !shell_puts(shell, " skipped=") ||
+            !shell_put_decimal(shell, summary.skipped) ||
+            !shell_puts(shell, " mode=") || !shell_puts(shell, mode) ||
+            !shell_puts(shell, "\r\n")) {
+            return YAN_SHELL_FATAL;
+        }
+        return YAN_SHELL_OK;
+    }
+    return finish_terms_error(shell, result);
+}
+
+/* `rebuild`: no argument, one full RAM rebuild. OK prints the receipt; a
+ * capacity limit is the ordinary ERROR INDEX_LIMIT; a source error keeps the
+ * existing mapping. */
+static YanShellResult run_rebuild(YanShell *shell)
+{
+    if (shell->terms == NULL) {
+        return emit_status(shell, "ERROR INVALID\r\n");
+    }
+    YanSearchTermsResult result = yan_search_terms_rebuild(shell->terms);
+    if (result != YAN_SEARCH_TERMS_OK) {
+        return finish_terms_error(shell, result);
+    }
+    return emit_ok(shell, "rebuild") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
+}
+
+/* `index status`: pure memory observation. The whole line is one INDEX record
+ * plus the OK receipt; an unknown enumerator is PROTOCOL, never a fake zero. */
+static YanShellResult run_index_status(YanShell *shell)
+{
+    if (shell->terms == NULL) {
+        return emit_status(shell, "ERROR INVALID\r\n");
+    }
+    YanSearchTermsStatus status;
+    status.state = YAN_SEARCH_INDEX_EMPTY;
+    status.source = YAN_SEARCH_SOURCE_UNINITIALIZED;
+    status.terms = 0u;
+    status.postings = 0u;
+    YanSearchTermsResult result =
+        yan_search_terms_status(shell->terms, &status);
+    if (result != YAN_SEARCH_TERMS_OK) {
+        return finish_terms_error(shell, result);
+    }
+    const char *state = terms_state_name(status.state);
+    const char *source = terms_source_name(status.source);
+    if (state == NULL || source == NULL) {
+        (void)emit_status(shell, "ERROR PROTOCOL\r\n");
+        return YAN_SHELL_FATAL;
+    }
+    if (!shell_puts(shell, "INDEX state=") || !shell_puts(shell, state) ||
+        !shell_puts(shell, " source=") || !shell_puts(shell, source) ||
+        !shell_puts(shell, " terms=") ||
+        !shell_put_decimal(shell, status.terms) ||
+        !shell_puts(shell, " postings=") ||
+        !shell_put_decimal(shell, status.postings) ||
+        !shell_puts(shell, "\r\n")) {
+        return YAN_SHELL_FATAL;
+    }
+    return emit_ok(shell, "index") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
+}
+
+/* `index clear`: drop the cache without touching the source. */
+static YanShellResult run_index_clear(YanShell *shell)
+{
+    if (shell->terms == NULL) {
+        return emit_status(shell, "ERROR INVALID\r\n");
+    }
+    YanSearchTermsResult result = yan_search_terms_clear(shell->terms);
+    if (result != YAN_SEARCH_TERMS_OK) {
+        return finish_terms_error(shell, result);
+    }
+    return emit_ok(shell, "index") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
+}
+
+typedef enum {
+    INDEX_CMD_NONE = 0,
+    INDEX_CMD_STATUS = 1,
+    INDEX_CMD_CLEAR = 2
+} IndexCommand;
+
+/* Recognizes exactly `index status` and `index clear` (surrounded only by
+ * spaces). Every other form, including a missing or extra subcommand, is NONE
+ * so the caller keeps the ordinary command/health priority. */
+static IndexCommand index_management_parse(const uint8_t *line, uint32_t length)
+{
+    uint32_t position = skip_spaces(line, length, 0u);
+    uint32_t start = position;
+    while (position < length && line[position] != (uint8_t)' ') {
+        ++position;
+    }
+    if (!token_is(line, start, position - start, "index")) {
+        return INDEX_CMD_NONE;
+    }
+    position = skip_spaces(line, length, position);
+    start = position;
+    while (position < length && line[position] != (uint8_t)' ') {
+        ++position;
+    }
+    uint32_t sub_length = position - start;
+    if (!rest_is_spaces(line, length, position)) {
+        return INDEX_CMD_NONE;
+    }
+    if (sub_length == 6u && token_is(line, start, sub_length, "status")) {
+        return INDEX_CMD_STATUS;
+    }
+    if (sub_length == 5u && token_is(line, start, sub_length, "clear")) {
+        return INDEX_CMD_CLEAR;
+    }
+    return INDEX_CMD_NONE;
+}
+
+static YanShellResult run_index_command(YanShell *shell, IndexCommand command)
+{
+    if (command == INDEX_CMD_STATUS) {
+        return run_index_status(shell);
+    }
+    return run_index_clear(shell);
+}
+
 static YanShellResult run_line(YanShell *shell, const uint8_t *line,
                                uint32_t length)
 {
@@ -963,6 +1405,24 @@ static YanShellResult run_line(YanShell *shell, const uint8_t *line,
     if (token_is(line, command_start, command_length, "grep")) {
         return run_grep(shell, line, length, position);
     }
+    if (token_is(line, command_start, command_length, "search")) {
+        return run_search(shell, line, length, position);
+    }
+    if (token_is(line, command_start, command_length, "rebuild")) {
+        if (!rest_is_spaces(line, length, position)) {
+            return emit_status(shell, "ERROR USAGE\r\n");
+        }
+        return run_rebuild(shell);
+    }
+    IndexCommand index_command = index_management_parse(line, length);
+    if (index_command != INDEX_CMD_NONE) {
+        return run_index_command(shell, index_command);
+    }
+    if (token_is(line, command_start, command_length, "index")) {
+        /* A valid form is routed before the health guard; any `index` that
+         * reaches here has a bad subcommand or trailing token. */
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
     if (token_is(line, command_start, command_length, "exit")) {
         if (!rest_is_spaces(line, length, position)) {
             return emit_status(shell, "ERROR USAGE\r\n");
@@ -990,6 +1450,15 @@ static YanShellResult execute_busy(YanShell *shell, const uint8_t *line,
             return emit_status(shell, "ERROR INVALID_INPUT\r\n");
         }
     }
+    /* 0026: an exact valid `index status`/`index clear` is a pure memory
+     * operation that is legal on an unmounted, faulted or uninitialized source,
+     * so it is routed before the filesystem health guard. Every other line,
+     * including an invalid management grammar and an empty or exit line, keeps
+     * the original health priority below. */
+    IndexCommand management = index_management_parse(line, length);
+    if (management != INDEX_CMD_NONE) {
+        return run_index_command(shell, management);
+    }
     YanFsResult health = shell_fs_health(shell);
     if (health != YAN_FS_OK) {
         return finish_fs_error(shell, health);
@@ -1011,15 +1480,16 @@ static bool shell_span_valid(uintptr_t base, uint64_t size)
 }
 
 YanShellResult yan_shell_init(YanShell *shell, YanFs *fs, YanSearch *search,
-                              YanShellOutput output)
+                              YanSearchTerms *terms, YanShellOutput output)
 {
     if (shell == NULL) {
         return YAN_SHELL_INVALID;
     }
     uintptr_t shell_base = (uintptr_t)(const void *)shell;
-    /* Pure address arithmetic for the three pointers this call holds, before
+    /* Pure address arithmetic for the four pointers this call holds, before
      * the first bool field of any context is read: a shell placed inside the
-     * filesystem or the Search is rejected without an undefined load. */
+     * filesystem, the literal Search or the term facade is rejected without an
+     * undefined load. */
     if (fs != NULL &&
         ranges_overlap(shell_base, (uint64_t)sizeof(YanShell),
                        (uintptr_t)(const void *)fs, (uint64_t)sizeof(YanFs))) {
@@ -1031,13 +1501,32 @@ YanShellResult yan_shell_init(YanShell *shell, YanFs *fs, YanSearch *search,
                        (uint64_t)sizeof(YanSearch))) {
         return YAN_SHELL_INVALID;
     }
+    if (terms != NULL &&
+        ranges_overlap(shell_base, (uint64_t)sizeof(YanShell),
+                       (uintptr_t)(const void *)terms,
+                       (uint64_t)sizeof(YanSearchTerms))) {
+        return YAN_SHELL_INVALID;
+    }
     if (fs != NULL && search != NULL &&
         ranges_overlap((uintptr_t)(const void *)fs, (uint64_t)sizeof(YanFs),
                        (uintptr_t)(const void *)search,
                        (uint64_t)sizeof(YanSearch))) {
         return YAN_SHELL_INVALID;
     }
-    if (fs == NULL || search == NULL) {
+    if (fs != NULL && terms != NULL &&
+        ranges_overlap((uintptr_t)(const void *)fs, (uint64_t)sizeof(YanFs),
+                       (uintptr_t)(const void *)terms,
+                       (uint64_t)sizeof(YanSearchTerms))) {
+        return YAN_SHELL_INVALID;
+    }
+    if (search != NULL && terms != NULL &&
+        ranges_overlap((uintptr_t)(const void *)search,
+                       (uint64_t)sizeof(YanSearch),
+                       (uintptr_t)(const void *)terms,
+                       (uint64_t)sizeof(YanSearchTerms))) {
+        return YAN_SHELL_INVALID;
+    }
+    if (fs == NULL || search == NULL || terms == NULL) {
         /* Nothing to compare addresses against; the original BUSY priority for
          * an active instance is preserved. */
         if (shell->initialized && shell->busy) {
@@ -1045,42 +1534,78 @@ YanShellResult yan_shell_init(YanShell *shell, YanFs *fs, YanSearch *search,
         }
         return YAN_SHELL_INVALID;
     }
-    if (!search->initialized) {
+    if (!search->initialized || !terms->initialized) {
         if (shell->initialized && shell->busy) {
             return YAN_SHELL_BUSY;
         }
         return YAN_SHELL_INVALID;
     }
-    /* The Search is initialized, so its backend record is valid. Its two
-     * protected spans must be well formed and disjoint from the Shell, the
-     * filesystem and the Search itself. */
-    uintptr_t context_base =
+    /* Both facades are initialized, so their backend records are valid. Each
+     * carries a context span and a source span; all four must be well formed. */
+    uintptr_t literal_context =
         (uintptr_t)(const void *)search->backend.context;
-    uint64_t context_size = (uint64_t)search->backend.context_size;
-    uintptr_t source_base =
+    uint64_t literal_context_size = (uint64_t)search->backend.context_size;
+    uintptr_t literal_source =
         (uintptr_t)(const void *)search->backend.source_context;
-    uint64_t source_size = (uint64_t)search->backend.source_size;
-    if (!shell_span_valid(context_base, context_size) ||
-        !shell_span_valid(source_base, source_size)) {
+    uint64_t literal_source_size = (uint64_t)search->backend.source_size;
+    uintptr_t term_context = (uintptr_t)(const void *)terms->backend.context;
+    uint64_t term_context_size = (uint64_t)terms->backend.context_size;
+    uintptr_t term_source =
+        (uintptr_t)(const void *)terms->backend.source_context;
+    uint64_t term_source_size = (uint64_t)terms->backend.source_size;
+    if (!shell_span_valid(literal_context, literal_context_size) ||
+        !shell_span_valid(literal_source, literal_source_size) ||
+        !shell_span_valid(term_context, term_context_size) ||
+        !shell_span_valid(term_source, term_source_size)) {
         return YAN_SHELL_INVALID;
     }
     uintptr_t fs_base = (uintptr_t)(const void *)fs;
     uintptr_t search_base = (uintptr_t)(const void *)search;
-    /* The source span may legitimately be the borrowed filesystem itself (that
-     * is exactly what the linear backend declares), so it is not compared with
-     * fs. It must still stay off the Shell, the Search and the backend
-     * context. */
-    if (ranges_overlap(shell_base, (uint64_t)sizeof(YanShell), context_base,
-                       context_size) ||
-        ranges_overlap(shell_base, (uint64_t)sizeof(YanShell), source_base,
-                       source_size) ||
-        ranges_overlap(fs_base, (uint64_t)sizeof(YanFs), context_base,
-                       context_size) ||
-        ranges_overlap(search_base, (uint64_t)sizeof(YanSearch), context_base,
-                       context_size) ||
-        ranges_overlap(search_base, (uint64_t)sizeof(YanSearch), source_base,
-                       source_size) ||
-        ranges_overlap(context_base, context_size, source_base, source_size)) {
+    uintptr_t terms_base = (uintptr_t)(const void *)terms;
+    /* The Shell, filesystem, the two facades and the two backend contexts are
+     * all writable objects and must be pairwise disjoint. A source span may
+     * legitimately be the borrowed filesystem itself (that is exactly what the
+     * linear and index backends declare), and the two sources may overlap each
+     * other read-only, so fs-vs-source and source-vs-source are deliberately
+     * not compared. A source must still stay off every foreign object. */
+    if (ranges_overlap(shell_base, (uint64_t)sizeof(YanShell),
+                       literal_context, literal_context_size) ||
+        ranges_overlap(shell_base, (uint64_t)sizeof(YanShell), term_context,
+                       term_context_size) ||
+        ranges_overlap(shell_base, (uint64_t)sizeof(YanShell), literal_source,
+                       literal_source_size) ||
+        ranges_overlap(shell_base, (uint64_t)sizeof(YanShell), term_source,
+                       term_source_size) ||
+        ranges_overlap(fs_base, (uint64_t)sizeof(YanFs), literal_context,
+                       literal_context_size) ||
+        ranges_overlap(fs_base, (uint64_t)sizeof(YanFs), term_context,
+                       term_context_size) ||
+        ranges_overlap(search_base, (uint64_t)sizeof(YanSearch),
+                       literal_context, literal_context_size) ||
+        ranges_overlap(search_base, (uint64_t)sizeof(YanSearch), term_context,
+                       term_context_size) ||
+        ranges_overlap(search_base, (uint64_t)sizeof(YanSearch),
+                       literal_source, literal_source_size) ||
+        ranges_overlap(search_base, (uint64_t)sizeof(YanSearch), term_source,
+                       term_source_size) ||
+        ranges_overlap(terms_base, (uint64_t)sizeof(YanSearchTerms),
+                       literal_context, literal_context_size) ||
+        ranges_overlap(terms_base, (uint64_t)sizeof(YanSearchTerms),
+                       term_context, term_context_size) ||
+        ranges_overlap(terms_base, (uint64_t)sizeof(YanSearchTerms),
+                       literal_source, literal_source_size) ||
+        ranges_overlap(terms_base, (uint64_t)sizeof(YanSearchTerms),
+                       term_source, term_source_size) ||
+        ranges_overlap(literal_context, literal_context_size, term_context,
+                       term_context_size) ||
+        ranges_overlap(literal_context, literal_context_size, literal_source,
+                       literal_source_size) ||
+        ranges_overlap(literal_context, literal_context_size, term_source,
+                       term_source_size) ||
+        ranges_overlap(literal_source, literal_source_size, term_context,
+                       term_context_size) ||
+        ranges_overlap(term_context, term_context_size, term_source,
+                       term_source_size)) {
         return YAN_SHELL_INVALID;
     }
     if (shell->initialized && shell->busy) {
@@ -1091,6 +1616,7 @@ YanShellResult yan_shell_init(YanShell *shell, YanFs *fs, YanSearch *search,
     }
     shell->fs = fs;
     shell->search = search;
+    shell->terms = terms;
     shell->output = output;
     shell->initialized = true;
     shell->busy = false;
@@ -1129,8 +1655,8 @@ YanShellResult yan_shell_execute(YanShell *shell, const uint8_t *line,
                            (uint64_t)sizeof(YanFs), begin, (uint64_t)length)) {
             return YAN_SHELL_INVALID;
         }
-        /* The injected Search and its two protected spans are borrowed too, so
-         * the command line may not alias them either. */
+        /* The injected literal Search and its two protected spans are borrowed
+         * too, so the command line may not alias them either. */
         if (shell->search != NULL &&
             (ranges_overlap((uintptr_t)(const void *)shell->search,
                             (uint64_t)sizeof(YanSearch), begin,
@@ -1142,6 +1668,22 @@ YanShellResult yan_shell_execute(YanShell *shell, const uint8_t *line,
              ranges_overlap(
                  (uintptr_t)(const void *)shell->search->backend.source_context,
                  (uint64_t)shell->search->backend.source_size, begin,
+                 (uint64_t)length))) {
+            return YAN_SHELL_INVALID;
+        }
+        /* The term facade and its two spans are borrowed for the whole call as
+         * well. */
+        if (shell->terms != NULL &&
+            (ranges_overlap((uintptr_t)(const void *)shell->terms,
+                            (uint64_t)sizeof(YanSearchTerms), begin,
+                            (uint64_t)length) ||
+             ranges_overlap(
+                 (uintptr_t)(const void *)shell->terms->backend.context,
+                 (uint64_t)shell->terms->backend.context_size, begin,
+                 (uint64_t)length) ||
+             ranges_overlap(
+                 (uintptr_t)(const void *)shell->terms->backend.source_context,
+                 (uint64_t)shell->terms->backend.source_size, begin,
                  (uint64_t)length))) {
             return YAN_SHELL_INVALID;
         }

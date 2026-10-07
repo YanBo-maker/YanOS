@@ -8,7 +8,9 @@
  * docs/specs/0021-yanfs.md; this header repeats the constants, enums,
  * structures and entry points fixed by its "接口" section. 0024 extends the
  * public surface with yan_fs_rename and yan_fs_copy and adds no enum value and
- * no context field, so the rest of the header is unchanged by that stage.
+ * no context field. 0026 adds the in-memory source identity (the source_token
+ * and source_cacheable fields of YanFs, observed through YanFsSource and
+ * yan_fs_source); it adds no enum value and no on-disk field.
  *
  * The core owns the on-disk format and the metadata cache. It reaches a block
  * device only through YanFsBlockIo, whose callbacks are synchronous: they may
@@ -57,8 +59,21 @@ typedef struct {
 
 typedef struct { char name[32]; uint32_t size_bytes; } YanFsInfo;
 
+/* 0026 source identity observation. token names the in-memory source that a
+ * cached term index was built against; cacheable says whether the global
+ * allocator could hand out an identity at all. This is a read-only view of the
+ * two context fields below: the on-disk format has no place for them and no
+ * entry point ever writes them to a device. */
+typedef struct {
+    YanFsState state;
+    uint64_t token;
+    bool cacheable;
+} YanFsSource;
+
 /* Memory context only. Its fields must not be written to disk as they are and
- * must not be edited by a caller to bypass the API. */
+ * must not be edited by a caller to bypass the API. source_token and
+ * source_cacheable are the in-memory source identity; they are not part of the
+ * on-disk format and are never stored in a block. */
 typedef struct {
     YanFsBlockIo io;
     bool initialized;
@@ -67,6 +82,8 @@ typedef struct {
     uint32_t capacity_blocks;
     uint8_t metadata[4096];
     uint8_t scratch[4096];
+    uint64_t source_token;
+    bool source_cacheable;
 } YanFs;
 
 YanFsResult yan_fs_init(YanFs *, YanFsBlockIo);
@@ -92,6 +109,15 @@ YanFsResult yan_fs_remove(YanFs *, const char *name);
 YanFsResult yan_fs_rename(YanFs *, const char *old_name, const char *new_name);
 YanFsResult yan_fs_copy(YanFs *, const char *source_name,
                        const char *destination_name);
+
+/* 0026 pure observation: report the instance's current state and in-memory
+ * source identity without reading the medium, allocating a token, changing the
+ * metadata cache or reviving a faulted or unmounted source. The check order is
+ * context + initialized, then BUSY, then the output holder's range, overflow
+ * and context-alias check; an error writes nothing through out. A valid
+ * UNMOUNTED, MOUNTED or FAULTED context all return YAN_FS_OK and report the
+ * real state. */
+YanFsResult yan_fs_source(const YanFs *fs, YanFsSource *out);
 
 /* Pure encoding helpers: no I/O and no instance state. yan_fs_format_metadata
  * builds a canonical empty directory for a device of capacity_blocks and

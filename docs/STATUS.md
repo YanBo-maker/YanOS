@@ -3,13 +3,31 @@
 当前推进：词项搜索与可重建索引，[0026](specs/0026-term-search-index.md)于2026-10-07 10:10 +08:00经项目所有者整体批准并锁定。
 
 - 规格批准：search词项组、同一行AND、倒排位置索引、top20排序与摘要、rebuild/status/clear、source身份与完整scan回退按整体交付；grep旧literal保持。
-- 实现：按计划分批推进，任务分支 `codex/knowledge-index`；尚无本能力实现完成记录。
-- 验证：待执行，容量/布局/栈与新增注册按实施后现测；0025的55/66与旧通过记录不作为新能力通过证据。
+- 实现：term facade、流式参考backend、RAM索引、排序摘要和shell管理已完成，任务分支 `codex/knowledge-index`；grep字面基线保持。
+- 验证：本机Release67/67（37.91 s）、ASan/UBSan67/67（75.33 s）、Windows MSVC41/41（20.19 s）；统一十二组实际变异12/12（203.40 s），均0失败、0SKIP。Linux现注册默认67/开变异79；独立实现审查已完成，无阻塞发现；远端CI待执行。
 - 用户审查：整体方案已批准，实现交付待审查，学习与理解程度由项目所有者判断。
 
 ### 0026 锁定后查询组数补齐
 
 2026-10-07，原文“最多16组；仅折叠ASCII大小写后按组内容去重”未明确上限在去重前还是之后计算。实际冲突例是17次CPU/cpu：先计数会拒绝，去重后计数则为一组。项目所有者明确批准“按去重后的不同组计数（推荐）”；总审核据此将0026改为canonical去重后的不同组最多16，17次重复合法且不重复加分，17不同组INVALID/CLI USAGE、零I/O，并补VERIFY边界。此为首次规格提交前的授权语义补齐，实现和执行验证尚待完成，旧通过记录不作此条证据。
+
+### 0026 锁定后不可缓存重建补齐
+
+2026-10-07：原0026只规定身份耗尽后UNCACHEABLE、search完整扫描，以及容量超限的rebuild错误，没有明确健康源身份耗尽时显式rebuild的结果。独立REVIEW03提出F8；`index_build_locked` 的 `!before.cacheable` 分支返回OK且不读盘，暴露这一遗漏。项目所有者明确批准“返回 OK rebuild，index status 显示 UNCACHEABLE（推荐）”。总审核将条款补为健康MOUNTED且身份耗尽时OK rebuild、零磁盘I/O、不发布READY/LIMIT、保持UNCACHEABLE和零计数；Root已补真实耗尽永久断言，尚待构建执行。整体实现与验证仍进行中，不将该批准当通过证据。
+
+### 0026 本机验收（2026-10-07）
+
+本轮默认与变异结果分别来自 `build/search-index-final-default-fixed.log`、`search-index-asan-final-default.log`、`search-index-windows-final-default-fixed.log` 和 `search-index-final-mutations.log`。默认与实际变异分开执行，不把分项耗时拼成统一结果。原生FS116、来源耗尽3、term58、index36、index耗尽1、shell term31用例均通过；独立Python Unicode/regex oracle在scan、index、index-repeat三条路径各320例，对照完整结果、分数、摘要、截断与无写盘。
+
+真实生产Guest健康8项、故障17项通过，包含容量LIMIT后的scan故障protocol7–10；故障发生后不再请求块设备或报告成功。RV32 facade探针61个唯一检查码通过，需同时有SEARCH_TERMS_API_PASS和实际tohost1；它使用fake backend，覆盖32位地址跨度、别名、生命周期与sticky错误，不代替实际文件匹配。证据 `search-index-api-repair-verify.log` 与 `search-index-fallback-fault-detail.log`。
+
+新term20个实际缺陷均命中指定suite/owner/具体断言，no-effect、wrong-owner、同owner wrong-assertion真实控制及多suite harness优先控制通过。十二组统一变异0存活、0harness。首轮门禁的缺传递源/TypeError及editor基线缺头是harness失败，修后重跑；首轮Linux默认API unused helper严格编译失败，Windows门禁默认GBK读UTF-8失败，均保留记录，不能计检出或通过。Windows改显式UTF8-sig读取后完整复验，hard repo1/外部依赖77规则不变。
+
+索引对象sizeof Host1564040、RV321564024字节，总静态预算在2MiB内。RV32单帧最大FS528、index查询512/build480、shell192字节；实物生产ELF text62960/data40/bss1654608。fresh ext4 BUILD_TESTING=OFF、TOOLS=ON构建无Unity及Clock skew警告，生产ELF实际8健康项通过。特定健康场景观测已分配task0栈使用1808字节、8次块响应；这是路径观测，不是完整嵌套、trap或所有错误路径的峰值证明。
+
+索引仅RAM、重启EMPTY；身份变化使READY/LIMIT失效，标识耗尽永久UNCACHEABLE并scan。整次查询要求调用方保持FS不变，不新增强制锁或跨进程快照；绕过FS直接改镜像不在身份契约内。无持久索引、词典分词、Unicode规范化、短语或模糊检索。 RV32 API验收使用宿主nm读取符号，当前环境已实际通过；存在但不支持该ELF的nm导致HARNESS2，不伪报SKIP。独立最终审查确认交叉alias和指定suite门禁修复已闭合，无阻塞发现；故障脚本说明已同步LIMIT回退及包含挂载的完整响应计数。
+
+上面两条锁定后补齐段保留当时“尚待执行”的历史记录；现已由17重复/17不同组、真实耗尽rebuildOK/零I/O/UNCACHEABLE零计数永久测试验证取代，批准依据和旧原文不删。阅读 [0026](specs/0026-term-search-index.md)、[term接口](../os/search_terms.h)、[index](../os/search_terms_index.c)、[独立oracle](../tests/search_terms_reference.py)。整体规格获批，用户实现审查与合入批准仍待，理解程度由项目所有者判断。
 
 ### 已交付字面检索基线
 
@@ -297,7 +315,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-按0026分批实现来源标识、流式term参考backend、索引/排名/摘要与shell管理，依次验证语义及真实Guest。0025字面检索基线保持；新能力实现交付与学习理解分别审阅。
+完成提交前检查，再通过PR核远端CI并请维护者审查0026实现与合入；供阅读实际search结果、索引状态与故障边界。学习理解由项目所有者判断，下一能力另行对齐。
 
 ### 历史推进记录（M1a / M2a）
 

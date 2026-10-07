@@ -71,6 +71,8 @@ PRODUCTION_SOURCES = [
     "os/task.c", "os/console.c", "os/line.c", "os/terminal.c",
     "os/shell.c", "os/editor.c", "os/search.c", "os/search_linear.c",
     "os/block.c", "os/yanfs.c", "os/yanfs_block.c", "os/memory.c",
+    "os/search_terms.c", "os/search_terms_core.c", "os/search_terms_linear.c",
+    "os/search_terms_index.c", "os/search_text.c",
 ]
 # Every repository header the built sources include, so a missing one is a hard
 # failure (1), not a silent build error.
@@ -85,6 +87,8 @@ GUEST_HEADERS = [
     "os/platform.h", "os/search.h", "os/search_linear.h", "os/shell.h",
     "os/task.h", "os/terminal.h", "os/yanfs.h",
     "os/yanfs_block.h", "os/editor.h",
+    "os/memory.h", "os/search_terms.h", "os/search_terms_core.h",
+    "os/search_terms_linear.h", "os/search_terms_index.h", "os/search_text.h",
 ]
 SANITIZER_FLAGS = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all",
                    "-fno-omit-frame-pointer"]

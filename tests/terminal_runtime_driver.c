@@ -174,6 +174,7 @@ typedef struct {
     size_t line2_start;
     bool io_error;
     uint32_t isr_count;
+    uint32_t task0_observed_stack_bytes;
     uint32_t tohost_value;
     bool tohost_seen;
 } Drive;
@@ -873,6 +874,18 @@ int main(int argc, char **argv)
         }
 
         const YanStatus step_status = yan_machine_step(&machine);
+        if (mode == MODE_PRODUCTION && drive.tasks_known) {
+            /* Observation of task 0's allocated stack, including trap frames.
+             * This sampled depth is evidence for this execution, not a proof
+             * of every possible call path or of out-of-range stack accesses. */
+            const uint32_t bottom = drive.tasks_addr + 80u;
+            const uint32_t top = bottom + 4096u;
+            const uint32_t sp = machine.cpu.regs[2];
+            if (sp >= bottom && sp <= top &&
+                top - sp > drive.task0_observed_stack_bytes) {
+                drive.task0_observed_stack_bytes = top - sp;
+            }
+        }
         /* YAN_TRAP means the CPU entered the Guest trap vector, including
          * ordinary UART/transport interrupts. The Guest handles that step. */
         if (step_status != YAN_OK && step_status != YAN_TRAP) {
@@ -1014,6 +1027,9 @@ int main(int argc, char **argv)
 
 done:
     if (status_file != NULL) {
+        (void)fprintf(status_file, "task0_observed_stack_bytes=%" PRIu32
+                      "\nblock_responses=%" PRIu64 "\n",
+                      drive.task0_observed_stack_bytes, drive.block.served);
         (void)fprintf(status_file, "verdict=%s\ntohost=0x%08" PRIx32
                       "\ndelivered=%" PRIu32 "\nout_length=%zu\nisr_count=%"
                       PRIu32 "\npredicate_entries=%" PRIu32 "\nchecks=%" PRIu32
