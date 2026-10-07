@@ -22,6 +22,8 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [词项搜索与可重建索引](docs/specs/0026-term-search-index.md)已实现并完成本机验证：search按词项组做同一行AND查询，返回评分最高的20行及上下文摘要；RAM倒排索引随文件变更失效，超出容量时完整扫描。原始笔记保持为事实来源，grep语义不变；功能提交77f03fd已通过 [PR #22](https://github.com/YanBo-maker/YanOS/pull/22) 的三项CI，项目所有者于2026-10-07明确批准，经PR #22合入main（c84b2e7）；学习理解由项目所有者判断。
 
+[笔记元数据与标签筛选](docs/specs/0027-note-metadata.md)整体方案已批准，尚待实现与验证：计划用版本化文件头管理title/tags/日期/links，提供meta命令及search标签AND筛选，不改变YanFS磁盘格式或既有无tag查询。
+
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
 ## 构建与测试
@@ -141,7 +143,7 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 
 ## 开发
 
-参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)、[控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)、[块请求协议规格](docs/specs/0018-block-protocol.md)、[协作式运行时规格](docs/specs/0019-cooperative-runtime.md)、[持久化块镜像规格](docs/specs/0020-persistent-block-image.md)、[YanFS 规格](docs/specs/0021-yanfs.md) 、[终端文件操作规格](docs/specs/0022-terminal-file-operations.md) 、[多行文本编辑规格](docs/specs/0023-multiline-text-editor.md) 、[重命名与复制规格](docs/specs/0024-file-rename-copy.md) 、[知识检索规格](docs/specs/0025-knowledge-search.md) 和 [词项搜索与索引规格](docs/specs/0026-term-search-index.md)。
+参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)、[控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)、[块请求协议规格](docs/specs/0018-block-protocol.md)、[协作式运行时规格](docs/specs/0019-cooperative-runtime.md)、[持久化块镜像规格](docs/specs/0020-persistent-block-image.md)、[YanFS 规格](docs/specs/0021-yanfs.md) 、[终端文件操作规格](docs/specs/0022-terminal-file-operations.md) 、[多行文本编辑规格](docs/specs/0023-multiline-text-editor.md) 、[重命名与复制规格](docs/specs/0024-file-rename-copy.md) 、[知识检索规格](docs/specs/0025-knowledge-search.md) 、[词项搜索与索引规格](docs/specs/0026-term-search-index.md) 和 [笔记元数据规格](docs/specs/0027-note-metadata.md)。
 
 ## 许可证
 
