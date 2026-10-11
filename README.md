@@ -22,7 +22,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [词项搜索与可重建索引](docs/specs/0026-term-search-index.md)已实现并完成本机验证：search按词项组做同一行AND查询，返回评分最高的20行及上下文摘要；RAM倒排索引随文件变更失效，超出容量时完整扫描。原始笔记保持为事实来源，grep语义不变；功能提交77f03fd已通过 [PR #22](https://github.com/YanBo-maker/YanOS/pull/22) 的三项CI，项目所有者于2026-10-07明确批准，经PR #22合入main（c84b2e7）；学习理解由项目所有者判断。
 
-[笔记元数据与标签筛选](docs/specs/0027-note-metadata.md)整体方案已批准，尚待实现与验证：计划用版本化文件头管理title/tags/日期/links，提供meta命令及search标签AND筛选，不改变YanFS磁盘格式或既有无tag查询。
+[笔记元数据与标签筛选](docs/specs/0027-note-metadata.md)已实现并完成本机验证：同文件版本化头声明title、tag、日期与文件链接，meta提供观察、单文件更新和列表，search先按标签AND筛选再排名。不改变YanFS磁盘格式或既有无tag查询；远端CI待执行，实现交付与合入待维护者审查。
 
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
@@ -102,9 +102,22 @@ index clear
 
 ASCII词按完整词匹配、忽略ASCII大小写，interrupt不会命中interruption；中文组内字符必须相邻，“中断”可命中“处理中断”，不能命中“中 foo 断”。空格分隔的组在同一行做AND，去重后最多16组。结果按分数、目录槽、行号排序，显示最多160字符的安全摘要及总匹配数；零匹配也成功。索引只在RAM，重启为EMPTY；clear只丢弃索引，容量不足回退scan，均不修改笔记。接口见 [term facade](os/search_terms.h) 与 [索引backend](os/search_terms_index.h)。
 
+保存并退出编辑态后，可为笔记声明元数据：
+
+```text
+meta set note.txt title 中断笔记
+meta tag note.txt add os
+meta link note.txt add irq.txt
+meta show note.txt
+meta list tag:os
+search tag:os 中断
+```
+
+日期由用户声明，不自动更新时间；不存在的链接显示DANGLING。meta更新只处理已有合法文本文件，整文件含头最多16384字节；show/list及标签搜索不受此大小限制。相同值、重复add或不存在的del成功而不写盘。实际更新保留正文原字节；元数据头仍属于原始文件，编辑器可改坏它，观察与标签搜索明确报告METADATA。无tag查询继续检索原字节和物理行号。接口见 [纯格式](os/note_metadata_format.h) 与 [元数据服务](os/note_metadata.h)。
+
 生产入口见 [应用](apps/yanfs_terminal/main.c)，公共接口见 [shell](os/shell.h)、[读行器](os/line.h) 和 [UART 终端](os/terminal.h)。应用依赖 `os/`，不依赖 `tests/`。
 
-变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 可注册十二组：`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
+变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 可注册十三组：`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `note_metadata_mutation_gate`、`search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
 
 `yan_run` 的默认执行路径由 `guest_golden` 用基准工件逐字节守住：改动默认行为会让它失败，先读差异再决定是否有意为之。生成与重生成见 [`tests/guest/golden/README.md`](tests/guest/golden/README.md)。
 

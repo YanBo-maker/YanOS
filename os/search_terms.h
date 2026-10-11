@@ -1,6 +1,8 @@
 #ifndef YAN_OS_SEARCH_TERMS_H
 #define YAN_OS_SEARCH_TERMS_H
 
+#include "note_metadata_format.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -54,7 +56,10 @@
 /* Term outcome. It reuses the literal enum's numeric classes so a front end
  * keeps one ERROR/fatal mapping, but it is a separate type and the literal enum
  * is untouched. INDEX_LIMIT is an ordinary management error: the index did not
- * fit and a query falls back to a scan; it is not a fatal source failure. */
+ * fit and a query falls back to a scan; it is not a fatal source failure.
+ * METADATA is the 0027 addition: an ordinary content error for a recognised
+ * header that is broken, appended after INDEX_LIMIT so every existing value
+ * keeps its number. */
 typedef enum {
     YAN_SEARCH_TERMS_OK = 0,
     YAN_SEARCH_TERMS_INVALID = 1,
@@ -67,7 +72,8 @@ typedef enum {
     YAN_SEARCH_TERMS_CORRUPT = 8,
     YAN_SEARCH_TERMS_UNSUPPORTED = 9,
     YAN_SEARCH_TERMS_NOT_FOUND = 10,
-    YAN_SEARCH_TERMS_INDEX_LIMIT = 11
+    YAN_SEARCH_TERMS_INDEX_LIMIT = 11,
+    YAN_SEARCH_TERMS_METADATA = 12
 } YanSearchTermsResult;
 
 /* Which execution path produced a successful summary. */
@@ -155,6 +161,18 @@ typedef YanSearchTermsResult (*YanSearchTermsQueryFn)(
     YanSearchTermsMatchFn match, void *match_context,
     YanSearchTermsSummary *summary);
 
+/* 0027 filtered query: the same contract as the plain query, plus an immutable
+ * borrowed tag selection. The facade validates the filter's span, its count and
+ * its per-tag values before this runs, and rejects an overlap with the facade,
+ * either protected span, the query or the summary holder. A NULL `filter` means
+ * "no filtering" and must behave exactly like the plain query. Duplicate tags
+ * are accepted by the facade and de-duplicated by the backend, so a count of at
+ * most YAN_NOTE_TAG_MAX_COUNT is a storage bound, not a uniqueness rule. */
+typedef YanSearchTermsResult (*YanSearchTermsFilteredQueryFn)(
+    void *context, const uint8_t *query, uint32_t query_length,
+    const YanNoteTagFilter *filter, YanSearchTermsMatchFn match,
+    void *match_context, YanSearchTermsSummary *summary);
+
 /* Reads up to capacity bytes of the current snippet from relative offset. On
  * success borrows *bytes for the callback and reports the chunk length. */
 typedef YanSearchTermsResult (*YanSearchTermsReadFn)(
@@ -175,7 +193,10 @@ typedef YanSearchTermsResult (*YanSearchTermsManageFn)(void *context);
  *
  * query and read_match are required. status, rebuild and clear are optional; a
  * NULL management entry is reported as YAN_SEARCH_TERMS_UNSUPPORTED rather than
- * silently succeeding. */
+ * silently succeeding. query_filtered is the 0027 optional seam, appended last
+ * so every existing field keeps its offset: an unfiltered query never consults
+ * it, and a filtered query against a backend that leaves it NULL is reported as
+ * YAN_SEARCH_TERMS_UNSUPPORTED. */
 typedef struct {
     void *context;
     size_t context_size;
@@ -186,6 +207,7 @@ typedef struct {
     YanSearchTermsStatusFn status;
     YanSearchTermsManageFn rebuild;
     YanSearchTermsManageFn clear;
+    YanSearchTermsFilteredQueryFn query_filtered;
 } YanSearchTermsBackend;
 
 /* Memory context only; the fields are private to os/search_terms.c. A caller
@@ -226,6 +248,26 @@ YanSearchTermsResult yan_search_terms(YanSearchTerms *, const uint8_t *query,
                                       uint32_t query_length,
                                       YanSearchTermsSink sink,
                                       YanSearchTermsSummary *summary);
+
+/* Runs one whole term query with an optional tag selection. The old
+ * yan_search_terms entry point is unchanged and still the only path for an
+ * unfiltered query; this entry point adds the 0027 filter dimension.
+ *
+ * `filter` is borrowed and read-only for this call; the facade never writes it
+ * and never copies it. A NULL filter and a filter with count 0 both delegate to
+ * the plain query, so an untagged call behaves exactly as before. A non-NULL
+ * filter with a count above YAN_NOTE_TAG_MAX_COUNT, a non-empty tag that fails
+ * the pure tag rule, a filter span that leaves uintptr_t, or an overlap with
+ * the facade, either protected span, the query or the summary holder is
+ * INVALID. Identical tags are accepted here; the backend de-duplicates them.
+ *
+ * When the backend has no query_filtered entry point the call reports
+ * YAN_SEARCH_TERMS_UNSUPPORTED. Otherwise the result, sticky reader error,
+ * STOPPED and summary rules are exactly the plain-query rules. */
+YanSearchTermsResult yan_search_terms_filtered(
+    YanSearchTerms *terms, const uint8_t *query, uint32_t query_length,
+    const YanNoteTagFilter *filter, YanSearchTermsSink sink,
+    YanSearchTermsSummary *summary);
 
 /* Reads the current snippet. Legal only from inside the synchronous match
  * callback; outside it is INVALID with no I/O. A nested call while the facade

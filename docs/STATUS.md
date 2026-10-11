@@ -3,9 +3,40 @@
 当前推进：[0027笔记元数据与标签筛选](specs/0027-note-metadata.md)，于2026-10-07 17:56 +08:00经项目所有者整体批准并锁定。
 
 - 规格：版本化同文件头、meta观察/单文件更新/列表、统一term API标签AND筛选；旧格式与无tag查询保持。
-- 实现：计划按parser、service、filtered backend、shell/Guest和门禁分批推进，尚未实现。
-- 验证：未执行，新增注册/内存预算及计数待真实测量；下列0026通过属于历史基线。
+- 实现：纯格式、元数据服务、统一term API标签筛选、shell命令与生产Guest接入已完成，独立实现审查已完成。
+- 验证：本机Release81/81（54.70 s）、ASan/UBSan81/81（93.49 s）、Windows MSVC52/52（20.63 s）；统一十三组实际变异13/13（190.50 s），均0失败、0SKIP。Linux注册81默认/94总计，含六个默认puregate。远端CI待执行；下列0026结果保留为历史基线。
 - 用户审查：整体方案已批准，实现交付与合入待审查，理解由项目所有者判断。
+
+### 0027 本机验收（2026-10-08）
+
+完整默认证据为`build/search-meta-release-default-verified.log`、`search-meta-asan-default-verified.log`、`search-meta-windows-default-fixed.log`；实际变异单独运行，证据为`search-meta-all-mutations-verified.log`。新增metadata21个实际缺陷均命中指定suite、owner与具体断言，五个严格基线和no-effect控制通过，wrong-owner/wrong-assertion逐项拒绝误计；持久明细见`build/search-meta-note-mutation-detail.log`。原生格式55例、服务27例、缓存/发布故障6例、filtered13例、shell21例通过；格式独立oracle627例，标签资格与排序独立oracle108个夹具在scan/index/index-repeat三条路径对照。源耗尽、旧无tag查询与原有能力保持在完整默认覆盖内。
+
+生产Guest健康7项通过，故障脚本共22项通过（19个故障注入和show/list/update三个健康基线），RV32服务/direct index探针26个唯一检查码同时要求marker和实际tohost1。故障要求响应3–8或精确TX位置真正触发，错误后无额外块请求；发布后回执失败保留已提交镜像，不承诺回滚。BUILD_TESTING OFF、TOOLS ON的生产构建完成应用、执行器与mkfs三个目标，用该生产ELF复跑健康7项通过，见`search-meta-production-config.log`、`search-meta-production-build.log`、`search-meta-production-guest.log`。
+
+Host/RV32的index、note context与shell合计1606968/1606920字节，低于2MiB；index内已经包含linear及metadata资格scratch，不重复计数。index分别1572048/1572032字节，note30544/30536，shell4376/4352；info/workspace各1920、filter1058。被测模块最大单函数帧Host608、RV32496字节，RV32服务128、格式80、shell208；这不是完整调用链或ISR嵌套栈峰值证明。原始测量见`build/search-meta-layout-stack-final.log`与对应`.su`。
+
+初次默认中的旧search语法兼容失败、Windows缺输入诊断路径repr不一致，以及统一变异首轮注入锚点失效，均在修后重跑；未把夹具、编译或注入harness错误计成缺陷检出。缺仓库输入硬1、缺外部依赖77及指定suite/owner/assertion纪律保持。元数据更新成功回执为OK meta set/tag/link，使用与读取边界见[README](../README.md)及[0027](specs/0027-note-metadata.md)。本机完成不代替远端CI或项目所有者对实现与合入的审查。
+
+### 0027 分项实施历史（2026-10-08）
+
+以下保留分批推进时的计数、失败和待验状态；上述完整验收取代其当前状态，不改当时记录。
+
+纯格式层提供bounded parser、canonical encoder及字段校验，与YanFS保持分离。格式专项CTest在Linux Release和ASan/UBSan各2/2通过，证据为 `build/search-meta-format-review-green.log`、`search-meta-format-review-asan.log`；原生55例和独立Python oracle619例的详细记录亦已核实，Windows MSVC同两项通过。这些结果只覆盖格式层，不是完整默认回归。
+
+元数据服务实现prefix观察、全库头预检后列表、幂等分支及实际变更的单次replace。Linux Release专项CTest1/1通过，含27个原生用例，证据 `build/search-meta-service-green.log`。测试区分数据块写入与目录发布，收紧观察读预算，使用合法名称检查别名，并覆盖日期、tag/link真实增删顺序及最后字段清除后保留17字节空头。服务ASan/Windows、标签查询集成、真实Guest、故障与变异门禁仍待执行；不能据此声明整体交付。
+
+filtered term首轮Linux专项CTest4/4通过：原生13例及独立oracle的108个夹具，在scan、index、index-repeat三条路径对照资格、排名、摘要与无写盘，包含容量LIMIT回退；证据 `build/search-meta-filter-first.log`。真实source耗尽的filtered专项亦通过，日志 `build/search-meta-exhaustion.log`，仍以SCAN运行并报告坏头METADATA。index地址跨度防御与服务缓存观察修后Linux专项3/3通过（故障6例、filter13例及真实耗尽），日志 `build/search-meta-cache-filter-reviewed.log`；缓存/filter两项在ASan和Windows各2/2通过，分别见 `search-meta-asan-cache-filter.log`、`search-meta-windows-cache-filter.log`。RV32服务API探针23个检查通过，要求NOTE_METADATA_API_PASS及实际tohost1；facade RV32探针亦通过。新metadata实际变异仅覆盖格式/service/filter的14个缺陷，均命中指定suite/owner/assertion，见 `search-meta-actual-mutations.log`，不代替全部变异组或shell验收。
+
+真实Guest故障脚本记录16项通过，见 `build/search-meta-guest-faults.log`，包含协议响应3–8、show输出故障与成功发布后的回执故障；回执故障是前三字节已输出后的失败，不能称回执首中末均覆盖。健康Guest首轮5项通过、1项夹具harness错误，shell原生14例中2例失败，仍须修复复验。此前binding stub的14/12 RED保留为tests-first记录，命令实现与整体交付尚未验收。
+
+### 0027 锁定后FEFF字段值裁定
+
+2026-10-08：原文“识别到的头内出现UTF-8 BOM字节序列为METADATA”与“未列的合法字符按原字节保存”存在冲突：U+FEFF不在列出的C0/DEL/C1或White_Space集合，却被头内全面禁令覆盖。实际输入是title/tag值的首、中、末含UTF-8 `EF BB BF`，两种解读分别会接受或返回METADATA。总审核报告矛盾，主Agent向项目所有者提出裁定；项目所有者明确回复“保留头内 FEFF 禁令，明确字段值也拒绝”。
+
+总审核据此将0027补为头内FEFF禁令明确包括title/tag值，未列合法字符规则须先服从这一禁令；byte0的marker前BOM仍是无头旧文件，正文FEFF保持原字节。原Spec Lock时间与其它行为不变。本条为所有者批准的语义消歧，不由Agent自主放宽。独立oracle新增title/tag首中末六例、正文一例、字段名前一例，共627例，Linux专项已通过，证据 `build/search-meta-format-current-rule.log`；原619例多配置记录保留。
+
+扩展真实Guest故障22项通过，日志 `build/search-meta-guest-faults-expanded.log`：协议响应3–8逐项要求完整响应计数等于注入目标，IO亦精确计数；show/list输出失败及成功发布后回执首、中、末均要求健康输出的精确前缀、fatal退出与无后续I/O。发布后镜像必须等于健康已提交镜像，失败不回滚。RV32服务与direct index extent探针增为26个检查，marker与实际tohost1通过，见 `build/search-meta-rv32-service-index-api.log`。shell/健康Guest修后专项与完整默认仍待最终结果，不能把这些分项写成整体验收。
+
 
 ### 已交付词项索引基线
 
@@ -326,7 +357,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-按0027计划完成元数据头、服务、标签筛选与真实Guest验证；0026已交付基线保持。新能力实施与用户交付审查分别记录，学习理解由项目所有者判断。
+0027本机实现与验证完成，下一步提交整项能力、运行远端CI并交项目所有者审查实现与合入；未获合入批准前不合入main。学习理解由项目所有者判断，后续能力另行对齐。
 
 ### 历史推进记录（M1a / M2a）
 

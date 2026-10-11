@@ -46,16 +46,16 @@ RUN_TIMEOUT = 240
 # native C library supplies memcpy/memset/memcmp/strlen, and only the
 # declarations in memory.h are needed by the term index.
 OS_HEADERS = ["yanfs.h", "memory.h", "search.h", "search_linear.h",
-              "search_terms.h", "search_terms_core.h", "search_terms_linear.h",
-              "search_terms_index.h", "search_text.h", "shell.h"]
-OS_SOURCES = ["yanfs.c", "search.c", "search_linear.c", "search_terms.c",
+              "search_terms.h", "note_metadata_format.h", "search_terms_core.h", "search_terms_linear.h",
+              "search_terms_index.h", "search_text.h", "shell.h", "note_metadata.h"]
+OS_SOURCES = ["yanfs.c", "search.c", "search_linear.c", "search_terms.c", "note_metadata_format.c",
               "search_terms_core.c", "search_terms_linear.c",
-              "search_terms_index.c", "search_text.c", "shell.c"]
+              "search_terms_index.c", "search_text.c", "shell.c", "note_metadata.c"]
 TEST_FILES = ["test_search_terms.c", "test_search_index.c",
               "test_shell_terms.c", "test_yanfs_source_exhaustion.c"]
 REQUIRED_FILES = TEST_FILES + ["run_search_terms_mutation.py"]
 
-TERM_CORE = ["os/search_terms.c", "os/search_terms_core.c", "os/search_text.c",
+TERM_CORE = ["os/search_terms.c", "os/note_metadata_format.c", "os/search_terms_core.c", "os/search_text.c",
              "os/search_terms_linear.c", "os/yanfs.c"]
 EXHAUSTION_SEED = "YAN_FS_SOURCE_TOKEN_SEED=18446744073709551551ULL"
 
@@ -74,7 +74,7 @@ SUITES = {
         "test": "tests/test_search_index.c",
     },
     "shell": {
-        "sources": ["tests/test_shell_terms.c", "os/shell.c", "os/search.c",
+        "sources": ["tests/test_shell_terms.c", "os/shell.c", "os/note_metadata.c", "os/search.c",
                     "os/search_linear.c", "os/search_terms_index.c"] + TERM_CORE,
         "target": "test_shell_terms",
         "define": None,
@@ -360,12 +360,20 @@ MUTATIONS = [
         "name": "shell_output_failure_ignored",
         "file": "os/shell.c",
         "old": ("    YanSearchTermsResult result =\n"
-                "        yan_search_terms(shell->terms, query, query_length, sink, &summary);\n"
+                "        (filter != NULL)\n"
+                "            ? yan_search_terms_filtered(shell->terms, query, query_length,\n"
+                "                                        filter, sink, &summary)\n"
+                "            : yan_search_terms(shell->terms, query, query_length, sink,\n"
+                "                               &summary);\n"
                 "    if (state.output_failed) {\n"
                 "        return YAN_SHELL_FATAL;\n"
                 "    }\n"),
         "new": ("    YanSearchTermsResult result =\n"
-                "        yan_search_terms(shell->terms, query, query_length, sink, &summary);\n"
+                "        (filter != NULL)\n"
+                "            ? yan_search_terms_filtered(shell->terms, query, query_length,\n"
+                "                                        filter, sink, &summary)\n"
+                "            : yan_search_terms(shell->terms, query, query_length, sink,\n"
+                "                               &summary);\n"
                 "    if (false) {\n"
                 "        return YAN_SHELL_FATAL;\n"
                 "    }\n"),

@@ -27,8 +27,8 @@ from pathlib import Path
 BLOCK_TIMEOUT = 300
 
 INPUTS = [
-    "os/search_terms.c",
-    "os/search_terms.h",
+    "os/search_terms.c", "os/note_metadata_format.c",
+    "os/search_terms.h", "os/note_metadata_format.h",
     "os/search_terms_core.c",
     "os/search_terms_core.h",
     "os/search_text.c",
@@ -55,6 +55,13 @@ SIGNATURE = b"SEARCH_TERMS_API_PASS"
 
 # tohost code -> check name, so a failure names the exact rule.
 CODES = {
+    63: "filtered facade span overflow",
+    64: "filtered tag holder span overflow",
+    65: "filtered tag holder overlaps backend",
+    66: "filtered summary overlaps tag holder",
+    67: "filtered holder count exceeds physical slots",
+    68: "missing optional filtered seam is unsupported",
+    69: "invalid/unsupported filtered call reached backend",
     1: "facade reached its final check",
     2: "init accepted a null facade",
     3: "init accepted a backend without query",
@@ -183,6 +190,7 @@ def main():
         "-T", str(source / "tests" / "guest" / "link.ld"),
         "-o", str(elf),
         str(source / "os" / "search_terms.c"),
+        str(source / "os" / "note_metadata_format.c"),
         str(source / "os" / "search_terms_core.c"),
         str(source / "os" / "search_text.c"),
         str(source / "tests" / "guest" / "start.S"),

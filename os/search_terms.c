@@ -86,7 +86,7 @@ static bool span_valid(const void *base, size_t size)
 static bool result_known(YanSearchTermsResult result)
 {
     return (int)result >= (int)YAN_SEARCH_TERMS_OK &&
-           (int)result <= (int)YAN_SEARCH_TERMS_INDEX_LIMIT;
+           (int)result <= (int)YAN_SEARCH_TERMS_METADATA;
 }
 
 static void clear_match(YanSearchTerms *terms)
@@ -247,6 +247,71 @@ YanSearchTermsResult yan_search_terms_init(YanSearchTerms *terms,
     return YAN_SEARCH_TERMS_OK;
 }
 
+/* The shared invocation tail of both entry points. `filter` is NULL for the
+ * plain query and a fully validated borrowed selection for the filtered one.
+ * The plain path's validation, busy window, bridge, sticky reader error and
+ * stopped/summary rules are byte-for-byte the 0026 behaviour; the filtered path
+ * adds one extra argument to the same backend seam. The old plain backend
+ * interface is untouched, and a filtered query against a backend without the
+ * optional entry point is UNSUPPORTED without disturbing the facade. */
+static YanSearchTermsResult terms_run(YanSearchTerms *terms,
+                                      const uint8_t *query,
+                                      uint32_t query_length,
+                                      const YanNoteTagFilter *filter,
+                                      YanSearchTermsSink sink,
+                                      YanSearchTermsSummary *summary)
+{
+    terms->reader_error = YAN_SEARCH_TERMS_OK;
+    terms->stopped = false;
+    terms->in_callback = false;
+    terms->reader_busy = false;
+    clear_match(terms);
+
+    YanSearchTermsBridge bridge;
+    bridge.terms = terms;
+    bridge.sink = sink;
+
+    /* The backend always receives a real summary object; the caller's holder is
+     * written only on OK, so a cancelled or failed query leaves it alone. */
+    YanSearchTermsSummary internal_summary;
+    internal_summary.total = 0u;
+    internal_summary.shown = 0u;
+    internal_summary.skipped = 0u;
+    internal_summary.mode = YAN_SEARCH_MODE_SCAN;
+
+    terms->busy = true;
+    YanSearchTermsResult result;
+    if (filter != NULL) {
+        if (terms->backend.query_filtered == NULL) {
+            result = YAN_SEARCH_TERMS_UNSUPPORTED;
+        } else {
+            result = terms->backend.query_filtered(
+                terms->backend.context, query, query_length, filter,
+                terms_facade_match, &bridge, &internal_summary);
+        }
+    } else {
+        result = terms->backend.query(terms->backend.context, query,
+                                      query_length, terms_facade_match,
+                                      &bridge, &internal_summary);
+    }
+    terms->busy = false;
+    terms->in_callback = false;
+    terms->reader_busy = false;
+
+    YanSearchTermsResult final = result;
+    if (terms->reader_error != YAN_SEARCH_TERMS_OK) {
+        final = terms->reader_error;
+    } else if (!result_known(result)) {
+        final = YAN_SEARCH_TERMS_PROTOCOL;
+    } else if (terms->stopped && result == YAN_SEARCH_TERMS_OK) {
+        final = YAN_SEARCH_TERMS_STOPPED;
+    }
+    if (final == YAN_SEARCH_TERMS_OK && summary != NULL) {
+        *summary = internal_summary;
+    }
+    return final;
+}
+
 YanSearchTermsResult yan_search_terms(YanSearchTerms *terms,
                                       const uint8_t *query,
                                       uint32_t query_length,
@@ -299,52 +364,106 @@ YanSearchTermsResult yan_search_terms(YanSearchTerms *terms,
 
     /* Pure grammar validation runs before the backend: a NUL, a control byte,
      * invalid UTF-8, an over-long word, more than 16 distinct groups or a
-     * separator-only query is rejected here with no backend call and no I/O.
-     * The small parsed table lives on the stack (~128 bytes). */
+     * separator-only query is rejected here with no backend call and no I/O. */
     YanSearchTermsQuery parsed;
     if (yan_search_terms_parse(query, query_length, &parsed) !=
         YAN_SEARCH_TERMS_OK) {
         return YAN_SEARCH_TERMS_INVALID;
     }
 
-    terms->reader_error = YAN_SEARCH_TERMS_OK;
-    terms->stopped = false;
-    terms->in_callback = false;
-    terms->reader_busy = false;
-    clear_match(terms);
+    return terms_run(terms, query, query_length, NULL, sink, summary);
+}
 
-    YanSearchTermsBridge bridge;
-    bridge.terms = terms;
-    bridge.sink = sink;
-
-    /* The backend always receives a real summary object; the caller's holder is
-     * written only on OK, so a cancelled or failed query leaves it alone. */
-    YanSearchTermsSummary internal_summary;
-    internal_summary.total = 0u;
-    internal_summary.shown = 0u;
-    internal_summary.skipped = 0u;
-    internal_summary.mode = YAN_SEARCH_MODE_SCAN;
-
-    terms->busy = true;
-    YanSearchTermsResult result = terms->backend.query(
-        terms->backend.context, query, query_length, terms_facade_match,
-        &bridge, &internal_summary);
-    terms->busy = false;
-    terms->in_callback = false;
-    terms->reader_busy = false;
-
-    YanSearchTermsResult final = result;
-    if (terms->reader_error != YAN_SEARCH_TERMS_OK) {
-        final = terms->reader_error;
-    } else if (!result_known(result)) {
-        final = YAN_SEARCH_TERMS_PROTOCOL;
-    } else if (terms->stopped && result == YAN_SEARCH_TERMS_OK) {
-        final = YAN_SEARCH_TERMS_STOPPED;
+YanSearchTermsResult yan_search_terms_filtered(
+    YanSearchTerms *terms, const uint8_t *query, uint32_t query_length,
+    const YanNoteTagFilter *filter, YanSearchTermsSink sink,
+    YanSearchTermsSummary *summary)
+{
+    if (!span_valid(terms, sizeof *terms) || !terms->initialized) {
+        return YAN_SEARCH_TERMS_INVALID;
     }
-    if (final == YAN_SEARCH_TERMS_OK && summary != NULL) {
-        *summary = internal_summary;
+    if (terms->busy) {
+        return YAN_SEARCH_TERMS_BUSY;
     }
-    return final;
+    if (query == NULL || query_length == 0u ||
+        query_length > YAN_SEARCH_TERMS_QUERY_MAX) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+    if ((uint64_t)query_length > (uint64_t)(UINTPTR_MAX - (uintptr_t)query)) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+    if (ranges_overlap(terms, sizeof *terms, query, (size_t)query_length) ||
+        ranges_overlap(terms->backend.context, terms->backend.context_size,
+                       query, (size_t)query_length) ||
+        ranges_overlap(terms->backend.source_context,
+                       terms->backend.source_size, query,
+                       (size_t)query_length)) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+    if (sink.match == NULL) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+
+    /* A NULL or empty filter is the plain query: the 0027 entry point must not
+     * change the untagged result, not even by routing through a different seam.
+     * A present filter is validated as a borrowed read-only span: the range,
+     * the alias rules against every protected object of this facade, the count
+     * bound and each tag's pure validity. Identical tags are legal here; the
+     * backend de-duplicates them. */
+    if (filter == NULL) {
+        return yan_search_terms(terms, query, query_length, sink, summary);
+    }
+    if (!span_valid(filter, sizeof *filter)) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+    if (ranges_overlap(terms, sizeof *terms, filter, sizeof *filter) ||
+        ranges_overlap(terms->backend.context, terms->backend.context_size,
+                       filter, sizeof *filter) ||
+        ranges_overlap(terms->backend.source_context,
+                       terms->backend.source_size, filter, sizeof *filter) ||
+        ranges_overlap(query, (size_t)query_length, filter, sizeof *filter)) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+    if (summary != NULL &&
+        ranges_overlap(filter, sizeof *filter, summary, sizeof *summary)) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+    if (filter->count > YAN_NOTE_TAG_MAX_COUNT) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+    if (filter->count == 0u) {
+        return yan_search_terms(terms, query, query_length, sink, summary);
+    }
+    for (uint16_t i = 0u; i < filter->count; ++i) {
+        if (filter->length[i] == 0u || filter->length[i] > YAN_NOTE_TAG_MAX ||
+            !yan_note_tag_valid(filter->tag[i], filter->length[i])) {
+            return YAN_SEARCH_TERMS_INVALID;
+        }
+    }
+    if (summary != NULL) {
+        if ((uint64_t)sizeof *summary >
+            (uint64_t)(UINTPTR_MAX - (uintptr_t)summary)) {
+            return YAN_SEARCH_TERMS_INVALID;
+        }
+        if (ranges_overlap(terms, sizeof *terms, summary, sizeof *summary) ||
+            ranges_overlap(terms->backend.context, terms->backend.context_size,
+                           summary, sizeof *summary) ||
+            ranges_overlap(terms->backend.source_context,
+                           terms->backend.source_size, summary,
+                           sizeof *summary) ||
+            ranges_overlap(query, (size_t)query_length, summary,
+                           sizeof *summary)) {
+            return YAN_SEARCH_TERMS_INVALID;
+        }
+    }
+
+    YanSearchTermsQuery parsed;
+    if (yan_search_terms_parse(query, query_length, &parsed) !=
+        YAN_SEARCH_TERMS_OK) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+
+    return terms_run(terms, query, query_length, filter, sink, summary);
 }
 
 YanSearchTermsResult yan_search_terms_read_snippet(

@@ -174,7 +174,7 @@ def cli_missing_controls():
         placeholder_cc = sys.executable
         absent_cc = str(Path(base) / "no-such-compiler")
 
-        for rel in ("os/search_terms_core.c", "os/search_terms.h",
+        for rel in ("os/search_terms_core.c", "os/search_terms.h", "os/note_metadata_format.h",
                     "os/search_terms_index.c", "os/memory.h",
                     "tests/test_search_terms.c",
                     "tests/run_yanfs_mutation.py"):

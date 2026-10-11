@@ -293,7 +293,7 @@ static YanSearchTermsResult fake_clear(void *context)
 
 static YanSearchTermsBackend fake_backend(void)
 {
-    YanSearchTermsBackend backend;
+    YanSearchTermsBackend backend = {0};
     backend.context = &fake;
     backend.context_size = sizeof fake;
     backend.source_context = fake_source;

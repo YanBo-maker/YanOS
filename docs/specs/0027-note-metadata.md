@@ -1,6 +1,6 @@
 # 0027：笔记元数据与标签筛选
 
-> 状态：**Spec Lock**（2026-10-07 17:56 +08:00）。项目所有者已批准整体方案并授权继续实现。实现为计划，验证未执行；实现交付与合入审查待进行，学习理解由项目所有者判断。
+> 状态：**Spec Lock**（2026-10-07 17:56 +08:00）。项目所有者已批准整体方案并授权继续实现。整体已实现并完成本机验证，独立实现审查已完成；远端CI待执行，实现交付与合入审查待进行，学习理解由项目所有者判断。
 
 ## INTENTION
 
@@ -14,7 +14,7 @@
 
 识别只发生在byte0。没有完整9字节`@yan-note`前缀的文件是旧格式，元数据为空；具有该前缀但marker不合法、版本未知、头未闭合或字段不合法时返回METADATA，不能猜测为空。
 
-唯一合法marker为ASCII `@yan-note 1\n`，以ASCII `@end\n`闭合；识别到的头严格使用LF，不接受CRLF、缩进或注释；byte0不是marker的BOM前缀文件按无头旧文件处理，不跳过BOM寻找头。识别到的头内出现UTF-8 BOM字节序列为METADATA，不忽略BOM继续解析字段。整个头包括marker/end最多4096字节，正文从end之后开始。正文出现相同文字不再解析。一个空合法头占17字节。
+唯一合法marker为ASCII `@yan-note 1\n`，以ASCII `@end\n`闭合；识别到的头严格使用LF，不接受CRLF、缩进或注释；byte0不是marker的BOM前缀文件按无头旧文件处理，不跳过BOM寻找头。识别到的头内出现UTF-8 BOM字节序列（U+FEFF）为METADATA，禁令也适用于title/tag字段值的首、中、末位置，不忽略或保存该值。整个头包括marker/end最多4096字节，正文从end之后开始。正文出现相同文字不再解析。一个空合法头占17字节。
 
 ```text
 @yan-note 1
@@ -36,7 +36,7 @@ interrupt controller
 | link | 最多16个，沿YanFS 1–31字节ASCII名称规则，区分大小写 |
 | created/modified | 各单值，严格十字节Gregorian YYYY-MM-DD，年份0001–9999，月份/闰年/日期真实有效；未声明为UNKNOWN |
 
-C0为U+0000–001F，DEL为U+007F，C1为U+0080–009F。tag额外拒绝固定Unicode White_Space集合：U+0009–000D、0020、0085、00A0、1680、2000–200A、2028、2029、202F、205F、3000；不用Host locale决定。未列的合法字符按原字节保存，不承诺所有不可见字符的终端安全。
+C0为U+0000–001F，DEL为U+007F，C1为U+0080–009F。tag额外拒绝固定Unicode White_Space集合：U+0009–000D、0020、0085、00A0、1680、2000–200A、2028、2029、202F、205F、3000；不用Host locale决定。除上述控制/空白规则及头内U+FEFF禁令外，未列的合法字符按原字节保存，不承诺所有不可见字符的终端安全。正文不再按元数据头解析，正文中的U+FEFF保持原字节；marker前BOM仍按无头旧文件处理。
 
 created/modified是用户声明的日期，不自动更新、不取CLINT instruction ticks作现实时间。mv/cp自然带走原头，不改其中日期/链接。链接只引用文件名；rename/delete后可能DANGLING，不自动改写其他文件或承诺稳定对象身份。
 
@@ -61,6 +61,8 @@ search tag:os tag:riscv 中断
 meta只在shell模式执行；编辑态先w成功或q退出。命令行仍沿0022的1023字节与整行拒绝规则。非法子命令、额外参数、缺参数或非法值为ERROR USAGE，零文件I/O；公开API相应返回INVALID。
 
 title是title后首个分隔空格以后的整段TEXT，保留额外空格；无TEXT/空TEXT清除。DATE为单token日期或`-`清除。tag/link参数为单个原字节token，不解释引号/反斜线；列表不覆盖或排序。set同值、add已有值、del不存在值成功零写；清除缺省字段也无变化。名称须合法、源须存在、头须合法，不能通过无变化操作绕过坏头。
+
+实际更新、清除或合法无变化成功，分别输出`OK meta set\r\n`、`OK meta tag\r\n`或`OK meta link\r\n`。普通错误输出既有`ERROR <token>\r\n`；发布成功后的回执输出故障沿0022致命退出，不回滚文件。
 
 show成功输出固定顺序，值沿0022 cat安全显示：
 
@@ -140,13 +142,13 @@ list错误/STOPPED不公开成功summary；show错误不公开半份info。metad
 
 ## IMPLE
 
-尚未实现。旧0026的67/79/41及所有通过记录仅属交付历史，不作为本能力证据。没有新增注册或测试结果。
+纯格式`note_metadata_format`与服务`note_metadata`已实现。格式层通过caller workspace解析头并生成canonical头；服务通过公开YanFS接口完成prefix观察、全库list预检、无变化零写及实际变化单次replace。filtered term、shell绑定与meta命令、生产Guest接入和门禁均已实现；独立实现审查完成，维护者实现交付与合入审查仍待。旧0026的67/79/41及所有通过记录仅属交付历史，不作为本能力证据。
 
 ## VERIFY
 
 | 面 | 实际输入/判据 |
 | --- | --- |
-| marker/头 | 无头、空头17B、4096边界/超限、unknownversion、prefix坏marker、CRLF/未闭合、未知/重复字段；精确METADATA，无假空标签 |
+| marker/头 | 无头、空头17B、4096边界/超限、unknownversion、prefix坏marker、CRLF/未闭合、未知/重复字段、title/tag首中末FEFF拒绝及正文FEFF原样；精确METADATA，无假空标签 |
 | 字段 | title256/257bytes与保留空格；tags16/17及63/64bytes、White_Space全集合、case/不同UTF8规范形不折叠；links名边界/顺序/重复 |
 | 日期 | 2000-02-29合法、1900-02-29/0000/无效月日拒绝；unknown缺省、清除、无自动tick |
 | 观察 | 数MiB/binary正文show/list仅prefix、无头空元数据；合法头binary正文不误拒，目标存在binary LINK OK，dangling明确 |
@@ -156,5 +158,21 @@ list错误/STOPPED不公开成功summary；show错误不公开半份info。metad
 | 一致性 | scan/index/warm/LIMIT/UNCACHEABLE完整oracle；20后候选仍进total/top20，修改/rename/copy/clear/restart/source耗尽无陈旧资格 |
 | API | RV32 UINTPTR_MAX、对象/FS/span别名、双输出、guard优先、BUSY reentry/输出保持、sticky真实错误、零初始化与生命周期 |
 | 门禁/工程 | exact suite/owner/assertion及no-effect/wrong-owner/wrong-assertion/mixedharness；全部缺输入硬1/外部77、MSVC/ASan/productionOFF、总static<=2MiB与单帧非全栈说明 |
+
+### 当前本机验收（2026-10-08）
+
+Release81/81（54.70 s）、ASan/UBSan81/81（93.49 s）、Windows MSVC52/52（20.63 s）通过；统一十三组实际变异13/13（190.50 s），0失败、0SKIP。Linux当前81默认/94总计，六puregate不计实际变异组。原生格式55、服务27、缓存故障6、filtered13、shell21通过；独立格式oracle627，filtered oracle108夹具对照三backend路径。生产OFF构建与实际健康7项、19故障注入加3健康基线、RV32 API26检查通过。静态预算及单帧边界见[STATUS](../STATUS.md)，不冒称完整嵌套栈证明。
+
+此为本机实现与验证；远端CI尚未执行，维护者实现交付与合入审查待进行。Spec Lock及FEFF所有者裁定保留。
+
+### 分项推进历史（2026-10-08）
+
+以下是当时的专项与待办快照，已由上述完整本机验收取代当前状态，保留原记录。
+
+格式专项在Linux Release、ASan/UBSan及Windows MSVC通过：原生55例、独立Python oracle619例，覆盖编码容量17/16字节、title控制字符边界及完整字段规则。Linux两配置分别CTest2/2通过，日志 `build/search-meta-format-review-green.log` 与 `search-meta-format-review-asan.log`。服务Linux Release专项CTest1/1、原生27例通过，日志 `build/search-meta-service-green.log`；覆盖头观察、列表预检、幂等与真实更新、holder/别名、状态优先和底层错误。
+
+filtered首轮Linux专项CTest4/4通过，原生13例及108个独立oracle夹具对照scan/index/index-repeat，含LIMIT回退；日志 `build/search-meta-filter-first.log`。真实source耗尽filtered专项通过，日志 `build/search-meta-exhaustion.log`。index跨度防御与缓存写回调观察修后，Linux专项3/3通过（filter13、fault6及真实耗尽）；cache/filter在ASan和Windows各2/2通过。RV32服务API23个检查与facade探针通过。metadata实际变异14个指定断言检出仅属格式/service/filter分项，尚未覆盖shell或全部变异组；真实Guest故障16项通过，但健康夹具和shell失败仍待修复复验，整体未验收。证据与具体边界见[STATUS](../STATUS.md)。
+
+上述为专项结果。完整服务多配置、shell/健康Guest修后验收、完整默认、完整actual mutation、远端CI以及Host/RV32最终布局与栈验证仍待执行。项目所有者于2026-10-08裁定保留头内FEFF禁令并明确字段值也拒绝，授权记录见[STATUS](../STATUS.md)；新增八个独立oracle夹具后Linux专项627例通过，日志 `build/search-meta-format-current-rule.log`。此分项不代表整体已验收。
 
 规格整体与上述工程具体化已获本轮授权；实施、验证、用户交付/合入审查分开记录。学习理解不由Agent代判。

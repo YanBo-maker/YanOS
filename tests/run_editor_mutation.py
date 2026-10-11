@@ -77,8 +77,8 @@ BUILD_TIMEOUT = 180
 
 # The whole tree the editor suite needs. Every one is a hard repository input.
 EDITOR_SOURCES = ["tests/test_editor.c", "os/editor.c", "os/yanfs.c"]
-EDITOR_OS = ["editor.h", "editor.c", "yanfs.h", "yanfs.c", "shell.h", "search.h",
-             "search_terms.h"]
+EDITOR_OS = ["editor.h", "editor.c", "yanfs.h", "yanfs.c", "shell.h", "note_metadata.h", "search.h",
+             "search_terms.h", "note_metadata_format.h"]
 REQUIRED_REPO = (
     ["os/" + name for name in EDITOR_OS]
     + ["tests/test_editor.c", "tests/run_yanfs_mutation.py"]

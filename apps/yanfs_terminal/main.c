@@ -7,8 +7,9 @@
  * and it owns the whole storage stack (os/yanfs.c over os/yanfs_block.c). It
  * references nothing under tests/, so the production image and the validation
  * corpus stay separate. The shell carries the original eight commands, the
- * 0024 `mv` and `cp`, the 0025 literal `grep`, and the 0026 `search`, `rebuild`
- * and `index status|clear` front ends.
+ * 0024 `mv` and `cp`, the 0025 literal `grep`, the 0026 `search`, `rebuild`
+ * and `index status|clear` front ends, and the 0027 `meta` family plus the
+ * `search tag:TAG ...` operator after the metadata binding below.
  *
  * Layout:
  *   main          runs on the boot stack from os/trap_entry.S, configures the
@@ -54,6 +55,7 @@
 #include "block.h"
 #include "editor.h"
 #include "line.h"
+#include "note_metadata.h"
 #include "platform.h"
 #include "search.h"
 #include "search_linear.h"
@@ -109,6 +111,11 @@ static YanSearchLinear search_linear;
 static YanSearch search;
 static YanSearchTermsIndex term_index;
 static YanSearchTerms term_terms;
+/* 0027: the note-metadata service owns the 16 KiB candidate and the header
+ * scratch, so it is static for the whole session exactly like the search
+ * backends. The shell binds it after its own init; an unbound shell would keep
+ * the pre-0027 command set. */
+static YanNoteContext note_context;
 
 /* --------------------------------------------------------------- reporting */
 
@@ -380,6 +387,16 @@ _Noreturn static void app_session(void)
     }
     if (yan_shell_init(&shell, &fs, &search, &term_terms, output) !=
         YAN_SHELL_OK) {
+        app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
+    }
+    /* 0027: the metadata service borrows the same mounted filesystem, and the
+     * shell enables `meta` and the tag operator only after this binding. A
+     * failure here is an initialization failure on the same path as the other
+     * injected objects, so it reports the existing SHELL_INIT reason. */
+    if (yan_note_init(&note_context, &fs) != YAN_NOTE_OK) {
+        app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
+    }
+    if (yan_shell_bind_metadata(&shell, &note_context) != YAN_SHELL_OK) {
         app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
     }
     if (yan_editor_init(&editor, &fs, output) != YAN_EDITOR_OK) {

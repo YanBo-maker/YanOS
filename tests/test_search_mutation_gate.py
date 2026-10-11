@@ -171,7 +171,7 @@ def cli_missing_controls():
         absent_cc = str(Path(base) / "no-such-compiler")
 
         for rel in ("os/search.c", "os/search.h", "os/search_linear.c",
-                    "os/search_linear.h", "os/search_terms.c",
+                    "os/search_linear.h", "os/search_terms.c", "os/note_metadata_format.c",
                     "os/search_terms_index.c", "os/memory.h",
                     "tests/test_search.c", "tests/test_shell.c",
                     "tests/run_yanfs_mutation.py"):
