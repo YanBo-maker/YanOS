@@ -22,7 +22,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [词项搜索与可重建索引](docs/specs/0026-term-search-index.md)已实现并完成本机验证：search按词项组做同一行AND查询，返回评分最高的20行及上下文摘要；RAM倒排索引随文件变更失效，超出容量时完整扫描。原始笔记保持为事实来源，grep语义不变；功能提交77f03fd已通过 [PR #22](https://github.com/YanBo-maker/YanOS/pull/22) 的三项CI，项目所有者于2026-10-07明确批准，经PR #22合入main（c84b2e7）；学习理解由项目所有者判断。
 
-[笔记元数据与标签筛选](docs/specs/0027-note-metadata.md)已实现并完成本机验证：同文件版本化头声明title、tag、日期与文件链接，meta提供观察、单文件更新和列表，search先按标签AND筛选再排名。不改变YanFS磁盘格式或既有无tag查询；远端CI待执行，实现交付与合入待维护者审查。
+[笔记元数据与标签筛选](docs/specs/0027-note-metadata.md)已实现并完成本机验证：同文件版本化头声明title、tag、日期与文件链接，meta提供观察、单文件更新和列表，search先按标签AND筛选再排名。不改变YanFS磁盘格式或既有无tag查询；功能提交180d18e已通过[PR #24](https://github.com/YanBo-maker/YanOS/pull/24)三项CI，实现交付与合入待维护者审查。
 
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
