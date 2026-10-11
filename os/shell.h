@@ -1,6 +1,7 @@
 #ifndef YAN_OS_SHELL_H
 #define YAN_OS_SHELL_H
 
+#include "note_metadata.h"
 #include "search.h"
 #include "search_terms.h"
 #include "yanfs.h"
@@ -80,14 +81,26 @@ typedef struct {
 } YanShellOutput;
 
 /* Memory context only. The fields are private to os/shell.c; callers
- * zero-initialize before yan_shell_init and never edit them afterwards. */
+ * zero-initialize before yan_shell_init and never edit them afterwards.
+ *
+ * 0027 adds an optional metadata binding and its long-lived scratch. The
+ * scratch is inside the shell so no command ever builds a large object on the
+ * stack: one parsed info, one borrowed tag selection and the 1023-byte keyword
+ * window the tag-stripped query is assembled into. `metadata` stays NULL after
+ * the original yan_shell_init, so an unbound shell keeps exactly the 0022-0026
+ * behaviour and never grows the new commands by accident. */
 typedef struct {
     YanFs *fs;
     YanSearch *search;
     YanSearchTerms *terms;
+    YanNoteContext *metadata;
     YanShellOutput output;
     bool initialized;
     bool busy;
+    YanNoteInfo metadata_info;
+    YanNoteTagFilter metadata_filter;
+    uint8_t keywords[YAN_SHELL_LINE_MAX + 1u];
+    char names[2][YAN_FS_NAME_MAX + 1u];
     uint8_t scratch[YAN_SHELL_SCRATCH_SIZE];
 } YanShell;
 
@@ -111,6 +124,25 @@ typedef struct {
  * different backend. */
 YanShellResult yan_shell_init(YanShell *, YanFs *, YanSearch *,
                               YanSearchTerms *, YanShellOutput);
+
+/* 0027 optional metadata binding. The shell borrows a caller-owned, long-lived
+ * YanNoteContext and only uses it when a line actually needs it; an unbound
+ * shell rejects the metadata commands with the original UNKNOWN_COMMAND and
+ * never treats a tag token as an operator.
+ *
+ * `note` must belong to the same filesystem the shell already borrows, must be
+ * a non-NULL, in-range span, and must not overlap the shell, the filesystem,
+ * either facade or either protected backend span. The full shell extent is
+ * validated before its initialized/busy fields; after that, the note span and
+ * all protected aliases are checked before any note field is read. The call
+ * performs no I/O and emits no byte.
+ *
+ * An active shell returns YAN_SHELL_BUSY; a NULL context unbinds and returns
+ * YAN_SHELL_OK; a mismatched filesystem, an uninitialized context or a bad
+ * span returns YAN_SHELL_INVALID. Unbinding never touches the filesystem or the
+ * service context, so a caller can drop the binding and keep the old command
+ * set. */
+YanShellResult yan_shell_bind_metadata(YanShell *, YanNoteContext *note);
 
 /* Runs one net line, already stripped of CR/LF by the caller's line reader.
  *
@@ -163,7 +195,16 @@ YanShellResult yan_shell_init(YanShell *, YanFs *, YanSearch *,
  * after the line length/control/range checks, an exact valid management line is
  * routed before the filesystem health guard. Every other command, including an
  * invalid `index` grammar and an empty or `exit` line, keeps the original health
- * priority. */
+ * priority.
+ *
+ * 0027: a bound shell also protects the metadata context span from an aliasing
+ * line, routes `meta show|set|tag|link|list` after the health guard, and takes
+ * a bare `search` query whose independent tokens start with `tag:` into the
+ * filtered entry point. Unbound, `meta` is the ordinary UNKNOWN_COMMAND and a
+ * bare query keeps the old keyword grammar; the whole outer-quoted form is
+ * always the old grammar, because the tag operator is never recognised inside
+ * quotes. After removing tag tokens, the first keyword must not begin with
+ * '-'; internal '-' and the whole outer-quoted form retain the old grammar. */
 YanShellResult yan_shell_execute(YanShell *, const uint8_t *line, uint32_t length);
 
 #endif

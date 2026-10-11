@@ -80,9 +80,10 @@ target_compile_options(yan_search_terms PRIVATE ${YAN_WARNINGS})
 
 # The shell consumes the two unified facades (literal and term) and never
 # instantiates or selects a backend, so it links the facades rather than yan_fs
-# directly. 0026 adds the term facade for search/rebuild/index.
+# directly. 0026 adds the term facade for search/rebuild/index; 0027 adds the
+# note-metadata service for the optional binding and its scratch types.
 add_library(yan_shell STATIC os/shell.c)
-target_link_libraries(yan_shell PUBLIC yan_search yan_search_terms)
+target_link_libraries(yan_shell PUBLIC yan_search yan_search_terms yan_note)
 target_compile_options(yan_shell PRIVATE ${YAN_WARNINGS})
 
 add_library(yan_line STATIC os/line.c)
@@ -92,6 +93,24 @@ target_compile_options(yan_line PRIVATE ${YAN_WARNINGS})
 add_library(yan_editor STATIC os/editor.c)
 target_link_libraries(yan_editor PUBLIC yan_fs)
 target_compile_options(yan_editor PRIVATE ${YAN_WARNINGS})
+
+# 0027 pure note-metadata format: the shared info/filter/result types plus the
+# bounded parser, the canonical encoder and the field validators. The library
+# is deliberately filesystem-free and shell-free so the term facade can reuse
+# YanNoteTagFilter and the same source still compiles for the Guest.
+add_library(yan_note_format STATIC os/note_metadata_format.c)
+target_include_directories(yan_note_format PUBLIC os)
+target_compile_options(yan_note_format PRIVATE ${YAN_WARNINGS})
+target_link_libraries(yan_search_terms PUBLIC yan_note_format)
+
+# 0027 note-metadata service: the filesystem-observing half. It borrows a YanFs
+# and reuses only the pure format types, so it links yan_fs and yan_note_format
+# and stays independent of the shell, the console and the Host. It adds no
+# on-disk format and no yan_fs_meta_* entry point.
+add_library(yan_note STATIC os/note_metadata.c)
+target_include_directories(yan_note PUBLIC os)
+target_link_libraries(yan_note PUBLIC yan_note_format yan_fs)
+target_compile_options(yan_note PRIVATE ${YAN_WARNINGS})
 
 if(YAN_BUILD_TOOLS)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -131,6 +150,8 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_linear.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/note_metadata_format.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/note_metadata.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms_linear.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms_core.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms_index.c"
@@ -142,7 +163,7 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         list(APPEND _yan_terminal_sources "${CMAKE_CURRENT_SOURCE_DIR}/os/memory.c")
     endif()
     set(_yan_terminal_headers)
-    foreach(_header block console editor memory line platform search search_linear search_terms search_terms_core search_terms_index search_terms_linear search_text shell task terminal yanfs yanfs_block)
+    foreach(_header note_metadata note_metadata_format block console editor memory line platform search search_linear search_terms search_terms_core search_terms_index search_terms_linear search_text shell task terminal yanfs yanfs_block)
         list(APPEND _yan_terminal_headers "${CMAKE_CURRENT_SOURCE_DIR}/os/${_header}.h")
     endforeach()
     add_custom_command(OUTPUT "${YAN_TERMINAL_ELF}"
@@ -207,6 +228,14 @@ if(BUILD_TESTING)
     add_test(NAME shell_terms COMMAND test_shell_terms)
     set_tests_properties(shell_terms PROPERTIES TIMEOUT 30)
 
+    # 0027 shell binding, metadata grammar and output over a mounted YanFS.
+    add_executable(test_shell_metadata tests/test_shell_metadata.c)
+    target_link_libraries(test_shell_metadata PRIVATE yan_shell
+                                                      unity::framework)
+    target_compile_options(test_shell_metadata PRIVATE ${YAN_WARNINGS})
+    add_test(NAME shell_metadata COMMAND test_shell_metadata)
+    set_tests_properties(shell_metadata PROPERTIES TIMEOUT 60)
+
     add_executable(test_line tests/test_line.c)
     target_link_libraries(test_line PRIVATE yan_line unity::framework)
     target_compile_options(test_line PRIVATE ${YAN_WARNINGS})
@@ -234,6 +263,35 @@ if(BUILD_TESTING)
     add_test(NAME search_terms COMMAND test_search_terms)
     set_tests_properties(search_terms PROPERTIES TIMEOUT 30)
 
+    # 0027 filtered qualification and ranking over a real in-memory YanFS.
+    add_executable(test_search_metadata tests/test_search_metadata.c)
+    target_link_libraries(test_search_metadata PRIVATE yan_search_terms
+                                                      unity::framework)
+    target_compile_options(test_search_metadata PRIVATE ${YAN_WARNINGS})
+    add_test(NAME search_metadata COMMAND test_search_metadata)
+    set_tests_properties(search_metadata PROPERTIES TIMEOUT 60)
+
+    # 0027 pure header parser, canonical encoder and field boundaries.
+    add_executable(test_note_metadata_format tests/test_note_metadata_format.c)
+    target_link_libraries(test_note_metadata_format PRIVATE yan_note_format
+                                                          unity::framework)
+    target_compile_options(test_note_metadata_format PRIVATE ${YAN_WARNINGS})
+    add_test(NAME note_metadata_format COMMAND test_note_metadata_format)
+    set_tests_properties(note_metadata_format PROPERTIES TIMEOUT 30)
+
+    # 0027 implemented service suite, introduced against RED stubs. It drives
+    # the service over a real mounted YanFS on a caller-owned static device.
+    add_executable(test_note_metadata tests/test_note_metadata.c)
+    target_link_libraries(test_note_metadata PRIVATE yan_note unity::framework)
+    target_compile_options(test_note_metadata PRIVATE ${YAN_WARNINGS})
+    add_test(NAME note_metadata COMMAND test_note_metadata)
+    set_tests_properties(note_metadata PROPERTIES TIMEOUT 60)
+    add_executable(test_note_metadata_faults tests/test_note_metadata_faults.c)
+    target_link_libraries(test_note_metadata_faults PRIVATE yan_note unity::framework)
+    target_compile_options(test_note_metadata_faults PRIVATE ${YAN_WARNINGS})
+    add_test(NAME note_metadata_faults COMMAND test_note_metadata_faults)
+    set_tests_properties(note_metadata_faults PROPERTIES TIMEOUT 30)
+
     # 0026 in-memory index contract: the index object, its vtable seam and the
     # approved physical caps over a real 8 MiB in-memory YanFS. Indexed-only
     # expectations exercise the implemented index; SCAN parity and the pure
@@ -257,7 +315,7 @@ if(BUILD_TESTING)
     target_include_directories(test_search_index_exhaustion PRIVATE os)
     target_compile_definitions(test_search_index_exhaustion PRIVATE
         "YAN_FS_SOURCE_TOKEN_SEED=18446744073709551551ULL")
-    target_link_libraries(test_search_index_exhaustion PRIVATE unity::framework)
+    target_link_libraries(test_search_index_exhaustion PRIVATE yan_note_format unity::framework)
     target_compile_options(test_search_index_exhaustion PRIVATE ${YAN_WARNINGS})
     add_test(NAME search_index_exhaustion
              COMMAND test_search_index_exhaustion)
@@ -338,6 +396,39 @@ if(BUILD_TESTING)
                         "$<TARGET_FILE:test_search_terms_oracle_probe>" "${_backend}")
             set_tests_properties(search_terms_oracle_${_backend} PROPERTIES TIMEOUT 120)
         endforeach()
+
+        # 0027 pure note-metadata oracle: the root-provided native probe is
+        # driven over stdin by the independent Python reference. The probe links
+        # the pure format library only, so this adds no dependency cycle.
+        add_executable(test_note_metadata_oracle_probe
+                       tests/note_metadata_oracle_probe.c)
+        target_link_libraries(test_note_metadata_oracle_probe PRIVATE
+                              yan_note_format)
+        target_compile_options(test_note_metadata_oracle_probe PRIVATE
+                               ${YAN_WARNINGS})
+        add_test(NAME note_metadata_oracle
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/note_metadata_oracle.py"
+                    "$<TARGET_FILE:test_note_metadata_oracle_probe>")
+        set_tests_properties(note_metadata_oracle PROPERTIES TIMEOUT 120)
+        add_executable(test_search_metadata_oracle_probe tests/search_metadata_oracle_probe.c)
+        target_link_libraries(test_search_metadata_oracle_probe PRIVATE yan_search_terms)
+        target_compile_options(test_search_metadata_oracle_probe PRIVATE ${YAN_WARNINGS})
+        foreach(_mode scan index index-repeat)
+            add_test(NAME search_metadata_oracle_${_mode}
+                COMMAND "${Python3_EXECUTABLE}" -B
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/search_metadata_oracle.py"
+                        "$<TARGET_FILE:test_search_metadata_oracle_probe>" "${_mode}")
+            set_tests_properties(search_metadata_oracle_${_mode} PROPERTIES TIMEOUT 240)
+        endforeach()
+        add_test(NAME note_metadata_mutation_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_metadata_mutation_gate.py")
+        set_tests_properties(note_metadata_mutation_gate PROPERTIES TIMEOUT 30)
+        add_test(NAME note_metadata_guest_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_metadata_guest_gate.py")
+        set_tests_properties(note_metadata_guest_gate PROPERTIES TIMEOUT 180)
         if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             add_test(NAME shell_launcher
                 COMMAND "${Python3_EXECUTABLE}" -B
@@ -368,6 +459,15 @@ if(BUILD_TESTING)
                             --mkfs "$<TARGET_FILE:yan_mkfs>"
                             --guest "${YAN_TERMINAL_ELF}")
                 set_tests_properties(guest_search_terms PROPERTIES TIMEOUT 600)
+                add_test(NAME guest_note_metadata
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_note_metadata.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-note-metadata"
+                            --run "$<TARGET_FILE:yan_run>"
+                            --mkfs "$<TARGET_FILE:yan_mkfs>"
+                            --guest "${YAN_TERMINAL_ELF}")
+                set_tests_properties(guest_note_metadata PROPERTIES TIMEOUT 600)
             endif()
             if(TARGET yanfs_terminal)
                 set(_yan_search_fault_args)
@@ -399,6 +499,15 @@ if(BUILD_TESTING)
                             ${_yan_search_fault_args})
                 set_tests_properties(guest_search_terms_faults PROPERTIES
                                      SKIP_RETURN_CODE 77 TIMEOUT 600)
+                add_test(NAME guest_note_metadata_faults
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_note_metadata_faults.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-note-metadata-faults"
+                            --cc "${CMAKE_C_COMPILER}"
+                            --guest "${YAN_TERMINAL_ELF}"
+                            ${_yan_search_fault_args})
+                set_tests_properties(guest_note_metadata_faults PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
             endif()
             if(TARGET yanfs_terminal AND TARGET yan_mkfs AND TARGET yan_run_disk_close_fault)
                 add_test(NAME guest_terminal_files
@@ -608,6 +717,14 @@ if(BUILD_TESTING)
                     --work "${CMAKE_BINARY_DIR}/search-terms-api")
         set_tests_properties(guest_search_terms_api PROPERTIES SKIP_RETURN_CODE 77
                                                              TIMEOUT 300)
+        add_test(NAME guest_note_metadata_api
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_note_metadata_api.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${CMAKE_BINARY_DIR}/note-metadata-api")
+        set_tests_properties(guest_note_metadata_api PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
     endif()
 
     # The console needs the UART terminal backend, which lives on the Host; the
@@ -768,6 +885,14 @@ if(BUILD_TESTING)
                     --work "${YAN_MUTATION_WORK_ROOT}/search-terms")
         set_tests_properties(search_terms_mutation PROPERTIES
                              SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        add_test(NAME note_metadata_mutation
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_note_metadata_mutation.py"
+                    --repo "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --cc "${CMAKE_C_COMPILER}"
+                    --unity "${unity_SOURCE_DIR}"
+                    --work "${YAN_MUTATION_WORK_ROOT}/note-metadata")
+        set_tests_properties(note_metadata_mutation PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 240)
         add_test(NAME persistent_block_mutation
             COMMAND "${Python3_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_persistent_mutation.py"

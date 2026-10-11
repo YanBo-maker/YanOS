@@ -17,7 +17,7 @@ import run_terminal_files as base
 
 INPUTS = tuple(literal.PRODUCTION_INPUTS) + (
     "tests/guest/run_search_terms.py", "os/memory.h",
-    "os/search_terms.h", "os/search_terms.c",
+    "os/search_terms.h", "os/note_metadata_format.h", "os/search_terms.c", "os/note_metadata_format.c",
     "os/search_terms_core.h", "os/search_terms_core.c",
     "os/search_terms_linear.h", "os/search_terms_linear.c",
     "os/search_terms_index.h", "os/search_terms_index.c",

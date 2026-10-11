@@ -168,7 +168,7 @@ static YanSearchTermsResult fake_clear(void *context)
 
 static YanSearchTermsBackend make_backend(Fake *fake)
 {
-    YanSearchTermsBackend backend;
+    YanSearchTermsBackend backend = {0};
     backend.context = fake;
     backend.context_size = sizeof *fake;
     backend.source_context = NULL;
@@ -548,6 +548,32 @@ int main(void)
                     YAN_SEARCH_TERMS_STOPPED, 61u);
     guest_check(probe_result == YAN_SEARCH_TERMS_INVALID, 62u);
 
+    /* 0027 filtered facade: fixed 16-slot holder and RV32 span checks. A fake
+     * backend without the optional seam must report UNSUPPORTED, not query. */
+    static YanNoteTagFilter tags;
+    tags.count = 1u;
+    tags.length[0] = 2u;
+    tags.tag[0][0] = 'o'; tags.tag[0][1] = 's';
+    sink.match = read_keep;
+    uint32_t queries_before = fake.queries;
+    guest_check(yan_search_terms_filtered(
+        (YanSearchTerms *)(uintptr_t)0xfffffffeu, body, 6u, &tags, sink, NULL) ==
+        YAN_SEARCH_TERMS_INVALID, 63u);
+    guest_check(yan_search_terms_filtered(&terms, body, 6u,
+        (YanNoteTagFilter *)(uintptr_t)0xfffffffeu, sink, NULL) ==
+        YAN_SEARCH_TERMS_INVALID, 64u);
+    guest_check(yan_search_terms_filtered(&terms, body, 6u,
+        (YanNoteTagFilter *)(void *)&fake, sink, NULL) ==
+        YAN_SEARCH_TERMS_INVALID, 65u);
+    guest_check(yan_search_terms_filtered(&terms, body, 6u, &tags, sink,
+        (YanSearchTermsSummary *)(void *)&tags) == YAN_SEARCH_TERMS_INVALID, 66u);
+    tags.count = 17u;
+    guest_check(yan_search_terms_filtered(&terms, body, 6u, &tags, sink, NULL) ==
+        YAN_SEARCH_TERMS_INVALID, 67u);
+    tags.count = 1u;
+    guest_check(yan_search_terms_filtered(&terms, body, 6u, &tags, sink, NULL) ==
+        YAN_SEARCH_TERMS_UNSUPPORTED, 68u);
+    guest_check(fake.queries == queries_before, 69u);
     marker("SEARCH_TERMS_API_PASS");
     guest_finish(1u);
     return 0;

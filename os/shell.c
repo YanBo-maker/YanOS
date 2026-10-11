@@ -29,8 +29,22 @@
  * cat's UTF-8 handling keeps at most one 4-byte sequence between read chunks.
  * A byte that cannot continue the pending sequence is escaped, then the
  * current byte is reprocessed, so a broken sequence never swallows the ASCII
- * that follows it. */
+ * that follows it.
+ *
+ * 0027 adds an optional metadata layer behind yan_shell_bind_metadata. It
+ * changes no old rule: an unbound shell is byte-for-byte the 0022-0026 shell.
+ * When bound, `meta show|set|tag|link|list` are routed after the filesystem
+ * health guard, a bare `search` query is split into exact `tag:` operators and
+ * keyword tokens, and a whole outer-quoted query keeps the old keyword grammar.
+ * The shell never traverses the filesystem, never parses a header and never
+ * filters a ranked list: it validates grammar and values, calls the note
+ * service or the filtered term entry point, and formats the result. Every
+ * command validates its complete grammar before the first service call, so a
+ * USAGE answer performs zero filesystem I/O, and every metadata declaration
+ * value is validated before that call as well. */
 #include "shell.h"
+
+#include "memory.h"
 
 #include <stddef.h>
 
@@ -51,6 +65,37 @@ static const char HELP_TEXT[] =
     "search QUERY: print term matches as FILE:LINE:SNIPPET\r\n"
     "rebuild: rebuild the term index\r\n"
     "index status|clear: show or drop the term index\r\n"
+    "exit: end the session\r\n"
+    "line: at most 1023 bytes, ended by CR or LF\r\n"
+    "separators: ASCII spaces; commands and names are case sensitive\r\n"
+    "names: 1 to 31 bytes of A-Z a-z 0-9 . _ - and never . or ..\r\n"
+    "create creates only; write replaces only; no LF is added to text\r\n"
+    "cat: printable ASCII as is, a backslash as two backslashes, C0 and DEL as \\xHH\r\n"
+    "cat: valid UTF-8 as is except C1 U+0080 to U+009F, escaped byte by byte\r\n";
+
+/* 0027 help for a shell with a bound metadata context. It is the original text
+ * plus the metadata and tag-search lines, so an unbound shell prints HELP_TEXT
+ * byte for byte and a bound shell advertises only the capabilities it has. */
+static const char HELP_METADATA[] =
+    "help: show commands and limits\r\n"
+    "ls: list files as <size> <name>\r\n"
+    "stat NAME: show a file's size\r\n"
+    "cat NAME: print a file\r\n"
+    "create NAME [TEXT]: create a new file\r\n"
+    "write NAME [TEXT]: replace an existing file\r\n"
+    "rm NAME: remove a file\r\n"
+    "mv OLD NEW: rename a file\r\n"
+    "cp SRC DEST: copy a file\r\n"
+    "grep TOKEN: print matching lines as FILE:LINE:CONTENT\r\n"
+    "search QUERY: print term matches as FILE:LINE:SNIPPET\r\n"
+    "rebuild: rebuild the term index\r\n"
+    "index status|clear: show or drop the term index\r\n"
+    "meta show NAME: print the note's declared metadata\r\n"
+    "meta set NAME title|created|modified VALUE: declare or clear a field\r\n"
+    "meta tag NAME add|del TAG: change one tag\r\n"
+    "meta link NAME add|del TARGET: change one link\r\n"
+    "meta list [tag:TAG ...]: list notes whose tags match\r\n"
+    "search tag:TAG QUERY: search only notes carrying every tag\r\n"
     "exit: end the session\r\n"
     "line: at most 1023 bytes, ended by CR or LF\r\n"
     "separators: ASCII spaces; commands and names are case sensitive\r\n"
@@ -278,6 +323,7 @@ static const char *terms_error_suffix(YanSearchTermsResult result)
     case YAN_SEARCH_TERMS_UNSUPPORTED: return "UNSUPPORTED";
     case YAN_SEARCH_TERMS_NOT_FOUND: return "NOT_FOUND";
     case YAN_SEARCH_TERMS_INDEX_LIMIT: return "INDEX_LIMIT";
+    case YAN_SEARCH_TERMS_METADATA: return "METADATA";
     case YAN_SEARCH_TERMS_OK: return "OK";
     }
     return NULL;
@@ -301,6 +347,7 @@ static bool terms_error_is_fatal(YanSearchTermsResult result)
     case YAN_SEARCH_TERMS_STOPPED:
     case YAN_SEARCH_TERMS_NOT_FOUND:
     case YAN_SEARCH_TERMS_INDEX_LIMIT:
+    case YAN_SEARCH_TERMS_METADATA:
         return false;
     }
     return true;
@@ -1060,6 +1107,8 @@ static bool search_parse_query(const uint8_t *line, uint32_t length,
     if (line[position] == (uint8_t)'-') {
         return false;
     }
+    /* The bare form is the whole remainder. It may contain runs of spaces; the
+     * term parser treats them as equivalent group separators. */
     for (uint32_t i = position; i < length; ++i) {
         if (line[i] == (uint8_t)'"') {
             return false;
@@ -1147,17 +1196,110 @@ static bool search_match(void *context, const YanSearchTermsMatch *match)
     return true;
 }
 
-/* `search QUERY`: parse the outer-quote grammar, run the injected term facade
- * and format its ranked rows plus the exact summary. A facade INVALID answer is
- * the CLI USAGE; a source error keeps the existing trust mapping. */
-static YanShellResult run_search(YanShell *shell, const uint8_t *line,
-                                 uint32_t length, uint32_t position)
+/* 0027 tag operator for a bound shell. It runs only for a bare query: the
+ * whole outer-quoted form keeps the old 0026 grammar. Each ASCII token is
+ * either an exact `tag:` operator with a raw suffix, or a keyword token copied
+ * into the shell's keyword window. At least one keyword token must remain, tag
+ * suffixes are de-duplicated before the 16-slot bound, and the keyword tokens
+ * keep the old no-inner-quote rule. */
+static bool search_parse_tags(YanShell *shell, const uint8_t *line,
+                              uint32_t length, uint32_t position,
+                              uint32_t *keyword_start,
+                              uint32_t *keyword_length)
 {
-    const uint8_t *query = NULL;
-    uint32_t query_length = 0u;
-    if (!search_parse_query(line, length, position, &query, &query_length)) {
-        return emit_status(shell, "ERROR USAGE\r\n");
+    YanNoteTagFilter *tag_filter = &shell->metadata_filter;
+    memset(tag_filter, 0, sizeof *tag_filter);
+    bool have_keyword = false;
+    uint32_t written = 0u;
+    uint32_t at = position;
+    for (;;) {
+        while (at < length && line[at] == (uint8_t)' ') {
+            ++at;
+        }
+        if (at == length) {
+            break;
+        }
+        uint32_t token_start = at;
+        while (at < length && line[at] != (uint8_t)' ') {
+            ++at;
+        }
+        uint32_t token_length = at - token_start;
+        if (token_length >= 4u &&
+            line[token_start] == (uint8_t)'t' &&
+            line[token_start + 1u] == (uint8_t)'a' &&
+            line[token_start + 2u] == (uint8_t)'g' &&
+            line[token_start + 3u] == (uint8_t)':') {
+            uint32_t suffix_start = token_start + 4u;
+            uint32_t suffix_length = token_length - 4u;
+            /* The authoritative rule already enforces strict UTF-8, the fixed
+             * White_Space set and the control ranges, so a raw suffix such as
+             * `a"b` is legal and no second validator is needed. */
+            if (!yan_note_tag_valid(line + suffix_start, suffix_length)) {
+                return false;
+            }
+            bool duplicate = false;
+            for (uint16_t i = 0u; i < tag_filter->count; ++i) {
+                if (tag_filter->length[i] == (uint16_t)suffix_length &&
+                    memcmp(tag_filter->tag[i], line + suffix_start,
+                           suffix_length) == 0) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) {
+                continue;
+            }
+            if (tag_filter->count >= YAN_NOTE_TAG_MAX_COUNT) {
+                return false; /* the 17th distinct tag is USAGE */
+            }
+            tag_filter->length[tag_filter->count] =
+                (uint16_t)suffix_length;
+            memcpy(tag_filter->tag[tag_filter->count], line + suffix_start,
+                   suffix_length);
+            tag_filter->count += 1u;
+            continue;
+        }
+        /* Tag removal must preserve the old bare keyword grammar: only its
+         * first keyword may not start with '-', even when tags preceded it. */
+        if (!have_keyword && line[token_start] == (uint8_t)'-') {
+            return false;
+        }
+        /* A keyword token keeps the old rule: no inner double quote. */
+        for (uint32_t i = token_start; i < token_start + token_length; ++i) {
+            if (line[i] == (uint8_t)'"') {
+                return false;
+            }
+        }
+        /* Only keyword tokens enter the keyword window, each separated by one
+         * ASCII space, so an interleaved tag operator leaves the keyword query
+         * with exactly the meaning it would have had without the operator. */
+        if (have_keyword) {
+            if (written >= YAN_SEARCH_TERMS_QUERY_MAX) {
+                return false;
+            }
+            shell->keywords[written] = (uint8_t)' ';
+            written += 1u;
+        }
+        if (written + token_length > YAN_SEARCH_TERMS_QUERY_MAX ||
+            written + token_length > sizeof shell->keywords - 1u) {
+            return false;
+        }
+        memcpy(shell->keywords + written, line + token_start, token_length);
+        written += token_length;
+        have_keyword = true;
     }
+    if (!have_keyword || written == 0u) {
+        return false; /* tag-only or an empty bare query is USAGE */
+    }
+    *keyword_start = 0u;
+    *keyword_length = written;
+    return true;
+}
+
+static YanShellResult run_search_terms(YanShell *shell, const uint8_t *query,
+                                       uint32_t query_length,
+                                       const YanNoteTagFilter *filter)
+{
     if (shell->terms == NULL) {
         return emit_status(shell, "ERROR INVALID\r\n");
     }
@@ -1176,7 +1318,11 @@ static YanShellResult run_search(YanShell *shell, const uint8_t *line,
     summary.skipped = 0u;
     summary.mode = YAN_SEARCH_MODE_INDEX;
     YanSearchTermsResult result =
-        yan_search_terms(shell->terms, query, query_length, sink, &summary);
+        (filter != NULL)
+            ? yan_search_terms_filtered(shell->terms, query, query_length,
+                                        filter, sink, &summary)
+            : yan_search_terms(shell->terms, query, query_length, sink,
+                               &summary);
     if (state.output_failed) {
         return YAN_SHELL_FATAL;
     }
@@ -1209,6 +1355,47 @@ static YanShellResult run_search(YanShell *shell, const uint8_t *line,
         return YAN_SHELL_OK;
     }
     return finish_terms_error(shell, result);
+}
+
+/* `search QUERY`: the first non-space byte decides the grammar. A whole
+ * outer-quoted query, and every query on an unbound shell, keeps the old 0026
+ * parse, which rejects any inner double quote. A bare query on a bound shell
+ * bypasses that whole-query check and is split per token: an exact `tag:`
+ * operator takes its raw suffix (quotes and backslashes are literal bytes), and
+ * each remaining keyword token keeps the old no-inner-quote rule. The keyword
+ * window is reassembled from the keyword tokens only, so an interleaved tag
+ * leaves the keyword query unchanged. Only a real tag selection reaches the
+ * filtered entry point. */
+static YanShellResult run_search(YanShell *shell, const uint8_t *line,
+                                 uint32_t length, uint32_t position)
+{
+    uint32_t first = position;
+    while (first < length && line[first] == (uint8_t)' ') {
+        ++first;
+    }
+    bool outer_quoted = first < length && line[first] == (uint8_t)'"';
+    if (shell->metadata == NULL || outer_quoted) {
+        const uint8_t *query = NULL;
+        uint32_t query_length = 0u;
+        if (!search_parse_query(line, length, position, &query,
+                                &query_length)) {
+            return emit_status(shell, "ERROR USAGE\r\n");
+        }
+        return run_search_terms(shell, query, query_length, NULL);
+    }
+    uint32_t keyword_start = 0u;
+    uint32_t keyword_length = 0u;
+    if (!search_parse_tags(shell, line, length, position, &keyword_start,
+                           &keyword_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    const YanNoteTagFilter *filter = shell->metadata_filter.count > 0u
+                                         ? &shell->metadata_filter
+                                         : NULL;
+    /* A bound bare query with no tag still goes through the keyword window,
+     * which holds exactly the old query text with canonical single separators;
+     * the facade applies the old grammar to it. */
+    return run_search_terms(shell, shell->keywords, keyword_length, filter);
 }
 
 /* `rebuild`: no argument, one full RAM rebuild. OK prints the receipt; a
@@ -1319,6 +1506,471 @@ static YanShellResult run_index_command(YanShell *shell, IndexCommand command)
     return run_index_clear(shell);
 }
 
+/* ------------------------------------------------------- 0027 metadata ---- */
+
+/* One ASCII token: spaces around it are skipped, and a token runs to the next
+ * space or the end of the line. Returns false at end of line. */
+static bool meta_next_token(const uint8_t *line, uint32_t length,
+                            uint32_t *position, uint32_t *start,
+                            uint32_t *token_length)
+{
+    uint32_t at = skip_spaces(line, length, *position);
+    if (at == length) {
+        return false;
+    }
+    uint32_t begin = at;
+    while (at < length && line[at] != (uint8_t)' ') {
+        ++at;
+    }
+    *position = at;
+    *start = begin;
+    *token_length = at - begin;
+    return true;
+}
+
+/* True when, after spaces, the line has no token whose first byte is not a
+ * space: i.e. only spaces remain. */
+static bool meta_only_spaces_left(const uint8_t *line, uint32_t length,
+                                  uint32_t position)
+{
+    return skip_spaces(line, length, position) == length;
+}
+
+static bool meta_add_or_del(const uint8_t *line, uint32_t start,
+                            uint32_t token_length, YanNoteManageMode *mode)
+{
+    if (token_is(line, start, token_length, "add")) {
+        *mode = YAN_NOTE_MANAGE_ADD;
+        return true;
+    }
+    if (token_is(line, start, token_length, "del")) {
+        *mode = YAN_NOTE_MANAGE_DELETE;
+        return true;
+    }
+    return false;
+}
+
+static const char *note_error_suffix(YanNoteResult result)
+{
+    switch (result) {
+    case YAN_NOTE_INVALID: return "INVALID";
+    case YAN_NOTE_BUSY: return "BUSY";
+    case YAN_NOTE_STOPPED: return "STOPPED";
+    case YAN_NOTE_METADATA: return "METADATA";
+    case YAN_NOTE_TOO_LARGE: return "TOO_LARGE";
+    case YAN_NOTE_INVALID_TEXT: return "INVALID_TEXT";
+    case YAN_NOTE_NOT_MOUNTED: return "NOT_MOUNTED";
+    case YAN_NOTE_FAULTED: return "FAULTED";
+    case YAN_NOTE_NOT_FOUND: return "NOT_FOUND";
+    case YAN_NOTE_EXISTS: return "EXISTS";
+    case YAN_NOTE_NOSPACE: return "NOSPACE";
+    case YAN_NOTE_CORRUPT: return "CORRUPT";
+    case YAN_NOTE_DIRECTORY_FULL: return "DIRECTORY_FULL";
+    case YAN_NOTE_IO: return "IO";
+    case YAN_NOTE_PROTOCOL: return "PROTOCOL";
+    case YAN_NOTE_UNSUPPORTED: return "UNSUPPORTED";
+    case YAN_NOTE_OK: return "OK";
+    }
+    return NULL;
+}
+
+static bool note_error_is_fatal(YanNoteResult result)
+{
+    switch (result) {
+    case YAN_NOTE_NOT_MOUNTED:
+    case YAN_NOTE_FAULTED:
+    case YAN_NOTE_IO:
+    case YAN_NOTE_PROTOCOL:
+    case YAN_NOTE_CORRUPT:
+    case YAN_NOTE_UNSUPPORTED:
+        return true;
+    case YAN_NOTE_OK:
+    case YAN_NOTE_INVALID:
+    case YAN_NOTE_BUSY:
+    case YAN_NOTE_STOPPED:
+    case YAN_NOTE_METADATA:
+    case YAN_NOTE_TOO_LARGE:
+    case YAN_NOTE_INVALID_TEXT:
+    case YAN_NOTE_NOT_FOUND:
+    case YAN_NOTE_EXISTS:
+    case YAN_NOTE_NOSPACE:
+    case YAN_NOTE_DIRECTORY_FULL:
+        return false;
+    }
+    return true;
+}
+
+static YanShellResult finish_note_error(YanShell *shell, YanNoteResult result)
+{
+    const char *suffix = note_error_suffix(result);
+    bool known = suffix != NULL;
+    if (suffix == NULL) {
+        suffix = "PROTOCOL";
+    }
+    if (!shell_puts(shell, "ERROR ") || !shell_puts(shell, suffix) ||
+        !shell_puts(shell, "\r\n")) {
+        return YAN_SHELL_FATAL;
+    }
+    if (!known) {
+        return YAN_SHELL_FATAL;
+    }
+    return note_error_is_fatal(result) ? YAN_SHELL_FATAL : YAN_SHELL_OK;
+}
+
+/* One declaration token or the rest of the line as raw title text. */
+static YanShellResult run_meta_set(YanShell *shell, const uint8_t *line,
+                                   uint32_t length, uint32_t position)
+{
+    uint32_t name_start = 0u;
+    uint32_t name_length = 0u;
+    if (!meta_next_token(line, length, &position, &name_start, &name_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    uint32_t field_start = 0u;
+    uint32_t field_length = 0u;
+    if (!meta_next_token(line, length, &position, &field_start,
+                         &field_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    char name[YAN_FS_NAME_MAX + 2u];
+    copy_name(line, name_start, name_length, name);
+    if (!yan_note_name_valid((const uint8_t *)name, name_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    if (token_is(line, field_start, field_length, "title")) {
+        /* The title value starts exactly one separator after the `title` token:
+         * any further leading and trailing spaces are part of the value, and an
+         * absent or empty value clears the field. The value is validated here,
+         * so an over-long or control-carrying title is USAGE with zero I/O. */
+        uint32_t text_start = position < length ? position + 1u : length;
+        uint32_t text_length = length - text_start;
+        if (text_length > 0u &&
+            !yan_note_title_valid(line + text_start, text_length)) {
+            return emit_status(shell, "ERROR USAGE\r\n");
+        }
+        YanNoteResult result = yan_note_set_title(
+            shell->metadata, name, line + text_start, text_length);
+        if (result != YAN_NOTE_OK) {
+            return finish_note_error(shell, result);
+        }
+        return emit_ok(shell, "meta set") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
+    }
+    YanNoteDateField field;
+    if (token_is(line, field_start, field_length, "created")) {
+        field = YAN_NOTE_DATE_CREATED;
+    } else if (token_is(line, field_start, field_length, "modified")) {
+        field = YAN_NOTE_DATE_MODIFIED;
+    } else {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    uint32_t date_start = 0u;
+    uint32_t date_length = 0u;
+    if (!meta_next_token(line, length, &position, &date_start, &date_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    if (!meta_only_spaces_left(line, length, position)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    bool clearing = date_length == 1u && line[date_start] == (uint8_t)'-';
+    if (!clearing && !yan_note_date_valid(line + date_start, date_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    YanNoteResult result =
+        yan_note_set_date(shell->metadata, name, field,
+                          clearing ? NULL : line + date_start,
+                          clearing ? 0u : date_length);
+    if (result != YAN_NOTE_OK) {
+        return finish_note_error(shell, result);
+    }
+    return emit_ok(shell, "meta set") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
+}
+
+static YanShellResult run_meta_tag_or_link(YanShell *shell,
+                                           const uint8_t *line,
+                                           uint32_t length, uint32_t position,
+                                           bool link)
+{
+    uint32_t name_start = 0u;
+    uint32_t name_length = 0u;
+    if (!meta_next_token(line, length, &position, &name_start, &name_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    uint32_t mode_start = 0u;
+    uint32_t mode_length = 0u;
+    if (!meta_next_token(line, length, &position, &mode_start, &mode_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    YanNoteManageMode mode;
+    if (!meta_add_or_del(line, mode_start, mode_length, &mode)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    uint32_t value_start = 0u;
+    uint32_t value_length = 0u;
+    if (!meta_next_token(line, length, &position, &value_start,
+                         &value_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    if (!meta_only_spaces_left(line, length, position)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    char name[YAN_FS_NAME_MAX + 2u];
+    copy_name(line, name_start, name_length, name);
+    /* The source name is validated here, so a name with an illegal byte or an
+     * over-long token is USAGE before any service call. */
+    if (!yan_note_name_valid((const uint8_t *)name, name_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    YanNoteResult result;
+    if (link) {
+        char target[YAN_FS_NAME_MAX + 2u];
+        copy_name(line, value_start, value_length, target);
+        if (!yan_note_name_valid((const uint8_t *)target, value_length)) {
+            return emit_status(shell, "ERROR USAGE\r\n");
+        }
+        result = yan_note_link(shell->metadata, name, mode, target);
+        if (result != YAN_NOTE_OK) {
+            return finish_note_error(shell, result);
+        }
+        return emit_ok(shell, "meta link") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
+    }
+    if (!yan_note_tag_valid(line + value_start, value_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    result = yan_note_tag(shell->metadata, name, mode, line + value_start,
+                          value_length);
+    if (result != YAN_NOTE_OK) {
+        return finish_note_error(shell, result);
+    }
+    return emit_ok(shell, "meta tag") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
+}
+
+/* Value formatting reuses the cat stream: valid UTF-8 passes through, invalid
+ * bytes and the forbidden control ranges are escaped byte by byte. */
+static bool note_emit_value(YanShell *shell, const uint8_t *bytes,
+                            uint32_t length)
+{
+    Utf8Stream stream;
+    stream.pending_len = 0u;
+    stream.expected = 0u;
+    for (uint32_t i = 0u; i < length; ++i) {
+        if (!cat_feed(shell, &stream, bytes[i])) {
+            return false;
+        }
+    }
+    return cat_flush(shell, &stream);
+}
+
+static YanShellResult run_meta_show(YanShell *shell, const uint8_t *line,
+                                    uint32_t length, uint32_t position)
+{
+    uint32_t name_start = 0u;
+    uint32_t name_length = 0u;
+    if (!meta_next_token(line, length, &position, &name_start, &name_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    if (!meta_only_spaces_left(line, length, position)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    char name[YAN_FS_NAME_MAX + 2u];
+    copy_name(line, name_start, name_length, name);
+    if (!yan_note_name_valid((const uint8_t *)name, name_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    YanNoteResult result =
+        yan_note_show(shell->metadata, name, &shell->metadata_info);
+    if (result != YAN_NOTE_OK) {
+        return finish_note_error(shell, result);
+    }
+    const YanNoteInfo *info = &shell->metadata_info;
+    if (!shell_puts(shell, "META ") ||
+        !shell_put_bytes(shell, (const uint8_t *)name, name_length) ||
+        !shell_puts(shell, "\r\n")) {
+        return YAN_SHELL_FATAL;
+    }
+    if (!shell_puts(shell, "TITLE ")) {
+        return YAN_SHELL_FATAL;
+    }
+    if (info->has_title) {
+        if (!note_emit_value(shell, info->title, info->title_length)) {
+            return YAN_SHELL_FATAL;
+        }
+    } else if (!shell_puts(shell, "UNKNOWN")) {
+        return YAN_SHELL_FATAL;
+    }
+    if (!shell_puts(shell, "\r\n")) {
+        return YAN_SHELL_FATAL;
+    }
+    if (!shell_puts(shell, "CREATED ")) {
+        return YAN_SHELL_FATAL;
+    }
+    if (info->has_created) {
+        if (!shell_put_bytes(shell, info->created, info->created_length)) {
+            return YAN_SHELL_FATAL;
+        }
+    } else if (!shell_puts(shell, "UNKNOWN")) {
+        return YAN_SHELL_FATAL;
+    }
+    if (!shell_puts(shell, "\r\n")) {
+        return YAN_SHELL_FATAL;
+    }
+    if (!shell_puts(shell, "MODIFIED ")) {
+        return YAN_SHELL_FATAL;
+    }
+    if (info->has_modified) {
+        if (!shell_put_bytes(shell, info->modified, info->modified_length)) {
+            return YAN_SHELL_FATAL;
+        }
+    } else if (!shell_puts(shell, "UNKNOWN")) {
+        return YAN_SHELL_FATAL;
+    }
+    if (!shell_puts(shell, "\r\n")) {
+        return YAN_SHELL_FATAL;
+    }
+    if (info->tag_count == 0u) {
+        if (!shell_puts(shell, "TAG NONE\r\n")) {
+            return YAN_SHELL_FATAL;
+        }
+    } else {
+        for (uint16_t i = 0u; i < info->tag_count; ++i) {
+            /* A tag may carry a backslash or any other raw byte, so it goes
+             * through the same cat-safe stream as the title instead of raw. */
+            if (!shell_puts(shell, "TAG ") ||
+                !note_emit_value(shell, info->tag[i], info->tag_length[i]) ||
+                !shell_puts(shell, "\r\n")) {
+                return YAN_SHELL_FATAL;
+            }
+        }
+    }
+    if (info->link_count == 0u) {
+        if (!shell_puts(shell, "LINK NONE\r\n")) {
+            return YAN_SHELL_FATAL;
+        }
+    } else {
+        for (uint16_t i = 0u; i < info->link_count; ++i) {
+            if (!shell_puts(shell, "LINK ") ||
+                !note_emit_value(shell, info->link[i], info->link_length[i]) ||
+                !shell_puts(shell, info->link_exists[i] ? " OK\r\n"
+                                                        : " DANGLING\r\n")) {
+                return YAN_SHELL_FATAL;
+            }
+        }
+    }
+    return emit_ok(shell, "meta show") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
+}
+
+typedef struct {
+    YanShell *shell;
+    bool output_failed;
+    uint32_t count;
+} MetaListState;
+
+static bool meta_list_callback(void *context, const char *name)
+{
+    MetaListState *state = (MetaListState *)context;
+    if (!shell_puts(state->shell, name) ||
+        !shell_puts(state->shell, "\r\n")) {
+        state->output_failed = true;
+        return false;
+    }
+    state->count += 1u;
+    return true;
+}
+
+static YanShellResult run_meta_list(YanShell *shell, const uint8_t *line,
+                                    uint32_t length, uint32_t position)
+{
+    YanNoteTagFilter *tag_filter = &shell->metadata_filter;
+    memset(tag_filter, 0, sizeof *tag_filter);
+    uint32_t at = position;
+    for (;;) {
+        uint32_t value_start = 0u;
+        uint32_t value_length = 0u;
+        if (!meta_next_token(line, length, &at, &value_start, &value_length)) {
+            break;
+        }
+        if (value_length < 4u ||
+            !token_is(line, value_start, 4u, "tag:")) {
+            return emit_status(shell, "ERROR USAGE\r\n");
+        }
+        uint32_t suffix_start = value_start + 4u;
+        uint32_t suffix_length = value_length - 4u;
+        /* The authoritative rule already enforces strict UTF-8, the fixed
+         * White_Space set and the control ranges, so a raw suffix such as
+         * `a"b` is legal and no second validator is needed. */
+        if (!yan_note_tag_valid(line + suffix_start, suffix_length)) {
+            return emit_status(shell, "ERROR USAGE\r\n");
+        }
+        /* Canonical de-duplication happens before the physical 16-slot bound:
+         * a repeated tag adds nothing, and the 17th *distinct* tag is USAGE. */
+        bool duplicate = false;
+        for (uint16_t i = 0u; i < tag_filter->count; ++i) {
+            if (tag_filter->length[i] == (uint16_t)suffix_length &&
+                memcmp(tag_filter->tag[i], line + suffix_start,
+                       suffix_length) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) {
+            continue;
+        }
+        if (tag_filter->count >= YAN_NOTE_TAG_MAX_COUNT) {
+            return emit_status(shell, "ERROR USAGE\r\n");
+        }
+        tag_filter->length[tag_filter->count] = (uint16_t)suffix_length;
+        memcpy(tag_filter->tag[tag_filter->count], line + suffix_start,
+               suffix_length);
+        tag_filter->count += 1u;
+    }
+    MetaListState state;
+    state.shell = shell;
+    state.output_failed = false;
+    state.count = 0u;
+    const YanNoteTagFilter *filter =
+        tag_filter->count == 0u ? NULL : tag_filter;
+    YanNoteResult result =
+        yan_note_list(shell->metadata, filter, meta_list_callback, &state,
+                      NULL);
+    if (state.output_failed || result == YAN_NOTE_STOPPED) {
+        return state.output_failed ? YAN_SHELL_FATAL : YAN_SHELL_OK;
+    }
+    if (result != YAN_NOTE_OK) {
+        return finish_note_error(shell, result);
+    }
+    if (!shell_puts(shell, "OK meta list shown=") ||
+        !shell_put_decimal(shell, state.count) ||
+        !shell_puts(shell, "\r\n")) {
+        return YAN_SHELL_FATAL;
+    }
+    return YAN_SHELL_OK;
+}
+
+static YanShellResult run_meta(YanShell *shell, const uint8_t *line,
+                               uint32_t length, uint32_t position)
+{
+    uint32_t sub_start = 0u;
+    uint32_t sub_length = 0u;
+    if (!meta_next_token(line, length, &position, &sub_start, &sub_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    if (token_is(line, sub_start, sub_length, "show")) {
+        return run_meta_show(shell, line, length, position);
+    }
+    if (token_is(line, sub_start, sub_length, "set")) {
+        return run_meta_set(shell, line, length, position);
+    }
+    if (token_is(line, sub_start, sub_length, "tag")) {
+        return run_meta_tag_or_link(shell, line, length, position, false);
+    }
+    if (token_is(line, sub_start, sub_length, "link")) {
+        return run_meta_tag_or_link(shell, line, length, position, true);
+    }
+    if (token_is(line, sub_start, sub_length, "list")) {
+        return run_meta_list(shell, line, length, position);
+    }
+    return emit_status(shell, "ERROR USAGE\r\n");
+}
+
 static YanShellResult run_line(YanShell *shell, const uint8_t *line,
                                uint32_t length)
 {
@@ -1337,7 +1989,10 @@ static YanShellResult run_line(YanShell *shell, const uint8_t *line,
         if (!rest_is_spaces(line, length, position)) {
             return emit_status(shell, "ERROR USAGE\r\n");
         }
-        if (!shell_puts(shell, HELP_TEXT)) {
+        /* A bound shell advertises the metadata capabilities; an unbound one
+         * keeps the original help text byte for byte. */
+        if (!shell_puts(shell,
+                        shell->metadata != NULL ? HELP_METADATA : HELP_TEXT)) {
             return YAN_SHELL_FATAL;
         }
         return emit_ok(shell, "help") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
@@ -1422,6 +2077,14 @@ static YanShellResult run_line(YanShell *shell, const uint8_t *line,
         /* A valid form is routed before the health guard; any `index` that
          * reaches here has a bad subcommand or trailing token. */
         return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    if (token_is(line, command_start, command_length, "meta")) {
+        /* 0027: the metadata command family exists only after a successful
+         * binding. An unbound shell keeps the old UNKNOWN_COMMAND verdict. */
+        if (shell->metadata == NULL) {
+            return emit_status(shell, "ERROR UNKNOWN_COMMAND\r\n");
+        }
+        return run_meta(shell, line, length, position);
     }
     if (token_is(line, command_start, command_length, "exit")) {
         if (!rest_is_spaces(line, length, position)) {
@@ -1617,16 +2280,101 @@ YanShellResult yan_shell_init(YanShell *shell, YanFs *fs, YanSearch *search,
     shell->fs = fs;
     shell->search = search;
     shell->terms = terms;
+    /* 0027: the original init leaves the shell unbound so the old command set
+     * and the old query behaviour are unchanged until a caller opts in. */
+    shell->metadata = NULL;
     shell->output = output;
     shell->initialized = true;
     shell->busy = false;
     return YAN_SHELL_OK;
 }
 
+YanShellResult yan_shell_bind_metadata(YanShell *shell, YanNoteContext *note)
+{
+    /* Extent rules run first, for both the unbind and the bind form, so a shell
+     * pointer outside its own object is rejected before any field is read. No
+     * byte is emitted and no filesystem call is made on any path. */
+    if (!shell_span_valid((uintptr_t)(const void *)shell,
+                          (uint64_t)sizeof(YanShell))) {
+        return YAN_SHELL_INVALID;
+    }
+    if (!shell->initialized) {
+        /* The original init is the only way to obtain the facade pointers this
+         * binding validates against; without it neither form is legal. */
+        return YAN_SHELL_INVALID;
+    }
+    if (shell->busy) {
+        return YAN_SHELL_BUSY;
+    }
+    if (note == NULL) {
+        /* The documented unbind: an initialized, idle shell drops its binding
+         * and returns to the old command set. */
+        shell->metadata = NULL;
+        return YAN_SHELL_OK;
+    }
+    uintptr_t note_base = (uintptr_t)(const void *)note;
+    if (!shell_span_valid(note_base, (uint64_t)sizeof(YanNoteContext))) {
+        return YAN_SHELL_INVALID;
+    }
+    /* Both facades are known valid because the shell was initialized through
+     * yan_shell_init, which requires an initialized literal and term facade. */
+    const void *search_context = shell->search->backend.context;
+    uint64_t search_context_size = (uint64_t)shell->search->backend.context_size;
+    const void *search_source = shell->search->backend.source_context;
+    uint64_t search_source_size = (uint64_t)shell->search->backend.source_size;
+    const void *term_context = shell->terms->backend.context;
+    uint64_t term_context_size = (uint64_t)shell->terms->backend.context_size;
+    const void *term_source = shell->terms->backend.source_context;
+    uint64_t term_source_size = (uint64_t)shell->terms->backend.source_size;
+    if (!shell_span_valid((uintptr_t)search_context, search_context_size) ||
+        !shell_span_valid((uintptr_t)search_source, search_source_size) ||
+        !shell_span_valid((uintptr_t)term_context, term_context_size) ||
+        !shell_span_valid((uintptr_t)term_source, term_source_size)) {
+        return YAN_SHELL_INVALID;
+    }
+    if (ranges_overlap((uintptr_t)(const void *)shell, sizeof(YanShell),
+                       note_base, sizeof(YanNoteContext)) ||
+        ranges_overlap((uintptr_t)(const void *)shell->fs, sizeof(YanFs),
+                       note_base, sizeof(YanNoteContext)) ||
+        ranges_overlap((uintptr_t)(const void *)shell->search,
+                       sizeof(YanSearch), note_base,
+                       sizeof(YanNoteContext)) ||
+        ranges_overlap((uintptr_t)(const void *)shell->terms,
+                       sizeof(YanSearchTerms), note_base,
+                       sizeof(YanNoteContext)) ||
+        ranges_overlap((uintptr_t)search_context, search_context_size,
+                       note_base, sizeof(YanNoteContext)) ||
+        ranges_overlap((uintptr_t)search_source, search_source_size,
+                       note_base, sizeof(YanNoteContext)) ||
+        ranges_overlap((uintptr_t)term_context, term_context_size, note_base,
+                       sizeof(YanNoteContext)) ||
+        ranges_overlap((uintptr_t)term_source, term_source_size, note_base,
+                       sizeof(YanNoteContext))) {
+        return YAN_SHELL_INVALID;
+    }
+    /* The borrowed source must be the shell's own filesystem, and the service
+     * must be initialized and idle. The source state is deliberately left to
+     * each command's own service call, which maps it with the note error
+     * policy. */
+    if (!note->initialized) {
+        return YAN_SHELL_INVALID;
+    }
+    if (note->busy) {
+        return YAN_SHELL_BUSY;
+    }
+    if (note->fs == NULL || note->fs != shell->fs) {
+        return YAN_SHELL_INVALID;
+    }
+    shell->metadata = note;
+    return YAN_SHELL_OK;
+}
+
 YanShellResult yan_shell_execute(YanShell *shell, const uint8_t *line,
                                  uint32_t length)
 {
-    if (shell == NULL || !shell->initialized) {
+    if (shell == NULL ||
+        (uint64_t)sizeof *shell > UINTPTR_MAX - (uintptr_t)shell ||
+        !shell->initialized) {
         return YAN_SHELL_INVALID;
     }
     if (shell->busy) {
@@ -1685,6 +2433,14 @@ YanShellResult yan_shell_execute(YanShell *shell, const uint8_t *line,
                  (uintptr_t)(const void *)shell->terms->backend.source_context,
                  (uint64_t)shell->terms->backend.source_size, begin,
                  (uint64_t)length))) {
+            return YAN_SHELL_INVALID;
+        }
+        /* 0027: a bound metadata context is borrowed for the whole call too, so
+         * the command line may not alias it. An unbound shell skips the test. */
+        if (shell->metadata != NULL &&
+            ranges_overlap((uintptr_t)(const void *)shell->metadata,
+                           (uint64_t)sizeof(YanNoteContext), begin,
+                           (uint64_t)length)) {
             return YAN_SHELL_INVALID;
         }
     }

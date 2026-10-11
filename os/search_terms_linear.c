@@ -13,6 +13,8 @@
  * EMPTY while an unusable source is UNAVAILABLE. */
 #include "search_terms_linear.h"
 
+#include "memory.h"
+
 #include <stddef.h>
 
 /* The same pure range rule the facade uses; duplicated here so the backend
@@ -58,6 +60,8 @@ static YanSearchTermsResult linear_map_fs(YanFsResult result)
         return YAN_SEARCH_TERMS_PROTOCOL;
     case YAN_FS_CORRUPT:
         return YAN_SEARCH_TERMS_CORRUPT;
+    case YAN_FS_DIRECTORY_FULL:
+        return YAN_SEARCH_TERMS_INVALID; /* not a searchable condition */
     case YAN_FS_UNSUPPORTED:
         return YAN_SEARCH_TERMS_UNSUPPORTED;
     default:
@@ -99,6 +103,153 @@ YanSearchTermsResult yan_search_terms_linear_init(YanSearchTermsLinear *linear,
     linear->busy = false;
     linear->snippet = NULL;
     linear->snippet_length = 0u;
+    linear->metadata_skipped = 0u;
+    linear->metadata_filtered = false;
+    return YAN_SEARCH_TERMS_OK;
+}
+
+/* Reads the bounded header prefix of one file and reports its qualification.
+ * The whole body is preflighted first, so a binary/NUL file never reaches the
+ * parser: `valid` false means INVALID (skip once). A valid file is read for at
+ * most YAN_NOTE_HEADER_MAX bytes and parsed; a matched prefix with a broken
+ * header is METADATA and stops the whole query. */
+static YanSearchTermsResult linear_qualify_file(YanSearchTermsLinear *linear,
+                                                const char *name,
+                                                uint32_t file_size,
+                                                bool *valid)
+{
+    LinearReader reader;
+    reader.fs = linear->fs;
+    reader.name = name;
+    bool skip = false;
+    YanSearchTermsResult result = yan_search_terms_core_preflight(
+        linear_read, &reader, linear->scratch.chunk, YAN_SEARCH_TERMS_CHUNK,
+        file_size, &skip);
+    if (result != YAN_SEARCH_TERMS_OK) {
+        return result;
+    }
+    if (skip) {
+        *valid = false;
+        return YAN_SEARCH_TERMS_OK;
+    }
+    *valid = true;
+    uint32_t want = file_size < YAN_NOTE_HEADER_MAX ? file_size
+                                                    : YAN_NOTE_HEADER_MAX;
+    uint32_t got = 0u;
+    YanFsResult read_result =
+        yan_fs_read(linear->fs, name, 0u, linear->metadata_prefix, want, &got);
+    if (read_result != YAN_FS_OK) {
+        return linear_map_fs(read_result);
+    }
+    if (got != want) {
+        return YAN_SEARCH_TERMS_PROTOCOL;
+    }
+    YanNoteResult parsed = yan_note_parse_header(linear->metadata_prefix, want,
+                                                &linear->metadata_info,
+                                                &linear->metadata_workspace);
+    if (parsed == YAN_NOTE_OK) return YAN_SEARCH_TERMS_OK;
+    if (parsed == YAN_NOTE_METADATA) return YAN_SEARCH_TERMS_METADATA;
+    return YAN_SEARCH_TERMS_PROTOCOL;
+}
+
+static bool linear_tag_present(const YanNoteInfo *info, const uint8_t *value,
+                               uint32_t length)
+{
+    for (uint16_t i = 0u; i < info->tag_count; ++i) {
+        if (info->tag_length[i] == (uint16_t)length &&
+            memcmp(info->tag[i], value, (size_t)length) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Defensive filter validation for a direct backend call: the facade has already
+ * checked the caller's span and aliases, but an exported entry point must not
+ * trust that. It rejects an absent, out-of-range or malformed selection. */
+bool yan_search_terms_linear_filter_valid(const YanSearchTermsLinear *linear,
+                                          const YanNoteTagFilter *filter)
+{
+    if (linear == NULL || filter == NULL ||
+        (uint64_t)sizeof *linear > UINTPTR_MAX - (uintptr_t)linear) {
+        return false;
+    }
+    if (linear_ranges_overlap(filter, sizeof *filter, linear, sizeof *linear) ||
+        linear_ranges_overlap(filter, sizeof *filter, linear->fs,
+                              sizeof *linear->fs)) {
+        return false;
+    }
+    if (filter->count > YAN_NOTE_TAG_MAX_COUNT) return false;
+    for (uint16_t i = 0u; i < filter->count; ++i) {
+        if (filter->length[i] == 0u || filter->length[i] > YAN_NOTE_TAG_MAX ||
+            !yan_note_tag_valid(filter->tag[i], filter->length[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+YanSearchTermsResult yan_search_terms_linear_qualify(
+    YanSearchTermsLinear *linear, const YanNoteTagFilter *filter)
+{
+    if (linear == NULL ||
+        (uint64_t)sizeof *linear > UINTPTR_MAX - (uintptr_t)linear ||
+        !linear->initialized) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+    if (!yan_search_terms_linear_filter_valid(linear, filter)) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+    for (uint32_t i = 0u; i < YAN_FS_MAX_FILES; ++i) {
+        linear->metadata_eligible[i] = YAN_NOTE_META_TAG;
+    }
+    linear->metadata_skipped = 0u;
+
+    uint32_t cursor = 0u;
+    for (;;) {
+        YanFsInfo info;
+        YanFsResult listed = yan_fs_list(linear->fs, &cursor, &info);
+        if (listed == YAN_FS_END) {
+            break;
+        }
+        if (listed != YAN_FS_OK) {
+            return linear_map_fs(listed);
+        }
+        /* The cursor is the next physical slot, so the entry just read is at
+         * cursor - 1; the eligibility table is indexed by that same physical
+         * slot, never by the entry's ordinal position. */
+        uint32_t slot = cursor - 1u;
+        if (slot >= YAN_FS_MAX_FILES) {
+            return YAN_SEARCH_TERMS_PROTOCOL;
+        }
+        bool valid = true;
+        YanSearchTermsResult result =
+            linear_qualify_file(linear, info.name, info.size_bytes, &valid);
+        if (result == YAN_SEARCH_TERMS_METADATA) {
+            return result; /* a broken header is fatal for the whole query */
+        }
+        if (result != YAN_SEARCH_TERMS_OK) {
+            return result;
+        }
+        if (!valid) {
+            linear->metadata_eligible[slot] = YAN_NOTE_META_INVALID;
+            ++linear->metadata_skipped;
+            continue;
+        }
+        bool qualified = true;
+        for (uint16_t t = 0u; t < filter->count; ++t) {
+            if (!linear_tag_present(&linear->metadata_info, filter->tag[t],
+                                    filter->length[t])) {
+                qualified = false;
+                break;
+            }
+        }
+        if (qualified) {
+            linear->metadata_eligible[slot] = YAN_NOTE_META_ELIGIBLE;
+        } else {
+            linear->metadata_eligible[slot] = YAN_NOTE_META_TAG;
+        }
+    }
     return YAN_SEARCH_TERMS_OK;
 }
 
@@ -138,6 +289,22 @@ static YanSearchTermsResult linear_query_locked(
             return linear_map_fs(listed);
         }
         uint32_t slot = cursor - 1u;
+        /* 0027 filtered mode: consult the precomputed eligibility set before
+         * the file is read. A binary/NUL slot was already counted once by the
+         * qualification pass; a valid file without the tags is skipped without
+         * touching the skip count. A plain (unfiltered) query never consults
+         * the table, so its warm path and read bound are unchanged. */
+        if (linear->metadata_filtered) {
+            if (slot >= YAN_FS_MAX_FILES) {
+                return YAN_SEARCH_TERMS_PROTOCOL;
+            }
+            if (linear->metadata_eligible[slot] != YAN_NOTE_META_ELIGIBLE) {
+                if (linear->metadata_eligible[slot] == YAN_NOTE_META_INVALID) {
+                    ++rank->skipped;
+                }
+                continue;
+            }
+        }
         reader.name = info.name;
         result = yan_search_terms_core_scan_file(
             info.name, slot, info.size_bytes, linear_read, &reader, &pattern,
@@ -208,6 +375,47 @@ YanSearchTermsResult yan_search_terms_linear_query(
     linear->snippet_length = 0u;
     YanSearchTermsResult result = linear_query_locked(
         linear, query, query_length, match, match_context, summary);
+    linear->busy = false;
+    return result;
+}
+
+YanSearchTermsResult yan_search_terms_linear_query_filtered(
+    void *context, const uint8_t *query, uint32_t query_length,
+    const YanNoteTagFilter *filter, YanSearchTermsMatchFn match,
+    void *match_context, YanSearchTermsSummary *summary)
+{
+    YanSearchTermsLinear *linear = (YanSearchTermsLinear *)context;
+    if (linear == NULL ||
+        (uint64_t)sizeof *linear > UINTPTR_MAX - (uintptr_t)linear ||
+        !linear->initialized) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+    if (match == NULL) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+    if (linear->busy) {
+        return YAN_SEARCH_TERMS_BUSY;
+    }
+    if (!yan_search_terms_linear_filter_valid(linear, filter)) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+
+    /* The whole qualification runs first: every invalid binary is skipped once,
+     * every valid header is parsed, and one broken header fails the query
+     * before any ranking or callback happens. The mode flag is armed only
+     * around the scan and is cleared on every exit so a later plain query takes
+     * the original warm path. */
+    linear->busy = true;
+    linear->snippet = NULL;
+    linear->snippet_length = 0u;
+    linear->metadata_filtered = true;
+    YanSearchTermsResult result =
+        yan_search_terms_linear_qualify(linear, filter);
+    if (result == YAN_SEARCH_TERMS_OK) {
+        result = linear_query_locked(linear, query, query_length, match,
+                                     match_context, summary);
+    }
+    linear->metadata_filtered = false;
     linear->busy = false;
     return result;
 }
@@ -318,5 +526,6 @@ YanSearchTermsBackend yan_search_terms_linear_backend(
     backend.status = yan_search_terms_linear_status;
     backend.rebuild = yan_search_terms_linear_rebuild;
     backend.clear = yan_search_terms_linear_clear;
+    backend.query_filtered = yan_search_terms_linear_query_filtered;
     return backend;
 }

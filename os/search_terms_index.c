@@ -560,6 +560,17 @@ static YanSearchTermsResult index_eval_line(YanSearchTermsIndex *index,
     return YAN_SEARCH_TERMS_OK;
 }
 
+/* The summary's skipped count in filtered mode: the qualification pass already
+ * counted every binary/NUL file once; in plain mode the build's own skip count
+ * is the definition. */
+static uint32_t index_skipped_count(const YanSearchTermsIndex *index)
+{
+    if (index->linear.metadata_filtered) {
+        return index->linear.metadata_skipped;
+    }
+    return index->skipped;
+}
+
 static YanSearchTermsResult index_search_locked(
     YanSearchTermsIndex *index, const uint8_t *query, uint32_t query_length,
     YanSearchTermsMatchFn match, void *match_context,
@@ -625,7 +636,7 @@ static YanSearchTermsResult index_search_locked(
             if (summary != NULL) {
                 summary->total = 0u;
                 summary->shown = 0u;
-                summary->skipped = index->skipped;
+                summary->skipped = index_skipped_count(index);
                 summary->mode = YAN_SEARCH_MODE_INDEX;
             }
             return YAN_SEARCH_TERMS_OK;
@@ -655,6 +666,16 @@ static YanSearchTermsResult index_search_locked(
     while (posting != INDEX_NO_POSTING) {
         uint32_t slot = index->postings[posting].slot;
         uint32_t line = index->postings[posting].line;
+        /* 0027 filtered mode: a slot that failed qualification must never reach
+         * index_eval_line, so it contributes no score, no total and no row. The
+         * check happens before the line's keyword work, which is what keeps the
+         * "filter first, then rank" contract true for the READY path. */
+        if (index->linear.metadata_filtered &&
+            (slot >= YAN_FS_MAX_FILES ||
+             index->linear.metadata_eligible[slot] != YAN_NOTE_META_ELIGIBLE)) {
+            posting = index->postings[posting].next;
+            continue;
+        }
         if (!have_last || slot != last_slot || line != last_line) {
             have_last = true;
             last_slot = slot;
@@ -702,7 +723,7 @@ static YanSearchTermsResult index_search_locked(
     if (summary != NULL) {
         summary->total = rank->total;
         summary->shown = shown;
-        summary->skipped = index->skipped;
+        summary->skipped = index_skipped_count(index);
         summary->mode = YAN_SEARCH_MODE_INDEX;
     }
     return YAN_SEARCH_TERMS_OK;
@@ -717,10 +738,10 @@ static YanSearchTermsResult index_scan_locked(
                                          match, match_context, summary);
 }
 
-static YanSearchTermsResult index_query_locked(
+static YanSearchTermsResult index_query_with_filter(
     YanSearchTermsIndex *index, const uint8_t *query, uint32_t query_length,
-    YanSearchTermsMatchFn match, void *match_context,
-    YanSearchTermsSummary *summary)
+    const YanNoteTagFilter *filter, YanSearchTermsMatchFn match,
+    void *match_context, YanSearchTermsSummary *summary)
 {
     YanFsSource source;
     YanSearchTermsResult result = index_observe(index, &source);
@@ -737,6 +758,24 @@ static YanSearchTermsResult index_query_locked(
         return source.state == YAN_FS_STATE_FAULTED
                    ? YAN_SEARCH_TERMS_FAULTED
                    : YAN_SEARCH_TERMS_NOT_MOUNTED;
+    }
+    if (filter != NULL) {
+        /* 0027: qualification runs before any index decision, so a broken
+         * header cannot hide behind a missing keyword, a warm cache or a LIMIT
+         * fallback. The eligibility table is indexed by physical slot, so the
+         * index's own entries can be screened by the same result. */
+        result = yan_search_terms_linear_qualify(&index->linear, filter);
+        if (result != YAN_SEARCH_TERMS_OK) {
+            /* A failed qualification must not leave the mode flag armed for a
+             * later plain query on the same context. */
+            index->linear.metadata_filtered = false;
+            return result;
+        }
+        index->linear.metadata_filtered = true;
+    } else {
+        /* A plain query on this context never consults the eligibility table,
+         * even if a previous call left it populated. */
+        index->linear.metadata_filtered = false;
     }
     if (!source.cacheable) {
         index_clear_cache(index);
@@ -757,7 +796,9 @@ static YanSearchTermsResult index_query_locked(
         return index_scan_locked(index, query, query_length, match,
                                  match_context, summary);
     }
-    /* EMPTY, STALE or a changed READY/LIMIT identity: rebuild once. */
+    /* EMPTY, STALE or a changed READY/LIMIT identity: rebuild once. The rebuild
+     * itself ignores the eligibility table; only the lookup and the scan
+     * fallback consult it. */
     result = index_build_locked(index);
     if (result == YAN_SEARCH_TERMS_INDEX_LIMIT) {
         return index_scan_locked(index, query, query_length, match,
@@ -776,7 +817,9 @@ static YanSearchTermsResult index_query_locked(
 
 static YanSearchTermsResult index_guard(const YanSearchTermsIndex *index)
 {
-    if (index == NULL || !index->initialized) {
+    if (index == NULL ||
+        (uint64_t)sizeof *index > UINTPTR_MAX - (uintptr_t)index ||
+        !index->initialized) {
         return YAN_SEARCH_TERMS_INVALID;
     }
     if (index->busy) {
@@ -800,8 +843,8 @@ static YanSearchTermsResult index_query(void *context, const uint8_t *query,
         return YAN_SEARCH_TERMS_INVALID;
     }
     index->busy = true;
-    YanSearchTermsResult result = index_query_locked(
-        index, query, query_length, match, match_context, summary);
+    YanSearchTermsResult result = index_query_with_filter(
+        index, query, query_length, NULL, match, match_context, summary);
     index->busy = false;
     return result;
 }
@@ -917,6 +960,33 @@ YanSearchTermsResult yan_search_terms_index_init(YanSearchTermsIndex *index,
     return YAN_SEARCH_TERMS_OK;
 }
 
+static YanSearchTermsResult index_query_filtered(
+    void *context, const uint8_t *query, uint32_t query_length,
+    const YanNoteTagFilter *filter, YanSearchTermsMatchFn match,
+    void *match_context, YanSearchTermsSummary *summary)
+{
+    YanSearchTermsIndex *index = (YanSearchTermsIndex *)context;
+    YanSearchTermsResult guard = index_guard(index);
+    if (guard != YAN_SEARCH_TERMS_OK) {
+        return guard;
+    }
+    if (match == NULL) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+    /* The exported index seam is reached through the facade, which validates
+     * the caller's span; a direct call still gets the same defensive filter
+     * check the linear backend applies. */
+    if (!yan_search_terms_linear_filter_valid(&index->linear, filter)) {
+        return YAN_SEARCH_TERMS_INVALID;
+    }
+    index->busy = true;
+    YanSearchTermsResult result = index_query_with_filter(
+        index, query, query_length, filter, match, match_context, summary);
+    index->linear.metadata_filtered = false;
+    index->busy = false;
+    return result;
+}
+
 YanSearchTermsBackend yan_search_terms_index_backend(
     YanSearchTermsIndex *index)
 {
@@ -931,5 +1001,6 @@ YanSearchTermsBackend yan_search_terms_index_backend(
     backend.status = index_status;
     backend.rebuild = index_rebuild;
     backend.clear = index_clear;
+    backend.query_filtered = index_query_filtered;
     return backend;
 }

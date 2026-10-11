@@ -263,7 +263,7 @@ def cli_missing_controls():
         # only used for input classification, never built.
         placeholder_cc = sys.executable
         absent_cc = str(Path(base) / "no-such-compiler")
-        for rel in ("os/shell.c", "os/shell.h", "os/search.c", "os/search.h",
+        for rel in ("os/shell.c", "os/note_metadata.c", "os/shell.h", "os/note_metadata.h", "os/search.c", "os/search.h",
                     "os/search_linear.c", "os/search_linear.h",
                     "tests/test_line.c",
                     "tests/guest/guest.h", "tests/terminal_runtime_driver.c",
@@ -291,7 +291,7 @@ def cli_missing_controls():
         # Missing external tools make the required order visible: repository
         # failure is 1, while an intact repository may legitimately return 77.
         Path(guest).write_bytes(b"guard-only ELF placeholder")
-        for rel in ("os/search.c", "os/search_linear.c", "os/shell.c",
+        for rel in ("os/search.c", "os/search_linear.c", "os/shell.c", "os/note_metadata.c",
                     "os/editor.c", "os/yanfs.c", "apps/yanfs_terminal/main.c"):
             victim = tree / rel
             saved = victim.read_bytes()

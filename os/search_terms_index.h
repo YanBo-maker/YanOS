@@ -35,10 +35,18 @@
  * 255, never the stored count. Per-query atom keys/cursors verify identity
  * through each key's posting list and exact byte adjacency. The 63-entry
  * directory snapshot, the rank table and the complete linear fallback backend
- * are bounded derived scratch. The whole context stays under the 2 MiB static
- * budget and is caller-owned; it must never live on the 4 KiB task stack. The
- * numbers below are design-time sizeof/static_assert values, not a Host or RV32
- * measured stack/size report. */
+ * are bounded derived scratch; 0027 adds the metadata prefix/info/workspace and
+ * the eligibility flags inside that embedded linear object, so the index's
+ * protected span already covers the whole filtered-query scratch. The whole
+ * context stays under the 2 MiB static budget and is caller-owned; it must
+ * never live on the 4 KiB task stack. The numbers below are design-time
+ * sizeof/static_assert values, not a Host or RV32 measured stack/size report.
+ *
+ * The 0027 filtered query is implemented through the embedded linear backend:
+ * the whole-directory qualification (preflight, header parse, exact tag AND)
+ * runs before any index decision, then the READY lookup or the scan fallback
+ * screens candidates by physical slot. The plain query path is unchanged and
+ * never consults the eligibility table. */
 
 #define YAN_SEARCH_TERMS_INDEX_KEYS UINT32_C(8192)
 #define YAN_SEARCH_TERMS_INDEX_KEY_POOL UINT32_C(262144)

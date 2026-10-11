@@ -69,9 +69,9 @@ GUEST_LD = "os/guest.ld"
 PRODUCTION_SOURCES = [
     "apps/yanfs_terminal/main.c", "os/trap_entry.S", "os/task_switch.S",
     "os/task.c", "os/console.c", "os/line.c", "os/terminal.c",
-    "os/shell.c", "os/editor.c", "os/search.c", "os/search_linear.c",
+    "os/shell.c", "os/note_metadata.c", "os/editor.c", "os/search.c", "os/search_linear.c",
     "os/block.c", "os/yanfs.c", "os/yanfs_block.c", "os/memory.c",
-    "os/search_terms.c", "os/search_terms_core.c", "os/search_terms_linear.c",
+    "os/search_terms.c", "os/note_metadata_format.c", "os/search_terms_core.c", "os/search_terms_linear.c",
     "os/search_terms_index.c", "os/search_text.c",
 ]
 # Every repository header the built sources include, so a missing one is a hard
@@ -84,10 +84,10 @@ HOST_HEADERS = [
 ]
 GUEST_HEADERS = [
     "tests/guest/guest.h", "os/block.h", "os/console.h", "os/line.h",
-    "os/platform.h", "os/search.h", "os/search_linear.h", "os/shell.h",
+    "os/platform.h", "os/search.h", "os/search_linear.h", "os/shell.h", "os/note_metadata.h",
     "os/task.h", "os/terminal.h", "os/yanfs.h",
     "os/yanfs_block.h", "os/editor.h",
-    "os/memory.h", "os/search_terms.h", "os/search_terms_core.h",
+    "os/memory.h", "os/search_terms.h", "os/note_metadata_format.h", "os/search_terms_core.h",
     "os/search_terms_linear.h", "os/search_terms_index.h", "os/search_text.h",
 ]
 SANITIZER_FLAGS = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all",

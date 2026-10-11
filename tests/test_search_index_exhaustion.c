@@ -202,6 +202,29 @@ static void index_source_exhaustion_is_uncacheable_and_scans(void)
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SEARCH_MODE_SCAN, summary.mode,
                                   "an uncacheable source must scan");
     TEST_ASSERT_EQUAL_UINT32(1u, ex_matches);
+    /* A genuinely exhausted process still qualifies metadata before its SCAN.
+     * Old no-header note.md is excluded, while tagged.md enters the result. */
+    static const uint8_t tagged[] = "@yan-note 1\ntag: os\n@end\nhit\n";
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
+        yan_fs_create(&fs_a, "tagged.md", tagged, sizeof tagged - 1u));
+    static YanNoteTagFilter filter;
+    filter.count = 1u; filter.length[0] = 2u;
+    memcpy(filter.tag[0], "os", 2u);
+    ex_matches = 0u;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SEARCH_TERMS_OK,
+        yan_search_terms_filtered(&terms_a, (const uint8_t *)"hit", 3u,
+                                  &filter, sink, &summary), "uncacheable_filtered_ok");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SEARCH_MODE_SCAN, summary.mode,
+                                  "uncacheable_filtered_scan");
+    TEST_ASSERT_EQUAL_UINT64_MESSAGE(1u, summary.total, "uncacheable_filtered_total_one");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1u, ex_matches, "uncacheable_filtered_one_callback");
+    static const uint8_t bad[] = "@yan-note 1\nunknown: x\n@end\n";
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_create(&fs_a, "bad.md", bad, sizeof bad - 1u));
+    ex_matches = 0u;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SEARCH_TERMS_METADATA,
+        yan_search_terms_filtered(&terms_a, (const uint8_t *)"missing", 7u,
+                                  &filter, sink, &summary), "uncacheable_bad_head_metadata");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0u, ex_matches, "uncacheable_bad_head_no_callbacks");
 }
 
 int main(void)
