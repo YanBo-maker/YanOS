@@ -5,9 +5,9 @@
 - 规格：版本化同文件头、meta观察/单文件更新/列表、统一term API标签AND筛选；旧格式与无tag查询保持。
 - 实现：纯格式、元数据服务、统一term API标签筛选、shell命令与生产Guest接入已完成，独立实现审查已完成。
 - 验证：本机Release81/81（54.70 s）、ASan/UBSan81/81（93.49 s）、Windows MSVC52/52（20.63 s）；统一十三组实际变异13/13（190.50 s），均0失败、0SKIP。Linux注册81默认/94总计，含六个默认puregate。功能提交180d18e的远端三项CI已通过；下列0026结果保留为历史基线。
-- 用户审查：整体方案已批准，实现交付与合入待审查，理解由项目所有者判断。
+- 用户审查：整体方案已批准，项目所有者于2026-10-11明确批准PR #24合入main（7451c85caa0b61e31add60a6374c326993471686）；学习理解由项目所有者判断。
 
-功能实现提交`180d18e94b38af88f8fdb67d86931db8e50eca5a`已推送并建立[PR #24](https://github.com/YanBo-maker/YanOS/pull/24)，前置Spec Lock提交`7eb143d`保留。2026-10-11，[CI运行38123445607](https://github.com/YanBo-maker/YanOS/actions/runs/38123445607)对应上述功能head，三项成功：Linux Release54/54（13.68 s）、Debug ASan54/54（61.13 s）、Windows52/52（58.97 s）。远端配置为TOOLS OFF，不等同本机81组工具/Guest和十三组实际变异；本机测量原值保持。CI成功与维护者实现交付、合入批准分别记录，后两者仍待。
+功能实现提交`180d18e94b38af88f8fdb67d86931db8e50eca5a`已推送并建立[PR #24](https://github.com/YanBo-maker/YanOS/pull/24)，前置Spec Lock提交`7eb143d`保留。2026-10-11，[CI运行38123445607](https://github.com/YanBo-maker/YanOS/actions/runs/38123445607)对应上述功能head，三项成功：Linux Release54/54（13.68 s）、Debug ASan54/54（61.13 s）、Windows52/52（58.97 s）。远端配置为TOOLS OFF，不等同本机81组工具/Guest和十三组实际变异；本机测量原值保持。CI成功与所有者合入批准分别记录。项目所有者随后明确批准merge commit，PR #24已合入main；合并提交`7451c85caa0b61e31add60a6374c326993471686`的树与已审c1f27e完全一致，前置规格7eb143d、实现180d18e和状态c1f27e阶段提交保留。
 
 ### 0027 本机验收（2026-10-08）
 
@@ -17,7 +17,7 @@
 
 Host/RV32的index、note context与shell合计1606968/1606920字节，低于2MiB；index内已经包含linear及metadata资格scratch，不重复计数。index分别1572048/1572032字节，note30544/30536，shell4376/4352；info/workspace各1920、filter1058。被测模块最大单函数帧Host608、RV32496字节，RV32服务128、格式80、shell208；这不是完整调用链或ISR嵌套栈峰值证明。原始测量见`build/search-meta-layout-stack-final.log`与对应`.su`。
 
-初次默认中的旧search语法兼容失败、Windows缺输入诊断路径repr不一致，以及统一变异首轮注入锚点失效，均在修后重跑；未把夹具、编译或注入harness错误计成缺陷检出。缺仓库输入硬1、缺外部依赖77及指定suite/owner/assertion纪律保持。元数据更新成功回执为OK meta set/tag/link，使用与读取边界见[README](../README.md)及[0027](specs/0027-note-metadata.md)。本机完成不代替远端CI或项目所有者对实现与合入的审查。
+初次默认中的旧search语法兼容失败、Windows缺输入诊断路径repr不一致，以及统一变异首轮注入锚点失效，均在修后重跑；未把夹具、编译或注入harness错误计成缺陷检出。缺仓库输入硬1、缺外部依赖77及指定suite/owner/assertion纪律保持。元数据更新成功回执为OK meta set/tag/link，使用与读取边界见[README](../README.md)及[0027](specs/0027-note-metadata.md)。本机验收、远端CI与所有者合入批准分别记录；当前合入事实见页首。
 
 ### 0027 分项实施历史（2026-10-08）
 
@@ -359,7 +359,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-0027本机实现与验证完成，功能提交已推送且对应远端CI通过，下一步由项目所有者审查PR #24的实现与合入；未获合入批准前不合入main。学习理解由项目所有者判断，后续能力另行对齐。
+0027已完成本机验证、远端CI及所有者批准合入，通过PR #24交付main，供项目所有者阅读和运行。学习理解由项目所有者判断，下一项能力另行对齐。
 
 ### 历史推进记录（M1a / M2a）
 
