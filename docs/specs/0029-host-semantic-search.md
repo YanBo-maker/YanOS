@@ -1,6 +1,6 @@
 # 0029：Host侧语义检索
 
-> 状态：**Spec Lock**（2026-10-14 21:11 +08:00）。项目所有者已认可Host语义检索整体方案，并授权形成规格、继续实现。实现待推进，可靠性验证与真实模型效果均未验；CI和实现交付、合入审查另行记录，学习理解由项目所有者判断。
+> 状态：**Spec Lock**（2026-10-14 21:11 +08:00）。项目所有者已认可Host语义检索整体方案，并授权形成规格、继续实现。已进入实施，本机完整回归、实际变异及固定小语料真实模型复验已完成，独立最终对齐与总审核进行中；CI和实现交付、合入审查另行记录，学习理解由项目所有者判断。
 
 ## INTENTION
 
@@ -107,7 +107,7 @@ search在首次输出前完成全部源/索引/模型验证、query embedding、
 
 ## IMPLE
 
-尚未实现。当前为已批准规格与计划，没有provider、工具、索引或模型效果交付结论；依赖准备与安装不等于实现通过。
+已编写纯SHA、text预检与chunker、整库source hash/文本分类/元数据/段数上限，以及POSIX只读来源与临时发布适配。上述部分及facade/索引已实现并完成定向验证；`host/semantic_llama.h/.c`提供libcurl/yyjson与受控child，`tools/yan_semantic.c`提供CLI。CMake以`YAN_BUILD_SEMANTIC`可选启用Linux工具，查找CURL/yyjson CMake package，默认核心与Guest不要求这些依赖。provider/CLI与完整生产工具已实现，冻结树默认回归、实际变异及生产OFF真实模型小语料复验通过，独立最终对齐及总审核、CI和维护者交付/合入审查另行记录。依赖准备与安装不等于实现通过。
 
 ## VERIFY
 
@@ -122,4 +122,8 @@ search在首次输出前完成全部源/索引/模型验证、query embedding、
 | CLI/工程 | 精确结果/exit码、timeout非整数/溢出/0/3601为USAGE零provider、错误前零MATCH、输出后失败精确prefix不补OK、可选依赖/默认Guest不变、指定assert变异控制与硬1/77 |
 | 真实效果 | 预标定中英文Top5相关出处/误检、至少一例无literal命中、固定模型runnerhash、实际加载/重建/查询耗时及峰值内存，fake与真效果分列 |
 
-全部验证待执行，当前没有新增套件注册数、通过时间或效果指标。实现、可靠性验收、真实模型效果、CI和所有者实现审查分别记录。
+2026-10-15冻结树：Release100/100（294.77 s）、ASan/UBSan100/100（423.51 s）、Windows MSVC65/65（141.66 s），统一十五组实际变异15/15（321.87 s），均0失败、0SKIP。Linux工具/provider开启注册100默认/115总计、八puregate；facade17/SHA8/text34/corpus9/POSIX5，文本oracle690、排名oracle50、provider24、CLI31通过。semantic19个实际缺陷须命中指定suite/owner/断言，三类实际负控及puregate10项控制通过。历史专项与真实问题修复保留在[STATUS](../STATUS.md)，不混作当次全量执行。
+
+生产OFF实际工具最终重建后，固定21笔记/10问题真实模型复验中8个有标签问题Top5各有相关出处，8个无literal命中；两无关问题仍各返回20候选。报告绑定当前工具/model/runner真实SHA及原文出处，重建7.63 s、status1.90 s、query2.62–2.84 s、峰值RSS1213312 KiB，只小语料/本机结果。`tests/semantic_model_check.py`是操作员显式运行入口，不注册默认CTest、不进入普通CI；缺工具硬失败、缺外部模型/runner/time明确77且不算通过，命令见[README](../../README.md)。fake可靠性通过不能冒充真实效果。
+
+当前实现与本机验收完成，独立最终文档对齐/总审核、功能PR远端CI及维护者交付/合入审查另行记录；不把本机或小语料通过当成用户理解判断。

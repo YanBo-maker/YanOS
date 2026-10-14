@@ -34,6 +34,8 @@ ISA 行为遵循 Spec → Test → Implementation：先写用例并确认预期�
 
 发现遗漏先停止收口，由总审核按权限修订，再交同一 dsh 会话复核；改变语义仍须项目所有者批准。单阶段只复用一个文档审核会话，开始前设置轮次和重试上限，重试不新建会话，结束关闭，不自动重启归档实验。dsh 不可用时记录原因并保留待审状态，不能跳过或假称通过。
 
+可选Host语义工具使用`YAN_BUILD_SEMANTIC=ON`及CURL/yyjson的CMake package，常规核心/Guest配置不要求这些依赖。验证必须区分provider关闭的默认回归、fake provider/CLI故障检查与实际生产工具的真实模型效果；记录各自二进制和模型身份、计数、耗时与未覆盖范围。固定小语料Top5结果不作通用质量保证，provider修改后须重建真实工具复验。真实效果脚本`tests/semantic_model_check.py`由操作员显式运行，不注册默认CTest或普通CI；外部依赖缺失77只表示待验，不能以fake通过替代。旧0028十四组记录保持历史范围。
+
 ## 实现约定
 
 - Host 核心使用 C17；Guest 使用 C 和必要的 RISC-V 汇编。
@@ -55,10 +57,12 @@ ISA 行为遵循 Spec → Test → Implementation：先写用例并确认预期�
 
 ### 合并前检查清单
 
-1. 默认套件全绿：`cmake --build build --parallel && ctest --test-dir build --output-on-failure`。若配置已开启变异，用 `ctest --test-dir build -E '_mutation$' --output-on-failure` 运行默认套件，保留默认的 `note_relations_mutation_gate`、`note_metadata_mutation_gate`、`search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 判据负控。这里的 `build` 指**你自己的构建目录**：本机上 `build/` 是各构建目录的容器（`build/agent-*` 等，没有统一的根配置），所以要先 `cmake -S . -B build/<你的目录>` 配置它，否则 `cmake --build build` 会直接报 `Error: could not load cache`（exit 1）。
-2. 变异检查显式跑一次：`cmake -S . -B build -DYAN_BUILD_TOOLS=ON -DYAN_ENABLE_MUTATION_TESTS=ON …` 后运行 `ctest --test-dir build -R '_mutation$'`。开关下实际变异套件在 Linux、工具与依赖齐备时是**十四组**：`note_relations_mutation`、`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`；默认七个 `*_mutation_gate` 检查分类器，不算实际变异组。另有两组 `difftest_mutation` / `difftest_ref_mutation` **只在检出 NEMU 参考模型时注册**，本地缺参考模型时不在名单里。每一组都必须 **0 存活**，而且**检出只认指定owner及具体断言失败**：无关case或同case的无关断言不计检出；完整footer、逐项PASS/FAIL/IGNORE计数与退出码必须一致。timeout、信号死亡（139 等）、sanitizer 报告、fixture abort、构建失败**一律归 harness error，不计检出**（这两条判据是 2026-09-20 两次门禁缺陷换来的：一次是只加一行 `fputs` 的零行为变化变异体被判成检出，一次是纯崩溃与 fixture abort 被计成检出）。**这一步不能省**：变异检查是"测试真的有检测力"的唯一证据，默认不注册只是因为它慢。
+1. 默认套件全绿：`cmake --build build --parallel && ctest --test-dir build --output-on-failure`。若配置已开启变异，用 `ctest --test-dir build -E '_mutation$' --output-on-failure` 运行默认套件，保留默认的 `semantic_mutation_gate`、`note_relations_mutation_gate`、`note_metadata_mutation_gate`、`search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 判据负控。这里的 `build` 指**你自己的构建目录**：本机上 `build/` 是各构建目录的容器（`build/agent-*` 等，没有统一的根配置），所以要先 `cmake -S . -B build/<你的目录>` 配置它，否则 `cmake --build build` 会直接报 `Error: could not load cache`（exit 1）。
+2. 变异检查显式跑一次：`cmake -S . -B build -DYAN_BUILD_TOOLS=ON -DYAN_ENABLE_MUTATION_TESTS=ON …` 后运行 `ctest --test-dir build -R '_mutation$'`。开关下实际变异套件在 Linux、工具与依赖齐备时是**十五组**：`semantic_mutation`、`note_relations_mutation`、`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`；默认八个 `*_mutation_gate` 检查分类器，不算实际变异组。另有两组 `difftest_mutation` / `difftest_ref_mutation` **只在检出 NEMU 参考模型时注册**，本地缺参考模型时不在名单里。每一组都必须 **0 存活**，而且**检出只认指定owner及具体断言失败**：无关case或同case的无关断言不计检出；完整footer、逐项PASS/FAIL/IGNORE计数与退出码必须一致。timeout、信号死亡（139 等）、sanitizer 报告、fixture abort、构建失败**一律归 harness error，不计检出**（这两条判据是 2026-09-20 两次门禁缺陷换来的：一次是只加一行 `fputs` 的零行为变化变异体被判成检出，一次是纯崩溃与 fixture abort 被计成检出）。**这一步不能省**：变异检查是"测试真的有检测力"的唯一证据，默认不注册只是因为它慢。
 3. 文档自洽核对：由总审核角色核对状态行、规格索引、计数与链接。
 4. **新增或改动被忽略扩展名的工件时，确认它真的能进提交**：判据是 `git add --dry-run <路径>` 是否列出该文件，**不是** `git check-ignore` 的返回码——命中取反规则时它也返回 0。仓库已经踩过一次：golden 基准的 `.jsonl` / `.hex` 被"验证产物不提交"的规则吃掉，基准进不了仓库，测试会在别的机器上静默 SKIP。
+
+0029冻结树本机验收（2026-10-15）：Linux同时开启TOOLS与SEMANTIC，默认100组、开启实际变异后115组，含八个默认puregate；Release100/100（294.77 s）、ASan/UBSan100/100（423.51 s）、Windows65/65（141.66 s），统一十五组实际变异15/15（321.87 s），均0失败、0SKIP。Windows不包含Linux provider/POSIX，不能把计数直接等同Linux覆盖。semantic19个指定suite/owner/具体断言缺陷与实际负控、puregate10项通过；真实生产OFF工具效果由独立手动脚本另验。日志和效果边界见[STATUS](docs/STATUS.md)，远端CI与维护者批准另行记录。
 
 0028本机验收（2026-10-14复测）：Linux默认90组、开启实际变异后104组，Windows默认58组；Release90/90（92.36 s）、ASan/UBSan90/90（154.99 s）、Windows MSVC58/58（42.50 s），统一十四组实际变异14/14（274.04 s），均0失败、0SKIP。七个默认puregate不计实际变异组；新增关系18个缺陷匹配指定suite、owner和具体断言。本机验收、远端CI与维护者批准分别记录，证据见[STATUS](docs/STATUS.md)。
 
