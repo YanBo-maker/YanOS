@@ -26,7 +26,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [知识关系导航](docs/specs/0028-knowledge-relations.md)已实现并完成本机验收：links按声明顺序观察向外链接，backlinks可反查不存在的目标名，related按链接方向与共同标签解释排序，显示前20项并统计全部候选。查询只读现有元数据头，不改变磁盘格式或正文搜索；功能提交be99b8e已通过[PR #26](https://github.com/YanBo-maker/YanOS/pull/26)的三项远端CI；项目所有者于2026-10-14明确批准，经PR #26合入main（8349b7d），阶段提交保留，学习理解由项目所有者判断。
 
-[Host语义检索](docs/specs/0029-host-semantic-search.md)整体方案已批准并锁定，计划提供独立可选Linux/WSL工具，以本地模型为只读YanFS原文段落建立旁置向量索引，返回带物理出处的前20个候选。Guest检索与磁盘格式保持。已实现并完成本机完整回归、实际变异及固定小语料真实模型复验；独立最终对齐与总审核、远端CI和维护者交付/合入审查另行记录。
+[Host语义检索](docs/specs/0029-host-semantic-search.md)整体方案已批准并锁定，提供独立可选Linux/WSL工具，以本地模型为只读YanFS原文段落建立旁置向量索引，返回带物理出处的前20个候选。Guest检索与磁盘格式保持。已实现并完成本机完整回归、实际变异及固定小语料真实模型复验；独立只读dsh对齐与总审核已完成，功能提交9ad39ed已通过[PR #30](https://github.com/YanBo-maker/YanOS/pull/30)对应的三项远端CI；实现交付与合入待维护者批准，学习理解由项目所有者判断。
 
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 

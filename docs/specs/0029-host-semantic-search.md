@@ -1,6 +1,6 @@
 # 0029：Host侧语义检索
 
-> 状态：**Spec Lock**（2026-10-14 21:11 +08:00）。项目所有者已认可Host语义检索整体方案，并授权形成规格、继续实现。已进入实施，本机完整回归、实际变异及固定小语料真实模型复验已完成，独立最终对齐与总审核进行中；CI和实现交付、合入审查另行记录，学习理解由项目所有者判断。
+> 状态：**Spec Lock**（2026-10-14 21:11 +08:00）。项目所有者已认可Host语义检索整体方案，并授权形成规格、继续实现。实现、本机完整回归、实际变异及固定小语料真实模型复验已完成，独立dsh对齐与总审核通过；功能提交9ad39ed的三项远端CI已通过，实现交付与合入待维护者批准，学习理解由项目所有者判断。
 
 ## INTENTION
 
@@ -107,7 +107,7 @@ search在首次输出前完成全部源/索引/模型验证、query embedding、
 
 ## IMPLE
 
-已编写纯SHA、text预检与chunker、整库source hash/文本分类/元数据/段数上限，以及POSIX只读来源与临时发布适配。上述部分及facade/索引已实现并完成定向验证；`host/semantic_llama.h/.c`提供libcurl/yyjson与受控child，`tools/yan_semantic.c`提供CLI。CMake以`YAN_BUILD_SEMANTIC`可选启用Linux工具，查找CURL/yyjson CMake package，默认核心与Guest不要求这些依赖。provider/CLI与完整生产工具已实现，冻结树默认回归、实际变异及生产OFF真实模型小语料复验通过，独立最终对齐及总审核、CI和维护者交付/合入审查另行记录。依赖准备与安装不等于实现通过。
+已编写纯SHA、text预检与chunker、整库source hash/文本分类/元数据/段数上限，以及POSIX只读来源与临时发布适配。上述部分及facade/索引已实现并完成定向验证；`host/semantic_llama.h/.c`提供libcurl/yyjson与受控child，`tools/yan_semantic.c`提供CLI。CMake以`YAN_BUILD_SEMANTIC`可选启用Linux工具，查找CURL/yyjson CMake package，默认核心与Guest不要求这些依赖。provider/CLI与完整生产工具已实现，冻结树默认回归、实际变异及生产OFF真实模型小语料复验通过，独立dsh对齐及总审核已完成，功能提交9ad39ed的CI与维护者合入审查分别记录。依赖准备与安装不等于实现通过。
 
 ## VERIFY
 
@@ -126,4 +126,4 @@ search在首次输出前完成全部源/索引/模型验证、query embedding、
 
 生产OFF实际工具最终重建后，固定21笔记/10问题真实模型复验中8个有标签问题Top5各有相关出处，8个无literal命中；两无关问题仍各返回20候选。报告绑定当前工具/model/runner真实SHA及原文出处，重建7.63 s、status1.90 s、query2.62–2.84 s、峰值RSS1213312 KiB，只小语料/本机结果。`tests/semantic_model_check.py`是操作员显式运行入口，不注册默认CTest、不进入普通CI；缺工具硬失败、缺外部模型/runner/time明确77且不算通过，命令见[README](../../README.md)。fake可靠性通过不能冒充真实效果。
 
-当前实现与本机验收完成，独立最终文档对齐/总审核、功能PR远端CI及维护者交付/合入审查另行记录；不把本机或小语料通过当成用户理解判断。
+当前实现与本机验收、独立dsh对齐/总审核已完成。功能提交9ad39ed已建立PR #30并通过对应三项CI；远端TOOLS/SEMANTIC关闭的计数与包装后验见[STATUS](../STATUS.md)，不替代本机完整工具与人工模型验收。维护者交付/合入批准仍待，不把本机、小语料或CI通过当成用户理解判断。
