@@ -23,6 +23,7 @@ if(YAN_ENABLE_SANITIZERS)
 endif()
 
 option(YAN_BUILD_TOOLS "Build Guest validation tools" OFF)
+option(YAN_BUILD_SEMANTIC "Build optional Linux Host semantic-search tool" OFF)
 
 # External validation layers. They stay optional: a missing dependency is
 # reported as a skipped test, never as a pass.
@@ -119,6 +120,25 @@ target_link_libraries(yan_relation PUBLIC yan_note_format yan_fs)
 target_compile_options(yan_relation PRIVATE ${YAN_WARNINGS})
 target_link_libraries(yan_shell PUBLIC yan_relation)
 
+# 0029 pure Host preprocessing has no model, HTTP or Guest dependency.
+add_library(yan_semantic_text STATIC host/semantic_sha256.c host/semantic_text.c)
+target_include_directories(yan_semantic_text PUBLIC host)
+target_compile_options(yan_semantic_text PRIVATE ${YAN_WARNINGS})
+add_library(yan_semantic_corpus STATIC host/semantic_corpus.c)
+target_link_libraries(yan_semantic_corpus PUBLIC yan_semantic_text yan_note_format)
+target_compile_options(yan_semantic_corpus PRIVATE ${YAN_WARNINGS})
+add_library(yan_semantic_core STATIC host/semantic.c)
+target_link_libraries(yan_semantic_core PUBLIC yan_semantic_corpus)
+if(UNIX)
+    target_link_libraries(yan_semantic_core PUBLIC m)
+endif()
+target_compile_options(yan_semantic_core PRIVATE ${YAN_WARNINGS})
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(yan_semantic_posix STATIC host/semantic_posix.c)
+    target_link_libraries(yan_semantic_posix PUBLIC yan_semantic_core yan_fs)
+    target_compile_options(yan_semantic_posix PRIVATE ${YAN_WARNINGS})
+endif()
+
 if(YAN_BUILD_TOOLS)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_executable(yan_mkfs tools/yan_mkfs.c)
@@ -174,6 +194,7 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
     foreach(_header note_relations note_metadata note_metadata_format block console editor memory line platform search search_linear search_terms search_terms_core search_terms_index search_terms_linear search_text shell task terminal yanfs yanfs_block)
         list(APPEND _yan_terminal_headers "${CMAKE_CURRENT_SOURCE_DIR}/os/${_header}.h")
     endforeach()
+
     add_custom_command(OUTPUT "${YAN_TERMINAL_ELF}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/guest-apps"
         COMMAND "${YAN_RISCV_GCC}" -std=c17 -march=rv32im -mabi=ilp32
@@ -189,6 +210,21 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
     add_custom_target(yanfs_terminal ALL DEPENDS "${YAN_TERMINAL_ELF}")
 endif()
 
+if(YAN_BUILD_SEMANTIC)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR "YAN_BUILD_SEMANTIC requires Linux/WSL")
+    endif()
+    find_package(CURL CONFIG REQUIRED)
+    find_package(yyjson CONFIG REQUIRED)
+    add_library(yan_semantic_llama STATIC host/semantic_llama.c)
+    target_link_libraries(yan_semantic_llama PUBLIC yan_semantic_core
+                          PRIVATE CURL::libcurl yyjson::yyjson)
+    target_compile_options(yan_semantic_llama PRIVATE ${YAN_WARNINGS})
+    add_executable(yan_semantic tools/yan_semantic.c)
+    target_link_libraries(yan_semantic PRIVATE yan_semantic_posix yan_semantic_llama)
+    target_compile_options(yan_semantic PRIVATE ${YAN_WARNINGS})
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
     include(FetchContent)
@@ -200,6 +236,70 @@ if(BUILD_TESTING)
         URL https://codeload.github.com/ThrowTheSwitch/Unity/tar.gz/cbcd08fa7de711053a3deec6339ee89cad5d2697
         URL_HASH SHA256=a197ea06556f524e378861e503fcfe2fe040447c7b90540ad86b653b13245ae4)
     FetchContent_MakeAvailable(unity)
+
+    add_executable(test_semantic_corpus tests/test_semantic_corpus.c)
+    target_link_libraries(test_semantic_corpus PRIVATE yan_semantic_corpus unity::framework)
+    target_compile_options(test_semantic_corpus PRIVATE ${YAN_WARNINGS})
+    add_test(NAME semantic_corpus COMMAND test_semantic_corpus)
+    set_tests_properties(semantic_corpus PROPERTIES TIMEOUT 30)
+
+    add_executable(test_semantic tests/test_semantic.c)
+    target_link_libraries(test_semantic PRIVATE yan_semantic_core unity::framework)
+    target_compile_options(test_semantic PRIVATE ${YAN_WARNINGS})
+    add_test(NAME semantic COMMAND test_semantic)
+    set_tests_properties(semantic PROPERTIES TIMEOUT 30)
+    add_executable(semantic_text_probe tests/semantic_text_probe.c)
+    target_link_libraries(semantic_text_probe PRIVATE yan_semantic_text)
+    target_compile_options(semantic_text_probe PRIVATE ${YAN_WARNINGS})
+    add_executable(semantic_rank_probe tests/semantic_rank_probe.c)
+    target_link_libraries(semantic_rank_probe PRIVATE yan_semantic_core)
+    target_compile_options(semantic_rank_probe PRIVATE ${YAN_WARNINGS})
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME semantic_text_oracle COMMAND "${Python3_EXECUTABLE}" -B
+                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_text_oracle.py"
+                 $<TARGET_FILE:semantic_text_probe>)
+        set_tests_properties(semantic_text_oracle PROPERTIES TIMEOUT 120)
+        add_test(NAME semantic_rank_oracle COMMAND "${Python3_EXECUTABLE}" -B
+                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_rank_oracle.py"
+                 $<TARGET_FILE:semantic_rank_probe>)
+        set_tests_properties(semantic_rank_oracle PROPERTIES TIMEOUT 120)
+        add_test(NAME semantic_mutation_gate COMMAND "${Python3_EXECUTABLE}" -B
+                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_semantic_mutation_gate.py")
+        set_tests_properties(semantic_mutation_gate PROPERTIES TIMEOUT 120)
+        if(YAN_BUILD_SEMANTIC)
+            add_executable(semantic_provider_probe tests/semantic_provider_probe.c)
+            target_link_libraries(semantic_provider_probe PRIVATE yan_semantic_llama)
+            target_compile_options(semantic_provider_probe PRIVATE ${YAN_WARNINGS})
+            add_test(NAME semantic_provider COMMAND "${Python3_EXECUTABLE}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_provider_checks.py"
+                $<TARGET_FILE:semantic_provider_probe>
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_fake_runner.py")
+            set_tests_properties(semantic_provider PROPERTIES TIMEOUT 120)
+            add_test(NAME semantic_cli COMMAND "${Python3_EXECUTABLE}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_cli_checks.py"
+                $<TARGET_FILE:yan_semantic>
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_fake_runner.py")
+            set_tests_properties(semantic_cli PROPERTIES TIMEOUT 120)
+        endif()
+    endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_executable(test_semantic_posix tests/test_semantic_posix.c)
+        target_link_libraries(test_semantic_posix PRIVATE yan_semantic_posix unity::framework)
+        target_compile_options(test_semantic_posix PRIVATE ${YAN_WARNINGS})
+        add_test(NAME semantic_posix COMMAND test_semantic_posix)
+        set_tests_properties(semantic_posix PROPERTIES TIMEOUT 30)
+    endif()
+
+    foreach(_semantic_suite sha256 text)
+        add_executable(test_semantic_${_semantic_suite}
+                       tests/test_semantic_${_semantic_suite}.c)
+        target_link_libraries(test_semantic_${_semantic_suite} PRIVATE
+                             yan_semantic_text unity::framework)
+        target_compile_options(test_semantic_${_semantic_suite} PRIVATE ${YAN_WARNINGS})
+        add_test(NAME semantic_${_semantic_suite} COMMAND test_semantic_${_semantic_suite})
+        set_tests_properties(semantic_${_semantic_suite} PROPERTIES TIMEOUT 30)
+    endforeach()
 
     add_executable(test_yanfs tests/test_yanfs.c)
     target_link_libraries(test_yanfs PRIVATE yan_fs unity::framework)
@@ -918,6 +1018,12 @@ if(BUILD_TESTING)
     option(YAN_ENABLE_MUTATION_TESTS
            "Register the mutation checks with CTest (slow)" OFF)
     if(YAN_BUILD_TOOLS AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND YAN_ENABLE_MUTATION_TESTS)
+        add_test(NAME semantic_mutation COMMAND "${Python3_EXECUTABLE}" -B
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_semantic_mutation.py"
+            --repo "${CMAKE_CURRENT_SOURCE_DIR}"
+            --unity "${unity_SOURCE_DIR}" --cc "${CMAKE_C_COMPILER}"
+            --work "${CMAKE_BINARY_DIR}/semantic-mutation")
+        set_tests_properties(semantic_mutation PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
         find_package(Python3 COMPONENTS Interpreter REQUIRED)
         add_test(NAME yanfs_mutation
             COMMAND "${Python3_EXECUTABLE}"

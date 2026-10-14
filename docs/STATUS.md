@@ -1,5 +1,64 @@
 # 项目状态
 
+当前推进：[0029 Host侧语义检索](specs/0029-host-semantic-search.md)，于2026-10-14 21:11 +08:00经项目所有者整体认可并授权形成规格、继续实现。
+
+- 规格：可选Linux/WSL C17只读Host工具、本地模型受控进程、确定分段与物理出处、旁置索引身份失效及精确top20，已锁定。
+- 实现：只读Host来源、文本/分段、身份与索引、精确排名、受控provider和CLI已完成；Guest检索、YanFS格式与既有能力保持。独立只读dsh对齐和总审核已完成，尚未合入main。
+- 验证：2026-10-15冻结树Release100/100（294.77 s）、ASan/UBSan100/100（423.51 s）、Windows MSVC65/65（141.66 s），统一十五组实际变异15/15（321.87 s），均0失败、0SKIP。Linux工具/provider开启配置注册100默认/115总计、八个默认puregate；生产工具真实模型复验另列。
+- 用户审查：整体方案已认可；实现交付、效果与合入待后续审查，学习理解由项目所有者判断。
+
+### 0029 冻结树本机验收（2026-10-15）
+
+完整默认证据为`build/search-semantic-final-release.log`、`search-semantic-final-asan.log`和`semantic-final-windows.log`；统一实际变异为`search-semantic-final-mutations.log`，注册快照为`search-semantic-final-counts.log`。Linux同时启用TOOLS和可选SEMANTIC，包含真实受控fake child的provider24场景、CLI31场景及默认puregate10项控制；Windows不包含Linux provider/POSIX。原生facade17、SHA8、text34、corpus9、POSIX5，独立文本oracle690和排名oracle50通过。上述用例数不等于CTest套件数，provider关闭配置的初轮97结果保留为历史，不宣称推算的其它配置已测。
+
+新增semantic19个实际缺陷均命中指定suite、owner与具体断言，no-effect、wrong-owner、wrong-assertion和harness优先控制通过；独立专项见`build/search-semantic-mutation-final.log`，统一十五组中的semantic实际组亦通过。原始日志保留在`build/semantic-mutation-final`及各实际变异工作目录；变异内预定FAIL不是默认回归失败。结构记录scalar_count、保留零、name padding/合法名校验缺口已补永久用例和变异。两次变异构建harness错误修后重新执行，没有计为检出；实际output holder别名缺陷命中指定断言。缺仓库输入硬1、外部依赖77由puregate逐项验证。
+
+BUILD_TESTING OFF生产工具重新构建，最终实际工具SHA-256 `19cb7a9df54701c4491c679a7147da466a62872d1fae1f3d20ea3bd49771b352`与`build/semantic-real-final/real-model-report.json`一致。真实Qwen Q8_0在固定21篇笔记、10个问题中，8个有标签问题的Top5各至少有一个相关出处，8个没有literal命中；两个无关问题仍各返回20候选。模型SHA `06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439`、runner SHA `be637d0423071dfe307c0ab5579ceeff7252f7395ddf65d8cbf40da98e637b5b`保持，源/模型/runner前后不变。执行日志为`build/search-semantic-real-model-final.log`，该轮rebuild7.63 s、status1.90 s、search2.62–2.84 s；峰值RSS1213312 KiB，约1.16 GiB。只证明该固定小语料及本机测量，不代表通用准确率、零误检或其他机器性能。
+
+真实效果脚本`tests/semantic_model_check.py`由操作员显式运行，实际调用生产工具和外部模型，不使用fixture向量冒充模型；它不注册默认CTest、不进入普通CI。手动提供模型、runner与`/usr/bin/time`，缺生产工具硬失败，缺外部依赖明确77并保持效果待验。通用命令见README；fake向量/独立oracle验证可靠性，不能替代这项人工触发的真实效果验收。
+
+本机完整验收、真实复验及独立dsh/总审核已完成。功能提交`9ad39eddbe88e9abda5fe107e5989512917ff92d`已建立[PR #30](https://github.com/YanBo-maker/YanOS/pull/30)，保留前置Spec Lock `e29e04b`。2026-10-15，[CI运行38613451617](https://github.com/YanBo-maker/YanOS/actions/runs/38613451617)对应上述功能head，三项成功：Linux Release68/68（35.36 s）、Linux Debug ASan68/68（87.95 s）、Windows Debug65/65（90.61 s），均0失败、0SKIP。远端TOOLS/SEMANTIC均关闭，不等同本机工具/provider开启的100组、十五组实际变异或人工真实模型验收。实现交付与main合入仍待维护者批准。
+
+提交前fake runner的执行位固定为100755，并移除provider/CLI测试自行chmod的两行，避免测试改变tracked文件模式。配套后验provider单项1/1（12.45 s）保持24场景，CLI单项1/1（1.81 s）保持31场景，日志为`build/search-semantic-fixture-mode-check.log`与`search-semantic-fixture-cli-check.log`。生产代码与断言不变，上述完整回归耗时保留原执行，不冒称因包装修正重跑。以下分项初验、失败与待验文字保留为当时阶段记录，由本节最新冻结树结果取代其当前状态，不删旧结论。
+
+### 0029 分项推进历史
+
+### 0029 provider、CLI与模型初验（2026-10-15）
+
+新增独立double cosine/排序oracle实际50例通过，单项CTest1/1（0.67 s），见`build/search-semantic-rank-oracle.log`；它使用可控向量核排名可靠性，不证明真实模型效果。provider最初18个生命周期场景1/1（5.35 s），CLI25场景1/1（1.46 s），日志为`search-semantic-provider-green.log`与`search-semantic-cli-green.log`。后续provider加固后24场景1/1（12.19 s）通过，见`search-semantic-provider-ownership.log`；不能把早期CLI记录冒作这些修补后的完整复验。
+
+provider曾将JSON中的1e-100转换为全零float后仍返回OK，修为按转换后的向量检查范数；另有child延迟提前退出却把stop记为OK，修为PROVIDER。原失败分别保留在`search-semantic-provider-underflow.log`、`search-semantic-provider-delayed-before.log`。当前还加固waitpid/EINTR、TERM后限时KILL/reap、版本进程回收与版本长度、active BUSY、health响应上限和固定运行参数；独立审查与后续冻结验收继续进行。
+
+BUILD_TESTING OFF的生产工具已构建，使用真实Qwen Q8_0对预先固定的21篇笔记、10个问题完成初验：8个有标签问题的Top5均至少含一个相关出处，8个没有literal命中；两个无关问题仍各返回20候选。报告`build/semantic-real/real-model-report.json`和执行日志`search-semantic-real-model.log`分别保存实际结果、工具/model/runner/fixture身份与误检。该轮rebuild约8.05 s、status2.00 s、search2.69–2.87 s；rebuild峰值RSS1213076 KiB、search1175504–1183912 KiB。仅此小语料结果，不构成通用准确率、置信度或性能保证。
+
+该报告绑定工具SHA-256 `de3bdb1771c08358fcdc132ae6c8dd16530972b8c25286710724a0bdb6bb95e1`、模型`06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439`（639150592字节）与runner `be637d0423071dfe307c0ab5579ceeff7252f7395ddf65d8cbf40da98e637b5b`。runner报告版本0.6.0-dev且commit unknown，不能据此伪称其版本输出携带源码commit。源、模型、runner在该轮前后不变。此初验二进制早于上述provider进一步加固，现已由前节最终生产工具重建复验取代；本段原始数字保留，不作为最新二进制证据。
+
+第一轮完整默认Release97/97（170.77 s）、ASan97/97（287.20 s）记录在`search-semantic-full-release.log`与`search-semantic-full-asan.log`，可选provider关闭，未覆盖provider；这些不是最终注册计数。Windows首轮两oracle因stdin文本模式失败，probe改二进制后五项专项通过，最新全默认仍待。新增结构变异/门禁与统一实际变异尚在准备，不宣称整阶段完成或CI通过。
+
+### 0029 facade与索引专项（2026-10-15）
+
+`build/search-semantic-core-fix-asan-build.log`严格构建后，`search-semantic-core-fix-asan.log`记录ASan/UBSan定向CTest6/6（7.25 s）：facade12例、SHA8例、text34例、corpus9例、POSIX5例与独立oracle690例。明细另存`build/semantic-chief-core-fix-asan-detail.log`。facade覆盖版本化索引、身份失效、全量cosine/top20、原文回读后输出、发布故障、holder别名与重入；corpus补长合法头后大正文和重复双CRLF调整跨8192上限。此前Release6/6（2.02 s）的facade10例属于新增两例前的树，记录在`search-semantic-facade-confirm.log`，不与当前12例混计。
+
+实际ASan曾检出read_index成功路径遗漏临时record释放，累计54080字节、13次分配，见`search-semantic-asan-before.log`；修复后上述专项通过。另修正坏索引的close_read失败被CORRUPT状态观察掩盖，以及context地址跨度、query别名晚于解引用检查的问题，新增精确关闭错误和不可读高地址永久用例。上述core修补时完整生产工具、真实provider、效果、默认回归及实际变异仍待；后续分项与初验见前节，最终冻结验收另行记录。
+
+POSIX open在后续依赖失败时可仍持有镜像描述符，调用者在任何返回后都须cleanup；当前CLI与测试遵守，cleanup关闭并置fd为-1且可重复调用。描述符释放由显式fd状态与幂等cleanup断言核对，ASan内存检测不能代替该断言。完整源码及文档对齐复核仍在进行。
+
+### 0029 初步分项验证（2026-10-14）
+
+`build/search-semantic-text-oracle.log`记录定向CTest5/5、2.16 s，包含原生SHA8例、text34例、corpus7例、POSIX4例及独立Python oracle690例。明细保存在`build/semantic-chief-primitives-targeted-detail.log`，只是当时分项执行，不能把其中构建注册序号当整体套件计数。整库扫描覆盖来源内容身份、整文件skip先于坏头、元数据正文/物理行号、恰8192段与下一段LIMIT；只读适配与临时文件发布已有初步测试，边界仍需独立审查和故障补强。
+
+随后总审核发现只读适配误拒合法的4096字节单块空YanFS，原因是最小长度写成8192。实现已改为4096，并新增真实单块镜像挂载、list END与镜像不变断言；严格重建后POSIX单项CTest1/1（0.02 s）、5个原生用例通过，见`build/search-semantic-one-block.log`及`semantic-chief-one-block-detail.log`。前述5/5专项中的POSIX4例保留为修前历史，不冒称整组重新执行。
+
+最初primitive与facade stub语义RED日志`search-semantic-primitives-red.log`、`search-semantic-facade-red.log`保留。元数据头长度夹具由26纠为实际28字节，POSIX测试每例复位writer；这些夹具修正不作为生产缺陷检出。上述初步分项时facade/index/provider/CLI与真实效果尚未通过；后续facade/index专项见前节，依赖准备或独立runner协议烟测仍不等于生产工具验收。
+
+### 0029 首次提交前的锁定后工程澄清
+
+2026-10-14：21:11 Spec Lock后、首次规格提交前，独立只读审查指出五项可使测试预期分歧的表述：原成功输出未限定skipped计数域，status未明确依赖与索引观察的先后，timeout范围没有显式USAGE映射，坏头的描述可能脱离整文件预检顺序，512标量未明确是否包括合成title。依据项目所有者已批准的整体方案，总审核在原范围内补齐工程契约：skipped为本次非文本逻辑文件数并与同身份header一致，非READY status无计数；可读源/model/runner为索引观察前置，源IO与模型/runner DEPENDENCY分开；非法timeout为USAGE；非文本只skip该文件，其他合法文件可发布；512及scalar_count仅计正文，不含title前缀。
+
+原CRLF算法保持，新增边界例明确两个调整同时发生可使步进为446标量，不能误取447为下界。上述澄清由总审核落笔，原批准与锁定时间保留，不增功能范围；对应VERIFY组合输入已列，实施与执行验收仍待。status观察STALE退出0，search遇STALE错误退出3，两者不能混写。独立审查的报告文字错误不作为产品事实或通过证据。
+
+### 已交付知识关系导航基线
+
 最新交付：[0028知识关系导航](specs/0028-knowledge-relations.md)，于2026-10-11 16:24 +08:00经项目所有者整体批准并锁定。
 
 - 规格：links按声明顺序、backlinks可查缺失目标、related按双向/单向链接与共同标签解释排序；只读观察现有头，无新磁盘格式。
@@ -8,7 +67,7 @@
 - 用户审查：整体方案已批准；项目所有者于2026-10-14明确回复“合入吧”，PR #26已合入main，学习理解由项目所有者判断。
 
 
-功能实现提交`be99b8e18c713e225111c1e6deb54463ce904ba8`已推送并建立[PR #26](https://github.com/YanBo-maker/YanOS/pull/26)，Spec Lock提交`3b3d068`保留。2026-10-14，[CI运行38507466007](https://github.com/YanBo-maker/YanOS/actions/runs/38507466007)对应上述功能head，三项成功：Linux Debug ASan60/60（47.24 s）、Linux Release60/60（30.98 s）、Windows58/58（77.59 s）。远端配置为TOOLS OFF，不等同本机90组工具/Guest与十四组实际变异。项目所有者随后明确批准merge commit，PR #26已合入main；合并提交`8349b7d5dfacd6ab86119045e0e25417d4687eec`的树与已审fcafb46完全一致，规格3b3d068、功能be99b8e及状态fcafb46阶段提交保留。下一步为阅读与运行已交付能力，下一项能力另行对齐；学习理解仍由项目所有者判断。
+功能实现提交`be99b8e18c713e225111c1e6deb54463ce904ba8`已推送并建立[PR #26](https://github.com/YanBo-maker/YanOS/pull/26)，Spec Lock提交`3b3d068`保留。2026-10-14，[CI运行38507466007](https://github.com/YanBo-maker/YanOS/actions/runs/38507466007)对应上述功能head，三项成功：Linux Debug ASan60/60（47.24 s）、Linux Release60/60（30.98 s）、Windows58/58（77.59 s）。远端配置为TOOLS OFF，不等同本机90组工具/Guest与十四组实际变异。项目所有者随后明确批准merge commit，PR #26已合入main；合并提交`8349b7d5dfacd6ab86119045e0e25417d4687eec`的树与已审fcafb46完全一致，规格3b3d068、功能be99b8e及状态fcafb46阶段提交保留。0028交付后的阶段安排为阅读与运行，后续0029规格批准另见页首；学习理解仍由项目所有者判断。
 
 ### 0028 本机验收（2026-10-14复测）
 
@@ -173,7 +232,7 @@ YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0
 - `yan_gen` 随机 RV32IM 指令流生成器（给定种子确定输出），以及 5 个手写 Guest 用例。
 - C17 / CMake 构建、Unity 单元测试、CTest 及 GitHub Actions。
 
-详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前0028工具配置默认90组、开启实际变异后104组，完整验收见页首；0025的55/66组、0024的49/59组、0023的47/57组、0022的43/52组与0020于2026-10-03的32/39组保留为本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；最新通过情况见页首验收，各阶段历史结果见本页「验证」的对应日期记录。
+详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前已验收0029工具/provider配置默认100组、开启实际变异后115组，完整验收见“0029 冻结树本机验收（2026-10-15）”；0028的90/104组及其日期化验收保留为历史；0025的55/66组、0024的49/59组、0023的47/57组、0022的43/52组与0020于2026-10-03的32/39组保留为本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；最新已执行结果见上述0029验收；各阶段历史结果见本页「验证」的对应日期记录。
 
 ## 验证
 
@@ -325,7 +384,7 @@ Host 变异逐项绑定表中指定的测试断言，无关断言失败负控不
 
 ### 历史测量：M2a
 
-下段保留2026-09-20的原始测量与当时统计说明。其中“本页其它段落若残留旧口径以本段覆盖”仅适用于当时记录，不覆盖后续阶段；当前配置与验收以页首为准。
+下段保留2026-09-20的原始测量与当时统计说明。其中“本页其它段落若残留旧口径以本段覆盖”仅适用于当时记录，不覆盖后续阶段；当前已执行配置与结果见“0029 冻结树本机验收（2026-10-15）”，0029规格批准、实现与审查状态见页首。
 
 GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建注册 **21 组 Unity 套件**（共 **172 个用例**：`uart` 19、`plic` 15、`transport` 14，其余为既有分组；`boot` 由 4 增至 6，新增两条是 0017 的 A1 / A2）。启用 Guest 工具链与 `yan_run` 时默认另有 6 组 Guest 侧测试：`guest_trap_env`、`guest_terminal`、`guest_console`、`guest_golden`、`guest_runtime` 与 `guest_block`，合计 **28 组 CTest**；加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 时为 **33 组**（再注册 `guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`）。**以下数字以本段为准**，本页其它段落若残留旧口径以本段覆盖。**两次独立测量**：总审核角色在全新目录实测默认 **28/28 passed，25.21 s**、`ctest -R mutation` **5/5 passed，281.19 s**；主 Agent 在开关下实测整套 **33/33 passed，317.39 s**（`guest_console_mutation` 45.4 s、`device_mutation` 40.5 s、`guest_runtime_mutation` 48.2 s、`guest_block_mutation` 151.0 s、`guest_m2a_combined_mutation` 3.7 s）——两次测量量级一致，差异来自机器负载。变异检查默认不注册，只为不让慢证据主导默认套件；合并前必须显式跑一次，见 [CONTRIBUTING](../CONTRIBUTING.md) 的「合并前检查清单」与「提交前总审核检查清单」。
 
@@ -387,7 +446,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-0028已交付main，阅读与运行入口见页首。下一能力的方向和整体语义另行对齐，批准前只讨论设计，不锁定新规格或实施。每批继续讲解实际输入、状态变化与失败边界，学习理解由项目所有者判断。
+审阅PR #30的实现与验证结果，由维护者决定是否合入main。可靠性、固定语料真实效果与合入批准分别记录，下一能力另行对齐。
 
 ### 历史推进记录（M1a / M2a）
 
