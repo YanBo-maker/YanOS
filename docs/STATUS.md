@@ -5,10 +5,10 @@
 - 规格：links按声明顺序、backlinks可查缺失目标、related按双向/单向链接与共同标签解释排序；只读观察现有头，无新磁盘格式。
 - 实现：独立关系service、shell可选绑定与生产应用注入已完成，独立实现审查无剩余阻塞发现。
 - 验证：2026-10-14完整复测本机Release90/90（92.36 s）、ASan/UBSan90/90（154.99 s）、Windows MSVC58/58（42.50 s）；统一十四组实际变异14/14（274.04 s），均0失败、0SKIP。Linux注册90默认/104总计，含七个默认puregate；全部复测均于2026-10-14完成；0027结果保留为历史交付。
-- 用户审查：整体方案回复“认可整体方案，形成规格并继续实现”；实现交付与合入待审查，学习理解由项目所有者判断。
+- 用户审查：整体方案已批准；项目所有者于2026-10-14明确回复“合入吧”，PR #26已合入main，学习理解由项目所有者判断。
 
 
-功能实现提交`be99b8e18c713e225111c1e6deb54463ce904ba8`已推送并建立[PR #26](https://github.com/YanBo-maker/YanOS/pull/26)，Spec Lock提交`3b3d068`保留。2026-10-14，[CI运行38507466007](https://github.com/YanBo-maker/YanOS/actions/runs/38507466007)对应上述功能head，三项成功：Linux Debug ASan60/60（47.24 s）、Linux Release60/60（30.98 s）、Windows58/58（77.59 s）。远端配置为TOOLS OFF，不等同本机90组工具/Guest与十四组实际变异。当前实现尚未合入main，下一步为维护者审查交付与批准合入；规格批准不代替实现交付批准。
+功能实现提交`be99b8e18c713e225111c1e6deb54463ce904ba8`已推送并建立[PR #26](https://github.com/YanBo-maker/YanOS/pull/26)，Spec Lock提交`3b3d068`保留。2026-10-14，[CI运行38507466007](https://github.com/YanBo-maker/YanOS/actions/runs/38507466007)对应上述功能head，三项成功：Linux Debug ASan60/60（47.24 s）、Linux Release60/60（30.98 s）、Windows58/58（77.59 s）。远端配置为TOOLS OFF，不等同本机90组工具/Guest与十四组实际变异。项目所有者随后明确批准merge commit，PR #26已合入main；合并提交`8349b7d5dfacd6ab86119045e0e25417d4687eec`的树与已审fcafb46完全一致，规格3b3d068、功能be99b8e及状态fcafb46阶段提交保留。下一步为阅读与运行已交付能力，下一项能力另行对齐；学习理解仍由项目所有者判断。
 
 ### 0028 本机验收（2026-10-14复测）
 

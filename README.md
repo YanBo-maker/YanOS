@@ -24,7 +24,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [笔记元数据与标签筛选](docs/specs/0027-note-metadata.md)已实现并完成本机验证：同文件版本化头声明title、tag、日期与文件链接，meta提供观察、单文件更新和列表，search先按标签AND筛选再排名。不改变YanFS磁盘格式或既有无tag查询；功能提交180d18e已通过[PR #24](https://github.com/YanBo-maker/YanOS/pull/24)三项CI，项目所有者于2026-10-11明确批准，经PR #24合入main（7451c85），阶段提交保留；学习理解由项目所有者判断。
 
-[知识关系导航](docs/specs/0028-knowledge-relations.md)已实现并完成本机验收：links按声明顺序观察向外链接，backlinks可反查不存在的目标名，related按链接方向与共同标签解释排序，显示前20项并统计全部候选。查询只读现有元数据头，不改变磁盘格式或正文搜索；功能提交be99b8e已通过[PR #26](https://github.com/YanBo-maker/YanOS/pull/26)的三项远端CI，实现交付与合入仍待维护者审查，学习理解由项目所有者判断。
+[知识关系导航](docs/specs/0028-knowledge-relations.md)已实现并完成本机验收：links按声明顺序观察向外链接，backlinks可反查不存在的目标名，related按链接方向与共同标签解释排序，显示前20项并统计全部候选。查询只读现有元数据头，不改变磁盘格式或正文搜索；功能提交be99b8e已通过[PR #26](https://github.com/YanBo-maker/YanOS/pull/26)的三项远端CI；项目所有者于2026-10-14明确批准，经PR #26合入main（8349b7d），阶段提交保留，学习理解由项目所有者判断。
 
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
