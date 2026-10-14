@@ -69,7 +69,7 @@ GUEST_LD = "os/guest.ld"
 PRODUCTION_SOURCES = [
     "apps/yanfs_terminal/main.c", "os/trap_entry.S", "os/task_switch.S",
     "os/task.c", "os/console.c", "os/line.c", "os/terminal.c",
-    "os/shell.c", "os/note_metadata.c", "os/editor.c", "os/search.c", "os/search_linear.c",
+    "os/shell.c", "os/note_relations.c", "os/note_metadata.c", "os/editor.c", "os/search.c", "os/search_linear.c",
     "os/block.c", "os/yanfs.c", "os/yanfs_block.c", "os/memory.c",
     "os/search_terms.c", "os/note_metadata_format.c", "os/search_terms_core.c", "os/search_terms_linear.c",
     "os/search_terms_index.c", "os/search_text.c",
@@ -84,7 +84,7 @@ HOST_HEADERS = [
 ]
 GUEST_HEADERS = [
     "tests/guest/guest.h", "os/block.h", "os/console.h", "os/line.h",
-    "os/platform.h", "os/search.h", "os/search_linear.h", "os/shell.h", "os/note_metadata.h",
+    "os/platform.h", "os/search.h", "os/search_linear.h", "os/shell.h", "os/note_relations.h", "os/note_metadata.h",
     "os/task.h", "os/terminal.h", "os/yanfs.h",
     "os/yanfs_block.h", "os/editor.h",
     "os/memory.h", "os/search_terms.h", "os/note_metadata_format.h", "os/search_terms_core.h",
@@ -111,7 +111,10 @@ TOHOST_LINE_UNAVAILABLE = 0x71000009
 TOHOST_SHELL_FATAL = 0x7100000C
 TOHOST_OUTPUT = 0x71000011
 APP_FAIL_TOP = 0x71000000
-APP_REASON_LAST = 21
+# Highest reason defined by apps/yanfs_terminal/main.c (22 is
+# APP_REASON_RELATION_INIT / RELATION_INIT). A reason at or below it is a named
+# owner failure; an unassigned code above it is a harness error.
+APP_REASON_LAST = 22
 
 # tests/guest/terminal_wait_check.c: TW_FAIL(reason) = 0x72000000 | reason.
 FIXTURE_FAIL_TOP = 0x72000000

@@ -1,6 +1,6 @@
 # 0028：知识关系导航
 
-> 状态：**Spec Lock**（2026-10-11 16:24 +08:00）。项目所有者明确批准“认可整体方案，形成规格并继续实现”。规格已批准，实现待推进、验证待执行；实现交付与合入审查另行记录，学习理解由项目所有者判断。
+> 状态：**Spec Lock**（2026-10-11 16:24 +08:00）。项目所有者明确批准“认可整体方案，形成规格并继续实现”。规格已批准，实现与本机验收已完成；远端CI与维护者合入审查另行记录，学习理解由项目所有者判断。
 
 ## INTENTION
 
@@ -75,15 +75,15 @@ related的源不存在优先NOT_FOUND，不先扫描远处文件并用其坏头�
 
 ```text
 yan_relation_init(context, fs)
-yan_relation_links(context, name, sink, optional_summary)
-yan_relation_backlinks(context, name, sink, optional_summary)
-yan_relation_related(context, name, sink, optional_summary)
+yan_relation_links(context, name, sink, sink_context, optional_summary)
+yan_relation_backlinks(context, name, sink, sink_context, optional_summary)
+yan_relation_related(context, name, sink, sink_context, optional_summary)
 yan_shell_bind_relations(shell, relation_context)
 ```
 
 `YanRelationContext`独立持有borrowed FS、initialized/busy、头prefix、parser workspace、源info及最多63文件的有界关系/排序scratch。返回结果复用纯格式层既有`YanNoteResult`，不引入与其冲突的错误数值。统一同步row字段为`name[32]`、`exists`、`outgoing`、`incoming`、`shared_tags`：links只填写name/exists，其余为0；backlinks的name为来源、exists=true、incoming=true，其余为0；related填写候选name/exists=true及三个解释字段。summary字段为`total`、`shown`、`target_exists`；links total=shown<=16且target_exists=true，backlinks total=shown<=63并反映目标存在性，related total<=62、shown<=20且target_exists=true。只有OK发布summary。具体公开struct布局由工程header固定并测试，必须保持上述语义，不引入新磁盘格式。
 
-sink必须有效；callback返回false时服务停止，结果STOPPED且不发布成功summary。summary允许NULL，其他错误也保持有效summary原值；callback行及其名称仅本次同步回调期间借用，不得保留指针。callback可查询其他对象，但重入同一关系服务必须BUSY、零新增I/O。输出层将拒绝写字节映射为致命退出，不将其混作普通成功或补写OK。
+sink必须有效；opaque `sink_context`原样传给同步callback，不转移对象所有权。callback返回false时服务停止，结果STOPPED且不发布成功summary。summary允许NULL，其他错误也保持有效summary原值；callback行及其名称仅本次同步回调期间借用，不得保留指针。callback可查询其他对象，但重入同一关系服务必须BUSY、零新增I/O。输出层将拒绝写字节映射为致命退出，不将其混作普通成功或补写OK。
 
 对象须零初始化后init并长期静态持有。init可复用闲置对象，active对象BUSY；init失败不写对象，不进行文件I/O。沿0027健康FS初始化及状态映射；服务调用检查context完整uintptr_t跨度，先于读取bool，再initialized、BUSY、借用FS完整跨度/initialized/BUSY/FAULTED/MOUNTED，随后其他参数、别名与完整名称，再源存在性和头预检。未初始化INVALID、未挂载NOT_MOUNTED、已停用FAULTED；底层FS结果按既有token传播，不把METADATA当FS损坏状态。
 
@@ -107,7 +107,7 @@ shell绑定为可选扩充，旧unbound命令仍UNKNOWN_COMMAND、旧help字节�
 
 ## IMPLE
 
-尚未实现。预期生产源码为`os/note_relations.h/.c`、shell可选绑定及应用注入；当前只有规格与计划，不能将0027通过记录当本能力通过。
+已实现`os/note_relations.h/.c`独立只读服务、shell可选绑定与生产应用静态注入。解析、排序及全库预检在关系服务内完成，shell仅解析参数和格式化同步结果。旧unbound命令/help保持，实际启动失败使用RELATION_INIT应用原因码22。公共header固定完整sink_context签名；补全依据见[STATUS](../STATUS.md)。
 
 ## VERIFY
 
@@ -122,4 +122,8 @@ shell绑定为可选扩充，旧unbound命令仍UNKNOWN_COMMAND、旧help字节�
 | shell/Guest | 三命令golden/零结果回执/USAGE零IO、unbound help旧字节、编辑态路由、全库预检后输出、TX首中末失败不再IO/OK |
 | 门禁/工程 | 指定suite/owner/assert、实际三负控/harness优先、缺源/脚本/ELF硬1/工具77、生产OFF无tests依赖、static总<=2MiB/单帧边界 |
 
-验证尚未执行，无新增套件数、用例数或通过耗时。实现交付、远端CI与所有者合入审查待后续真实结果，理解程度不由Agent代判。
+2026-10-14完整默认复测：Release90/90（92.36 s）、ASan/UBSan90/90（154.99 s）、Windows MSVC58/58（42.50 s）；统一十四组实际变异14/14（274.04 s），均0失败、0SKIP。核心38例、shell25例、耗尽1例、独立oracle237查询、Guest健康8项、RV32 API35个唯一检查码及实际tohost1通过。Guest故障23项为3健康基线、19故障注入与1真实生产ELF启动失败；末回执postcheck失败按精确已发送前缀验收，不禁止已发出的OK字节。
+
+新增18个实际缺陷要求指定suite/owner/具体断言，默认puregate8项及三类实际负控通过；原始变异日志累计留存1556份，包含10月11日保留记录，不全部算作当日生成。生产OFF实际ELF健康8项通过，静态总预算Host/RV32为1619120/1619060字节；关系对象12144/12136字节，RV32关系单帧192字节，不代表完整调用链峰值。默认套件、统一变异与生产健康验收于2026-10-14复测；布局与单帧沿用10月11日测量，首轮执行结果另在STATUS保留。完整日志、失败修补记录和边界见[STATUS](../STATUS.md)。
+
+本机验收与远端CI、维护者合入批准分别记录：实现尚未合入main，远端CI与维护者合入审查另行记录；规格批准历史保持，理解程度不由Agent代判。

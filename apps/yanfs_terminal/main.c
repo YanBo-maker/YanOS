@@ -8,8 +8,9 @@
  * references nothing under tests/, so the production image and the validation
  * corpus stay separate. The shell carries the original eight commands, the
  * 0024 `mv` and `cp`, the 0025 literal `grep`, the 0026 `search`, `rebuild`
- * and `index status|clear` front ends, and the 0027 `meta` family plus the
- * `search tag:TAG ...` operator after the metadata binding below.
+ * and `index status|clear` front ends, the 0027 `meta` family plus the
+ * `search tag:TAG ...` operator after the metadata binding below, and the 0028
+ * `links`, `backlinks` and `related` commands after the relation binding.
  *
  * Layout:
  *   main          runs on the boot stack from os/trap_entry.S, configures the
@@ -39,7 +40,9 @@
  * Verdicts: tohost 1 is the healthy exit after a successful unmount and
  * terminal close. Every other end writes 0x71000000 | reason, so a host can
  * tell an application failure from the runtime's panic codes (0x80000000) and
- * the filesystem corpus' 0x60000000. The exact output lines are listed in the
+ * the filesystem corpus' 0x60000000. A relation service initialization or
+ * binding failure uses reason 22 (token RELATION_INIT) instead of the shared
+ * SHELL_INIT path. The exact output lines are listed in the
  * delivery report; a failure prints "ERROR <token>\r\n" and the mount failure
  * prints the filesystem result's own name.
  *
@@ -56,6 +59,7 @@
 #include "editor.h"
 #include "line.h"
 #include "note_metadata.h"
+#include "note_relations.h"
 #include "platform.h"
 #include "search.h"
 #include "search_linear.h"
@@ -94,6 +98,7 @@ extern volatile uint32_t tohost;
 #define APP_REASON_EDITOR_FATAL 19u
 #define APP_REASON_EDITOR_INVALID 20u
 #define APP_REASON_EDITOR_BUSY 21u
+#define APP_REASON_RELATION_INIT 22u
 
 /* ---------------------------------------------------------- static storage */
 
@@ -116,6 +121,10 @@ static YanSearchTerms term_terms;
  * backends. The shell binds it after its own init; an unbound shell would keep
  * the pre-0027 command set. */
 static YanNoteContext note_context;
+/* 0028: the relation service owns the bounded prefix, parser workspace and the
+ * 63-row table, so it is static for the whole session exactly like the note
+ * service above. */
+static YanRelationContext relation_context;
 
 /* --------------------------------------------------------------- reporting */
 
@@ -398,6 +407,16 @@ _Noreturn static void app_session(void)
     }
     if (yan_shell_bind_metadata(&shell, &note_context) != YAN_SHELL_OK) {
         app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
+    }
+    /* 0028: the relation service borrows the same mounted filesystem; the shell
+     * enables `links`, `backlinks` and `related` only after this binding. Both
+     * steps are startup failures with their own stable reason and token, so a
+     * host can tell a relation initialization failure from the metadata one. */
+    if (yan_relation_init(&relation_context, &fs) != YAN_NOTE_OK) {
+        app_fail(APP_REASON_RELATION_INIT, "RELATION_INIT");
+    }
+    if (yan_shell_bind_relations(&shell, &relation_context) != YAN_SHELL_OK) {
+        app_fail(APP_REASON_RELATION_INIT, "RELATION_INIT");
     }
     if (yan_editor_init(&editor, &fs, output) != YAN_EDITOR_OK) {
         app_fail(APP_REASON_EDITOR_INIT, "EDITOR_INIT");
