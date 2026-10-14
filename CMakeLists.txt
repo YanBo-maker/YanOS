@@ -112,6 +112,13 @@ target_include_directories(yan_note PUBLIC os)
 target_link_libraries(yan_note PUBLIC yan_note_format yan_fs)
 target_compile_options(yan_note PRIVATE ${YAN_WARNINGS})
 
+# 0028 read-only relation queries borrow YanFs and share only the pure format.
+add_library(yan_relation STATIC os/note_relations.c)
+target_include_directories(yan_relation PUBLIC os)
+target_link_libraries(yan_relation PUBLIC yan_note_format yan_fs)
+target_compile_options(yan_relation PRIVATE ${YAN_WARNINGS})
+target_link_libraries(yan_shell PUBLIC yan_relation)
+
 if(YAN_BUILD_TOOLS)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_executable(yan_mkfs tools/yan_mkfs.c)
@@ -152,6 +159,7 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/note_metadata_format.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/note_metadata.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/note_relations.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms_linear.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms_core.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms_index.c"
@@ -163,7 +171,7 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         list(APPEND _yan_terminal_sources "${CMAKE_CURRENT_SOURCE_DIR}/os/memory.c")
     endif()
     set(_yan_terminal_headers)
-    foreach(_header note_metadata note_metadata_format block console editor memory line platform search search_linear search_terms search_terms_core search_terms_index search_terms_linear search_text shell task terminal yanfs yanfs_block)
+    foreach(_header note_relations note_metadata note_metadata_format block console editor memory line platform search search_linear search_terms search_terms_core search_terms_index search_terms_linear search_text shell task terminal yanfs yanfs_block)
         list(APPEND _yan_terminal_headers "${CMAKE_CURRENT_SOURCE_DIR}/os/${_header}.h")
     endforeach()
     add_custom_command(OUTPUT "${YAN_TERMINAL_ELF}"
@@ -278,6 +286,27 @@ if(BUILD_TESTING)
     target_compile_options(test_note_metadata_format PRIVATE ${YAN_WARNINGS})
     add_test(NAME note_metadata_format COMMAND test_note_metadata_format)
     set_tests_properties(note_metadata_format PROPERTIES TIMEOUT 30)
+
+    add_executable(test_note_relations tests/test_note_relations.c)
+    target_link_libraries(test_note_relations PRIVATE yan_relation unity::framework)
+    target_compile_options(test_note_relations PRIVATE ${YAN_WARNINGS})
+    add_test(NAME note_relations COMMAND test_note_relations)
+    set_tests_properties(note_relations PROPERTIES TIMEOUT 30)
+    add_executable(test_note_relations_source_exhaustion
+                   tests/test_note_relations_source_exhaustion.c
+                   os/note_relations.c os/yanfs.c)
+    target_include_directories(test_note_relations_source_exhaustion PRIVATE os)
+    target_compile_definitions(test_note_relations_source_exhaustion PRIVATE
+        "YAN_FS_SOURCE_TOKEN_SEED=18446744073709551615ULL")
+    target_link_libraries(test_note_relations_source_exhaustion PRIVATE yan_note_format unity::framework)
+    target_compile_options(test_note_relations_source_exhaustion PRIVATE ${YAN_WARNINGS})
+    add_test(NAME note_relations_source_exhaustion COMMAND test_note_relations_source_exhaustion)
+    set_tests_properties(note_relations_source_exhaustion PROPERTIES TIMEOUT 30)
+    add_executable(test_shell_relations tests/test_shell_relations.c)
+    target_link_libraries(test_shell_relations PRIVATE yan_shell unity::framework)
+    target_compile_options(test_shell_relations PRIVATE ${YAN_WARNINGS})
+    add_test(NAME shell_relations COMMAND test_shell_relations)
+    set_tests_properties(shell_relations PROPERTIES TIMEOUT 30)
 
     # 0027 implemented service suite, introduced against RED stubs. It drives
     # the service over a real mounted YanFS on a caller-owned static device.
@@ -425,6 +454,23 @@ if(BUILD_TESTING)
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_metadata_mutation_gate.py")
         set_tests_properties(note_metadata_mutation_gate PROPERTIES TIMEOUT 30)
+
+        add_executable(test_note_relations_oracle_probe tests/note_relations_oracle_probe.c)
+        target_link_libraries(test_note_relations_oracle_probe PRIVATE yan_relation)
+        target_compile_options(test_note_relations_oracle_probe PRIVATE ${YAN_WARNINGS})
+        add_test(NAME note_relations_oracle
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/note_relations_oracle.py"
+                    "$<TARGET_FILE:test_note_relations_oracle_probe>")
+        set_tests_properties(note_relations_oracle PROPERTIES TIMEOUT 180)
+        add_test(NAME note_relations_guest_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_relations_guest_gate.py")
+        set_tests_properties(note_relations_guest_gate PROPERTIES TIMEOUT 180)
+        add_test(NAME note_relations_mutation_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_relations_mutation_gate.py")
+        set_tests_properties(note_relations_mutation_gate PROPERTIES TIMEOUT 30)
         add_test(NAME note_metadata_guest_gate
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_metadata_guest_gate.py")
@@ -468,6 +514,15 @@ if(BUILD_TESTING)
                             --mkfs "$<TARGET_FILE:yan_mkfs>"
                             --guest "${YAN_TERMINAL_ELF}")
                 set_tests_properties(guest_note_metadata PROPERTIES TIMEOUT 600)
+                add_test(NAME guest_note_relations
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_note_relations.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-note-relations"
+                            --run "$<TARGET_FILE:yan_run>"
+                            --mkfs "$<TARGET_FILE:yan_mkfs>"
+                            --guest "${YAN_TERMINAL_ELF}")
+                set_tests_properties(guest_note_relations PROPERTIES TIMEOUT 600)
             endif()
             if(TARGET yanfs_terminal)
                 set(_yan_search_fault_args)
@@ -508,6 +563,16 @@ if(BUILD_TESTING)
                             --guest "${YAN_TERMINAL_ELF}"
                             ${_yan_search_fault_args})
                 set_tests_properties(guest_note_metadata_faults PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+                add_test(NAME guest_note_relations_faults
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_note_relations_faults.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-note-relations-faults"
+                            --cc "${CMAKE_C_COMPILER}"
+                            --gcc "${YAN_RISCV_GCC}"
+                            --guest "${YAN_TERMINAL_ELF}"
+                            ${_yan_search_fault_args})
+                set_tests_properties(guest_note_relations_faults PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
             endif()
             if(TARGET yanfs_terminal AND TARGET yan_mkfs AND TARGET yan_run_disk_close_fault)
                 add_test(NAME guest_terminal_files
@@ -725,6 +790,14 @@ if(BUILD_TESTING)
                     --run "$<TARGET_FILE:yan_run>"
                     --work "${CMAKE_BINARY_DIR}/note-metadata-api")
         set_tests_properties(guest_note_metadata_api PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+        add_test(NAME guest_note_relations_api
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_note_relations_api.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${CMAKE_BINARY_DIR}/note-relations-api")
+        set_tests_properties(guest_note_relations_api PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
     endif()
 
     # The console needs the UART terminal backend, which lives on the Host; the
@@ -893,6 +966,14 @@ if(BUILD_TESTING)
                     --unity "${unity_SOURCE_DIR}"
                     --work "${YAN_MUTATION_WORK_ROOT}/note-metadata")
         set_tests_properties(note_metadata_mutation PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 240)
+        add_test(NAME note_relations_mutation
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_note_relations_mutation.py"
+                    --repo "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --cc "${CMAKE_C_COMPILER}"
+                    --unity "${unity_SOURCE_DIR}"
+                    --work "${YAN_MUTATION_WORK_ROOT}/note-relations")
+        set_tests_properties(note_relations_mutation PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 240)
         add_test(NAME persistent_block_mutation
             COMMAND "${Python3_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_persistent_mutation.py"

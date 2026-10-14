@@ -1,6 +1,34 @@
 # 项目状态
 
-当前推进：[0027笔记元数据与标签筛选](specs/0027-note-metadata.md)，于2026-10-07 17:56 +08:00经项目所有者整体批准并锁定。
+当前推进：[0028知识关系导航](specs/0028-knowledge-relations.md)，于2026-10-11 16:24 +08:00经项目所有者整体批准并锁定。
+
+- 规格：links按声明顺序、backlinks可查缺失目标、related按双向/单向链接与共同标签解释排序；只读观察现有头，无新磁盘格式。
+- 实现：独立关系service、shell可选绑定与生产应用注入已完成，独立实现审查无剩余阻塞发现。
+- 验证：2026-10-14完整复测本机Release90/90（92.36 s）、ASan/UBSan90/90（154.99 s）、Windows MSVC58/58（42.50 s）；统一十四组实际变异14/14（274.04 s），均0失败、0SKIP。Linux注册90默认/104总计，含七个默认puregate；全部复测均于2026-10-14完成；0027结果保留为历史交付。
+- 用户审查：整体方案回复“认可整体方案，形成规格并继续实现”；实现交付与合入待审查，学习理解由项目所有者判断。
+
+
+功能实现提交`be99b8e18c713e225111c1e6deb54463ce904ba8`已推送并建立[PR #26](https://github.com/YanBo-maker/YanOS/pull/26)，Spec Lock提交`3b3d068`保留。2026-10-14，[CI运行38507466007](https://github.com/YanBo-maker/YanOS/actions/runs/38507466007)对应上述功能head，三项成功：Linux Debug ASan60/60（47.24 s）、Linux Release60/60（30.98 s）、Windows58/58（77.59 s）。远端配置为TOOLS OFF，不等同本机90组工具/Guest与十四组实际变异。当前实现尚未合入main，下一步为维护者审查交付与批准合入；规格批准不代替实现交付批准。
+
+### 0028 本机验收（2026-10-14复测）
+
+当前默认日志为`build/search-relations-review-20261014-release.log`、`search-relations-review-20261014-asan.log`、`search-relations-review-20261014-windows.log`，对应完整明细为`relations-review-20261014-*-detail.log`。2026-10-11冻结树历史测量保留：Release90/90（81.66 s）、ASan90/90（90.15 s）、Windows58/58（40.22 s），统一十四组14/14（275.89 s），原`search-relations-final-*`日志仍作为该轮证据。核心38例、shell25例、源身份耗尽1例与独立oracle237个查询通过。真实Guest健康8项、故障脚本23项通过；23项由3个健康基线、19个协议/I/O/TX注入和1个关系启动失败组成。RV32 API的35个唯一检查码2–36同时要求marker和实际tohost1，执行顺序不要求升序。所有关系查询断言全镜像不变。
+
+故障要求响应计数、fired及TX已发送字节数精确匹配；输出失败必须等于健康输出的精确前缀。末回执字节已经发送后的postcheck失败可留下已发送的OK前缀，仍须致命退出，不能补写后续成功。启动失败使用真实生产ELF的链接wrapper强制关系init失败，要求RELATION_INIT和应用码22；未知应用码、panic和执行器异常仍归harness。最初分类上界21及unbind/help夹具错误修后均由完整默认复验，不把这些验证缺口计成生产缺陷检出。
+
+当前统一实际变异日志为`build/search-relations-review-20261014-mutations.log`及`relations-review-20261014-mutations-detail.log`。新增关系18个缺陷命中指定suite、owner与具体断言，no-effect、wrong-owner、wrong-assertion和harness优先控制保留；默认关系puregate含8项控制。累计1556份原始日志（含10月11日保留记录）保存在`build/relations-mutation-final/retained`，不引用已不存在的临时目录作为明细。仓库缺源/脚本/ELF硬失败1，外部工具缺失77的边界由默认Guest门禁覆盖。
+
+2026-10-14，BUILD_TESTING OFF、TOOLS ON的生产目标重新构建完成，并用其实际ELF运行健康8项通过，见`build/search-relations-review-20261014-production-build.log`及`search-relations-review-20261014-production-guest.log`；原生产配置保持。独立服务借用YanFs和纯格式层，shell只解析和格式化，生产应用不依赖tests。
+
+2026-10-11布局测量见`build/search-relations-layout-stack-final.log`：Host/RV32关系对象12144/12136字节，shell4384/4356；index、note、shell、relation合计1619120/1619060字节，低于2MiB。index已包含linear，不重复计数。被测模块最大单函数帧Host608、RV32496字节，RV32关系服务192；这些数值不是完整调用链或ISR嵌套栈峰值证明。查询借用期间FS稳定仍由调用方保证，无事务快照、关系缓存或自动断链修复。
+
+### 0028 机械接口补全记录
+
+总审核将三条示意query签名的`(context, name, sink, optional_summary)`补为`(context, name, sink, sink_context, optional_summary)`，并说明opaque上下文同步传给callback。依据为`os/note_relations.h`中`YanRelationRowFn`及三query公开声明，与既有元数据列表接口一致；补全原已批准callback责任，不改变行为、所有权、磁盘格式或Spec Lock时间。原阶段“尚未实现/待验”现由上述冻结树实测取代；0027及更早交付结论保持。
+
+### 已交付笔记元数据基线
+
+已交付：[0027笔记元数据与标签筛选](specs/0027-note-metadata.md)，于2026-10-07 17:56 +08:00经项目所有者整体批准并锁定。
 
 - 规格：版本化同文件头、meta观察/单文件更新/列表、统一term API标签AND筛选；旧格式与无tag查询保持。
 - 实现：纯格式、元数据服务、统一term API标签筛选、shell命令与生产Guest接入已完成，独立实现审查已完成。
@@ -359,7 +387,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-0027已完成本机验证、远端CI及所有者批准合入，通过PR #24交付main，供项目所有者阅读和运行。学习理解由项目所有者判断，下一项能力另行对齐。
+按0028计划先固定关系服务接口与原生语义RED，再实现服务、终端和独立验证；每批讲解实际输入、状态变化及失败边界。0027交付保持，实现与用户审查分别记录。
 
 ### 历史推进记录（M1a / M2a）
 

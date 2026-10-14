@@ -2,6 +2,7 @@
 #define YAN_OS_SHELL_H
 
 #include "note_metadata.h"
+#include "note_relations.h"
 #include "search.h"
 #include "search_terms.h"
 #include "yanfs.h"
@@ -20,6 +21,10 @@
  * literal byte search itself comes from the injected unified Search facade.
  * 0026 adds the `search`, `rebuild` and `index status|clear` front ends over a
  * second, independent term facade.
+ *
+ * 0028 adds an optional relation binding behind yan_shell_bind_relations; the
+ * relation service itself is the independent os/note_relations.h object, so the
+ * shell never walks the filesystem or ranks candidates by itself.
  *
  * The layer performs no Host I/O of its own. Every produced byte goes through
  * the borrowed YanShellOutput callback; every file operation goes through a
@@ -86,14 +91,17 @@ typedef struct {
  * 0027 adds an optional metadata binding and its long-lived scratch. The
  * scratch is inside the shell so no command ever builds a large object on the
  * stack: one parsed info, one borrowed tag selection and the 1023-byte keyword
- * window the tag-stripped query is assembled into. `metadata` stays NULL after
- * the original yan_shell_init, so an unbound shell keeps exactly the 0022-0026
- * behaviour and never grows the new commands by accident. */
+ * window the tag-stripped query is assembled into. `metadata` and `relations`
+ * stay NULL after the original yan_shell_init, so an unbound shell keeps
+ * exactly the 0022-0026 behaviour and never grows the new commands by accident.
+ * 0028 adds the optional relation binding; its long-lived relation context
+ * lives in the caller's os/note_relations.h object rather than in the shell. */
 typedef struct {
     YanFs *fs;
     YanSearch *search;
     YanSearchTerms *terms;
     YanNoteContext *metadata;
+    YanRelationContext *relations;
     YanShellOutput output;
     bool initialized;
     bool busy;
@@ -143,6 +151,27 @@ YanShellResult yan_shell_init(YanShell *, YanFs *, YanSearch *,
  * service context, so a caller can drop the binding and keep the old command
  * set. */
 YanShellResult yan_shell_bind_metadata(YanShell *, YanNoteContext *note);
+
+/* 0028 optional relation binding. The shell borrows a caller-owned, long-lived
+ * YanRelationContext so the three relation commands can run without the shell
+ * traversing the filesystem or ranking candidates; an unbound shell keeps the
+ * original UNKNOWN_COMMAND for `links`, `backlinks` and `related`.
+ *
+ * `relations` must belong to the same filesystem the shell already borrows,
+ * must be a non-NULL, in-range span, and must not overlap the shell, the
+ * filesystem, either facade, either protected backend span, or a currently
+ * bound metadata context. The full shell extent is checked before its
+ * initialized/busy fields; after that, the relation span and every protected
+ * alias are checked before any relation field is read. The call performs no I/O
+ * and emits no byte.
+ *
+ * A valid context is published, and the shell routes `links`, `backlinks` and
+ * `related` through the service after the binding succeeds. A NULL context
+ * unbinds and returns YAN_SHELL_OK. An active shell returns YAN_SHELL_BUSY; a
+ * mismatched filesystem, an uninitialized relation context and a bad span
+ * return YAN_SHELL_INVALID, while a busy relation context returns
+ * YAN_SHELL_BUSY. */
+YanShellResult yan_shell_bind_relations(YanShell *, YanRelationContext *);
 
 /* Runs one net line, already stripped of CR/LF by the caller's line reader.
  *
@@ -196,6 +225,12 @@ YanShellResult yan_shell_bind_metadata(YanShell *, YanNoteContext *note);
  * routed before the filesystem health guard. Every other command, including an
  * invalid `index` grammar and an empty or `exit` line, keeps the original health
  * priority.
+ *
+ * 0028: a bound relation context is borrowed for the whole call, so an aliasing
+ * line is rejected with YAN_SHELL_INVALID before any parse. A bound shell
+ * routes `links`, `backlinks` and `related` to the relation service and formats
+ * one CRLF row per callback plus the summary receipt; an unbound shell keeps
+ * the three names as UNKNOWN_COMMAND.
  *
  * 0027: a bound shell also protects the metadata context span from an aliasing
  * line, routes `meta show|set|tag|link|list` after the health guard, and takes

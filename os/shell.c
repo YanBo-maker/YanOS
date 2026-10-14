@@ -41,7 +41,16 @@
  * service or the filtered term entry point, and formats the result. Every
  * command validates its complete grammar before the first service call, so a
  * USAGE answer performs zero filesystem I/O, and every metadata declaration
- * value is validated before that call as well. */
+ * value is validated before that call as well.
+ *
+ * 0028 adds an optional relation layer behind yan_shell_bind_relations. It
+ * changes no old rule: an unbound shell is byte-for-byte the 0022-0027 shell
+ * and `links`, `backlinks` and `related` stay UNKNOWN_COMMAND. When bound, each
+ * command parses exactly one legal name, calls the independent note-relations
+ * service once, formats one CRLF row per callback and then the summary receipt.
+ * The shell never walks the directory, prechecks a header or ranks a row, and a
+ * refused output byte makes the service STOPPED, which returns fatal with no
+ * receipt and no retry. */
 #include "shell.h"
 
 #include "memory.h"
@@ -103,6 +112,15 @@ static const char HELP_METADATA[] =
     "create creates only; write replaces only; no LF is added to text\r\n"
     "cat: printable ASCII as is, a backslash as two backslashes, C0 and DEL as \\xHH\r\n"
     "cat: valid UTF-8 as is except C1 U+0080 to U+009F, escaped byte by byte\r\n";
+
+/* 0028 help fragment for a shell with a bound relation context. It is appended
+ * after the base help (metadata-bound or not), so the three relation commands
+ * are advertised independently of the metadata binding and an unbound shell
+ * still prints only HELP_TEXT. */
+static const char HELP_RELATIONS[] =
+    "links NAME: list a note's declared outgoing links\r\n"
+    "backlinks NAME: list files that declare NAME\r\n"
+    "related NAME: list files related by a link or a shared tag\r\n";
 
 /* True when the two byte ranges intersect. Same arithmetic as the filesystem
  * core: a range that would leave uintptr_t is reported as overlapping, which
@@ -1971,6 +1989,121 @@ static YanShellResult run_meta(YanShell *shell, const uint8_t *line,
     return emit_status(shell, "ERROR USAGE\r\n");
 }
 
+/* -------------------------------------------------------- relation commands */
+
+/* Which of the three 0028 commands the shared emitter formats. */
+typedef enum {
+    RELATION_CMD_LINKS = 0,
+    RELATION_CMD_BACKLINKS = 1,
+    RELATION_CMD_RELATED = 2
+} RelationCommand;
+
+/* One synchronous callback's formatting state. It lives on the run_relation
+ * frame, never in the service, and the borrowed row is used only until the
+ * callback returns. */
+typedef struct {
+    YanShell *shell;
+    RelationCommand command;
+} RelationEmit;
+
+/* Formats exactly one CRLF row for the borrowed relation row. Returning false
+ * stops the service immediately (YAN_NOTE_STOPPED), which run_relation turns
+ * into a fatal exit without a receipt or a retry. */
+static bool relation_emit(void *context, const YanRelationRow *row)
+{
+    RelationEmit *emit = context;
+    if (emit->command == RELATION_CMD_LINKS) {
+        return shell_puts(emit->shell, "LINK ") &&
+               shell_puts(emit->shell, row->name) &&
+               shell_puts(emit->shell,
+                          row->exists ? " OK\r\n" : " DANGLING\r\n");
+    }
+    if (emit->command == RELATION_CMD_BACKLINKS) {
+        return shell_puts(emit->shell, "BACKLINK ") &&
+               shell_puts(emit->shell, row->name) &&
+               shell_puts(emit->shell, "\r\n");
+    }
+    return shell_puts(emit->shell, "RELATED ") &&
+           shell_puts(emit->shell, row->name) &&
+           shell_puts(emit->shell, " out=") &&
+           shell_put_decimal(emit->shell, row->outgoing ? 1u : 0u) &&
+           shell_puts(emit->shell, " in=") &&
+           shell_put_decimal(emit->shell, row->incoming ? 1u : 0u) &&
+           shell_puts(emit->shell, " tags=") &&
+           shell_put_decimal(emit->shell, (uint32_t)row->shared_tags) &&
+           shell_puts(emit->shell, "\r\n");
+}
+
+/* One relation command: exactly one legal name, one service call and one
+ * summary receipt. The shell never walks the directory or ranks rows; every
+ * row byte comes from the callback. Arity and name validity are checked here so
+ * a malformed line is USAGE with zero I/O; a missing source or a broken header
+ * is the ordinary service error through the shared note mapping, and an
+ * I/O/protocol failure is fatal. */
+static YanShellResult run_relation(YanShell *shell, const uint8_t *line,
+                                   uint32_t length, uint32_t position,
+                                   RelationCommand command)
+{
+    uint32_t name_start = 0u;
+    uint32_t name_length = 0u;
+    if (!parse_one_name(line, length, position, &name_start, &name_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    char name[YAN_FS_NAME_MAX + 2u];
+    copy_name(line, name_start, name_length, name);
+    if (!yan_note_name_valid((const uint8_t *)name, name_length)) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    RelationEmit emit;
+    emit.shell = shell;
+    emit.command = command;
+    YanRelationSummary summary = {0u, 0u, false};
+    YanNoteResult result;
+    if (command == RELATION_CMD_LINKS) {
+        result = yan_relation_links(shell->relations, name, relation_emit,
+                                    &emit, &summary);
+    } else if (command == RELATION_CMD_BACKLINKS) {
+        result = yan_relation_backlinks(shell->relations, name, relation_emit,
+                                        &emit, &summary);
+    } else {
+        result = yan_relation_related(shell->relations, name, relation_emit,
+                                      &emit, &summary);
+    }
+    if (result == YAN_NOTE_STOPPED) {
+        /* The callback refused a byte: stop now, with no receipt and no retry. */
+        return YAN_SHELL_FATAL;
+    }
+    if (result != YAN_NOTE_OK) {
+        return finish_note_error(shell, result);
+    }
+    if (command == RELATION_CMD_LINKS) {
+        if (!shell_puts(shell, "OK links shown=") ||
+            !shell_put_decimal(shell, summary.shown) ||
+            !shell_puts(shell, "\r\n")) {
+            return YAN_SHELL_FATAL;
+        }
+        return YAN_SHELL_OK;
+    }
+    if (command == RELATION_CMD_BACKLINKS) {
+        if (!shell_puts(shell, "OK backlinks shown=") ||
+            !shell_put_decimal(shell, summary.shown) ||
+            !shell_puts(shell, " target=") ||
+            !shell_puts(shell, summary.target_exists ? "OK\r\n"
+                                                     : "DANGLING\r\n")) {
+            return YAN_SHELL_FATAL;
+        }
+        return YAN_SHELL_OK;
+    }
+    if (!shell_puts(shell, "OK related total=") ||
+        !shell_put_decimal(shell, summary.total) ||
+        !shell_puts(shell, " shown=") ||
+        !shell_put_decimal(shell, summary.shown) ||
+        !shell_puts(shell, "\r\n")) {
+        return YAN_SHELL_FATAL;
+    }
+    return YAN_SHELL_OK;
+}
+
 static YanShellResult run_line(YanShell *shell, const uint8_t *line,
                                uint32_t length)
 {
@@ -1990,9 +2123,13 @@ static YanShellResult run_line(YanShell *shell, const uint8_t *line,
             return emit_status(shell, "ERROR USAGE\r\n");
         }
         /* A bound shell advertises the metadata capabilities; an unbound one
-         * keeps the original help text byte for byte. */
-        if (!shell_puts(shell,
-                        shell->metadata != NULL ? HELP_METADATA : HELP_TEXT)) {
+         * keeps the original help text byte for byte. 0028 appends the relation
+         * lines independently of the metadata binding. */
+        const char *help = shell->metadata != NULL ? HELP_METADATA : HELP_TEXT;
+        if (!shell_puts(shell, help)) {
+            return YAN_SHELL_FATAL;
+        }
+        if (shell->relations != NULL && !shell_puts(shell, HELP_RELATIONS)) {
             return YAN_SHELL_FATAL;
         }
         return emit_ok(shell, "help") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
@@ -2085,6 +2222,20 @@ static YanShellResult run_line(YanShell *shell, const uint8_t *line,
             return emit_status(shell, "ERROR UNKNOWN_COMMAND\r\n");
         }
         return run_meta(shell, line, length, position);
+    }
+    bool links = token_is(line, command_start, command_length, "links");
+    bool backlinks = token_is(line, command_start, command_length, "backlinks");
+    bool related = token_is(line, command_start, command_length, "related");
+    if (links || backlinks || related) {
+        /* 0028: the three relation commands exist only after a successful
+         * binding; an unbound shell keeps the old UNKNOWN_COMMAND verdict. */
+        if (shell->relations == NULL) {
+            return emit_status(shell, "ERROR UNKNOWN_COMMAND\r\n");
+        }
+        RelationCommand relation_command =
+            links ? RELATION_CMD_LINKS
+                  : (backlinks ? RELATION_CMD_BACKLINKS : RELATION_CMD_RELATED);
+        return run_relation(shell, line, length, position, relation_command);
     }
     if (token_is(line, command_start, command_length, "exit")) {
         if (!rest_is_spaces(line, length, position)) {
@@ -2283,6 +2434,7 @@ YanShellResult yan_shell_init(YanShell *shell, YanFs *fs, YanSearch *search,
     /* 0027: the original init leaves the shell unbound so the old command set
      * and the old query behaviour are unchanged until a caller opts in. */
     shell->metadata = NULL;
+    shell->relations = NULL;
     shell->output = output;
     shell->initialized = true;
     shell->busy = false;
@@ -2352,6 +2504,14 @@ YanShellResult yan_shell_bind_metadata(YanShell *shell, YanNoteContext *note)
                        sizeof(YanNoteContext))) {
         return YAN_SHELL_INVALID;
     }
+    /* 0028: a bound relation context is borrowed too, so the metadata context
+     * may not overlap it in either direction. */
+    if (shell->relations != NULL &&
+        ranges_overlap((uintptr_t)(const void *)shell->relations,
+                       sizeof(YanRelationContext), note_base,
+                       sizeof(YanNoteContext))) {
+        return YAN_SHELL_INVALID;
+    }
     /* The borrowed source must be the shell's own filesystem, and the service
      * must be initialized and idle. The source state is deliberately left to
      * each command's own service call, which maps it with the note error
@@ -2366,6 +2526,89 @@ YanShellResult yan_shell_bind_metadata(YanShell *shell, YanNoteContext *note)
         return YAN_SHELL_INVALID;
     }
     shell->metadata = note;
+    return YAN_SHELL_OK;
+}
+
+YanShellResult yan_shell_bind_relations(YanShell *shell,
+                                        YanRelationContext *relations)
+{
+    /* The extent rules run first, for both forms, so a shell pointer outside
+     * its own object is rejected before any field is read. No byte is emitted
+     * and no filesystem call is made on any path. */
+    if (!shell_span_valid((uintptr_t)(const void *)shell,
+                          (uint64_t)sizeof(YanShell))) {
+        return YAN_SHELL_INVALID;
+    }
+    if (!shell->initialized) {
+        return YAN_SHELL_INVALID;
+    }
+    if (shell->busy) {
+        return YAN_SHELL_BUSY;
+    }
+    if (relations == NULL) {
+        /* The documented unbind: an initialized, idle shell drops its binding
+         * and returns the relation commands to UNKNOWN_COMMAND. */
+        shell->relations = NULL;
+        return YAN_SHELL_OK;
+    }
+    uintptr_t relations_base = (uintptr_t)(const void *)relations;
+    if (!shell_span_valid(relations_base,
+                          (uint64_t)sizeof(YanRelationContext))) {
+        return YAN_SHELL_INVALID;
+    }
+    /* Both facades are known valid because the shell was initialized through
+     * yan_shell_init, which requires an initialized literal and term facade. */
+    const void *search_context = shell->search->backend.context;
+    uint64_t search_context_size = (uint64_t)shell->search->backend.context_size;
+    const void *search_source = shell->search->backend.source_context;
+    uint64_t search_source_size = (uint64_t)shell->search->backend.source_size;
+    const void *term_context = shell->terms->backend.context;
+    uint64_t term_context_size = (uint64_t)shell->terms->backend.context_size;
+    const void *term_source = shell->terms->backend.source_context;
+    uint64_t term_source_size = (uint64_t)shell->terms->backend.source_size;
+    if (!shell_span_valid((uintptr_t)search_context, search_context_size) ||
+        !shell_span_valid((uintptr_t)search_source, search_source_size) ||
+        !shell_span_valid((uintptr_t)term_context, term_context_size) ||
+        !shell_span_valid((uintptr_t)term_source, term_source_size)) {
+        return YAN_SHELL_INVALID;
+    }
+    if (ranges_overlap((uintptr_t)(const void *)shell, sizeof(YanShell),
+                       relations_base, sizeof(YanRelationContext)) ||
+        ranges_overlap((uintptr_t)(const void *)shell->fs, sizeof(YanFs),
+                       relations_base, sizeof(YanRelationContext)) ||
+        ranges_overlap((uintptr_t)(const void *)shell->search,
+                       sizeof(YanSearch), relations_base,
+                       sizeof(YanRelationContext)) ||
+        ranges_overlap((uintptr_t)(const void *)shell->terms,
+                       sizeof(YanSearchTerms), relations_base,
+                       sizeof(YanRelationContext)) ||
+        ranges_overlap((uintptr_t)search_context, search_context_size,
+                       relations_base, sizeof(YanRelationContext)) ||
+        ranges_overlap((uintptr_t)search_source, search_source_size,
+                       relations_base, sizeof(YanRelationContext)) ||
+        ranges_overlap((uintptr_t)term_context, term_context_size,
+                       relations_base, sizeof(YanRelationContext)) ||
+        ranges_overlap((uintptr_t)term_source, term_source_size,
+                       relations_base, sizeof(YanRelationContext)) ||
+        (shell->metadata != NULL &&
+         ranges_overlap((uintptr_t)(const void *)shell->metadata,
+                        sizeof(YanNoteContext), relations_base,
+                        sizeof(YanRelationContext)))) {
+        return YAN_SHELL_INVALID;
+    }
+    /* The relation field is read only after every span and alias check. The
+     * borrowed source must be the shell's own filesystem and the service must
+     * be initialized and idle. */
+    if (!relations->initialized) {
+        return YAN_SHELL_INVALID;
+    }
+    if (relations->busy) {
+        return YAN_SHELL_BUSY;
+    }
+    if (relations->fs == NULL || relations->fs != shell->fs) {
+        return YAN_SHELL_INVALID;
+    }
+    shell->relations = relations;
     return YAN_SHELL_OK;
 }
 
@@ -2440,6 +2683,14 @@ YanShellResult yan_shell_execute(YanShell *shell, const uint8_t *line,
         if (shell->metadata != NULL &&
             ranges_overlap((uintptr_t)(const void *)shell->metadata,
                            (uint64_t)sizeof(YanNoteContext), begin,
+                           (uint64_t)length)) {
+            return YAN_SHELL_INVALID;
+        }
+        /* 0028: a bound relation context is borrowed for the whole call too, so
+         * the command line may not alias it. An unbound shell skips the test. */
+        if (shell->relations != NULL &&
+            ranges_overlap((uintptr_t)(const void *)shell->relations,
+                           (uint64_t)sizeof(YanRelationContext), begin,
                            (uint64_t)length)) {
             return YAN_SHELL_INVALID;
         }
