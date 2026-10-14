@@ -8,7 +8,7 @@
 - 用户审查：整体方案回复“认可整体方案，形成规格并继续实现”；实现交付与合入待审查，学习理解由项目所有者判断。
 
 
-当前实现尚未合入main，远端CI与维护者合入审查另行记录；Spec Lock提交`3b3d068`保留。下一步为完整能力提交、PR与远端CI，再交维护者审查合入；规格批准不代替实现交付批准。
+功能实现提交`be99b8e18c713e225111c1e6deb54463ce904ba8`已推送并建立[PR #26](https://github.com/YanBo-maker/YanOS/pull/26)，Spec Lock提交`3b3d068`保留。2026-10-14，[CI运行38507466007](https://github.com/YanBo-maker/YanOS/actions/runs/38507466007)对应上述功能head，三项成功：Linux Debug ASan60/60（47.24 s）、Linux Release60/60（30.98 s）、Windows58/58（77.59 s）。远端配置为TOOLS OFF，不等同本机90组工具/Guest与十四组实际变异。当前实现尚未合入main，下一步为维护者审查交付与批准合入；规格批准不代替实现交付批准。
 
 ### 0028 本机验收（2026-10-14复测）
 
