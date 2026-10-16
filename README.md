@@ -28,7 +28,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [Host语义检索](docs/specs/0029-host-semantic-search.md)整体方案已批准并锁定，提供独立可选Linux/WSL工具，以本地模型为只读YanFS原文段落建立旁置向量索引，返回带物理出处的前20个候选。Guest检索与磁盘格式保持。已实现并完成本机完整回归、实际变异及固定小语料真实模型复验；独立只读dsh对齐与总审核已完成，功能提交9ad39ed已通过[PR #30](https://github.com/YanBo-maker/YanOS/pull/30)对应的三项远端CI；项目所有者于2026-10-15明确批准，经PR #30合入main（79fdde6），阶段提交保留，学习理解由项目所有者判断。
 
-[可核验检索上下文包](docs/specs/0030-retrieval-context-json.md)整体方案已于2026-10-16批准，为Host search增加可选JSON输出，携带完整命中段、物理出处和同次来源/模型/runner/配置身份；默认文本输出保持。规格锁定提交3e84826已保留；evidence API与JSON层已实现，原生及JSON定向验证通过，旧门禁夹具复制范围问题已修复；Release/ASan/Windows完整复验及统一十五组实际变异通过，显式JSON真模型验收亦通过。独立最终对齐及九项总审核已通过，功能提交5299136已通过[PR #32](https://github.com/YanBo-maker/YanOS/pull/32)对应三项远端CI；维护者交付与合入审查仍待批准。
+[可核验检索上下文包](docs/specs/0030-retrieval-context-json.md)整体方案已于2026-10-16批准，为Host search增加可选JSON输出，携带完整命中段、物理出处和同次来源/模型/runner/配置身份；默认文本输出保持。规格锁定提交3e84826已保留；evidence API与JSON层已实现，原生及JSON定向验证通过，旧门禁夹具复制范围问题已修复；Release/ASan/Windows完整复验及统一十五组实际变异通过，显式JSON真模型验收亦通过。独立最终对齐及九项总审核已通过，功能提交5299136已通过[PR #32](https://github.com/YanBo-maker/YanOS/pull/32)对应三项远端CI；项目所有者于2026-10-16明确批准，经PR #32合入main（5170cf0），阶段提交保留，学习理解仍由项目所有者判断。
 
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
