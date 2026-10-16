@@ -220,8 +220,12 @@ if(YAN_BUILD_SEMANTIC)
     target_link_libraries(yan_semantic_llama PUBLIC yan_semantic_core
                           PRIVATE CURL::libcurl yyjson::yyjson)
     target_compile_options(yan_semantic_llama PRIVATE ${YAN_WARNINGS})
+    add_library(yan_semantic_json STATIC tools/semantic_json.c)
+    target_link_libraries(yan_semantic_json PUBLIC yan_semantic_core PRIVATE yyjson::yyjson)
+    target_compile_options(yan_semantic_json PRIVATE ${YAN_WARNINGS})
     add_executable(yan_semantic tools/yan_semantic.c)
-    target_link_libraries(yan_semantic PRIVATE yan_semantic_posix yan_semantic_llama)
+    target_link_libraries(yan_semantic PRIVATE yan_semantic_posix yan_semantic_llama
+                          yan_semantic_json yyjson::yyjson)
     target_compile_options(yan_semantic PRIVATE ${YAN_WARNINGS})
 endif()
 
@@ -268,6 +272,17 @@ if(BUILD_TESTING)
                  "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_semantic_mutation_gate.py")
         set_tests_properties(semantic_mutation_gate PROPERTIES TIMEOUT 120)
         if(YAN_BUILD_SEMANTIC)
+            add_executable(test_semantic_json tests/test_semantic_json.c)
+            target_include_directories(test_semantic_json PRIVATE tools)
+            target_link_libraries(test_semantic_json PRIVATE yan_semantic_json yyjson::yyjson unity::framework)
+            target_compile_options(test_semantic_json PRIVATE ${YAN_WARNINGS})
+            add_test(NAME semantic_json_memory COMMAND test_semantic_json)
+            add_executable(semantic_json_memory_probe tools/yan_semantic.c tests/semantic_json_memory.c)
+            target_include_directories(semantic_json_memory_probe PRIVATE tools)
+            target_compile_definitions(semantic_json_memory_probe PRIVATE calloc=yan_semantic_test_calloc)
+            target_link_libraries(semantic_json_memory_probe PRIVATE yan_semantic_posix yan_semantic_llama
+                                  yan_semantic_json yyjson::yyjson)
+            target_compile_options(semantic_json_memory_probe PRIVATE ${YAN_WARNINGS})
             add_executable(semantic_provider_probe tests/semantic_provider_probe.c)
             target_link_libraries(semantic_provider_probe PRIVATE yan_semantic_llama)
             target_compile_options(semantic_provider_probe PRIVATE ${YAN_WARNINGS})
@@ -281,6 +296,12 @@ if(BUILD_TESTING)
                 $<TARGET_FILE:yan_semantic>
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_fake_runner.py")
             set_tests_properties(semantic_cli PROPERTIES TIMEOUT 120)
+            add_test(NAME semantic_json COMMAND "${Python3_EXECUTABLE}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_json_checks.py"
+                $<TARGET_FILE:yan_semantic>
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_fake_runner.py"
+                $<TARGET_FILE:semantic_json_memory_probe>)
+            set_tests_properties(semantic_json PROPERTIES TIMEOUT 120)
         endif()
     endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

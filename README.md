@@ -28,7 +28,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [Host语义检索](docs/specs/0029-host-semantic-search.md)整体方案已批准并锁定，提供独立可选Linux/WSL工具，以本地模型为只读YanFS原文段落建立旁置向量索引，返回带物理出处的前20个候选。Guest检索与磁盘格式保持。已实现并完成本机完整回归、实际变异及固定小语料真实模型复验；独立只读dsh对齐与总审核已完成，功能提交9ad39ed已通过[PR #30](https://github.com/YanBo-maker/YanOS/pull/30)对应的三项远端CI；项目所有者于2026-10-15明确批准，经PR #30合入main（79fdde6），阶段提交保留，学习理解由项目所有者判断。
 
-[可核验检索上下文包](docs/specs/0030-retrieval-context-json.md)整体方案已于2026-10-16批准，计划为Host search增加可选JSON输出，携带完整命中段、物理出处和同次来源/模型/runner/配置身份；默认文本输出保持。规格已通过独立只读审核并锁定，实施与验证待进行。
+[可核验检索上下文包](docs/specs/0030-retrieval-context-json.md)整体方案已于2026-10-16批准，为Host search增加可选JSON输出，携带完整命中段、物理出处和同次来源/模型/runner/配置身份；默认文本输出保持。规格锁定提交3e84826已保留；evidence API与JSON层已实现，原生及JSON定向验证通过，旧门禁夹具复制范围问题已修复；Release/ASan/Windows完整复验及统一十五组实际变异通过，显式JSON真模型验收亦通过。独立增量实现审核已通过，冻结树最终审核、远端CI与维护者交付合入审查仍待完成。
 
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
@@ -141,19 +141,22 @@ cmake -S . -B build/semantic -DBUILD_TESTING=OFF -DYAN_BUILD_SEMANTIC=ON \
 cmake --build build/semantic --target yan_semantic --parallel
 build/semantic/yan_semantic rebuild --disk-image notes.img --index notes.index --model model.gguf --runner /path/to/llama-server
 build/semantic/yan_semantic search --disk-image notes.img --index notes.index --model model.gguf --runner /path/to/llama-server --query "设备如何叫醒处理器"
+build/semantic/yan_semantic search --disk-image notes.img --index notes.index --model model.gguf --runner /path/to/llama-server --query "设备如何叫醒处理器" --format json > context.json
 build/semantic/yan_semantic status --disk-image notes.img --index notes.index --model model.gguf --runner /path/to/llama-server
 ```
 
 运行前停止使用该镜像的Guest，并保持镜像、模型、runner和索引稳定；工具不下载模型或自动格式化。旁置索引在来源或模型身份变化后STALE，须显式rebuild。结果是原文候选，不生成答案；没有相关内容的问题也可能返回20段。首次加载、每次完整身份校验与模型内存有成本，固定小语料复验不代表任意知识库质量。实现与验证边界见[0029](docs/specs/0029-host-semantic-search.md)和[STATUS](docs/STATUS.md)。
 
+search省略格式或使用`--format text`保持人读输出；`--format json`输出完整命中原文、物理行号与半开字节范围，以及同次来源、模型、runner和配置四身份。只有search接受该参数。调用方先检查退出码为0，再完整解析JSON；输出失败可能留下前缀，不能仅凭文件存在或JSON可解析就消费。接口与契约见[0030](docs/specs/0030-retrieval-context-json.md)及[host/semantic.h](host/semantic.h)。
+
 真实模型效果采用操作员显式运行的独立验收脚本，不注册默认CTest，也不进入普通CI；需要手动提供已准备的模型、runner和`/usr/bin/time`：
 
 ```sh
 python3 -B tests/semantic_model_check.py --tool build/semantic/yan_semantic \
-  --model model.gguf --runner /path/to/llama-server --work build/semantic-real-check
+  --model model.gguf --runner /path/to/llama-server --work build/semantic-real-check --json-context
 ```
 
-脚本实际调用生产工具，保存身份、原文出处、预标签Top5结果和耗时/RSS报告。工具缺失硬失败；外部依赖缺失明确返回77，表示效果待验，不能当通过或静默跳过。默认fake provider/oracle通过不能替代这项效果验证。
+脚本实际调用生产工具，保存身份、原文出处、预标签Top5结果和耗时/RSS报告。只有显式添加`--json-context`才同时检查完整JSON上下文包的身份、排名和原文范围；不添加时保留原文本效果验收。工具缺失硬失败；外部依赖缺失明确返回77，表示效果待验，不能当通过或静默跳过。默认fake provider/oracle通过不能替代这项效果验证。
 
 变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 可注册十五组：`semantic_mutation`、`note_relations_mutation`、`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `semantic_mutation_gate`、`note_relations_mutation_gate`、`note_metadata_mutation_gate`、`search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
 

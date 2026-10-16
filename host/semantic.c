@@ -857,7 +857,8 @@ static YanSemanticResult guard_query(const YanSemantic *ctx,
 static YanSemanticResult search_locked(YanSemantic *ctx, const uint8_t *query,
                                        size_t length, YanSemanticRowFn sink,
                                        void *sink_context,
-                                       YanSemanticSummary *out)
+                                       YanSemanticSummary *out,
+                                       YanSemanticEvidence *evidence_out)
 {
     if (!binary32_supported()) {
         return YAN_SEMANTIC_UNSUPPORTED;
@@ -866,6 +867,8 @@ static YanSemanticResult search_locked(YanSemantic *ctx, const uint8_t *query,
     if (result != YAN_SEMANTIC_OK) {
         return result;
     }
+
+    const YanSemanticIdentity verified_identity = ctx->identity;
 
     YanSemanticCorpus *corpus = malloc(sizeof *corpus);
     if (corpus == NULL) {
@@ -1016,6 +1019,12 @@ static YanSemanticResult search_locked(YanSemantic *ctx, const uint8_t *query,
         out->skipped = meta.skipped;
         out->shown = delivered;
     }
+    if (evidence_out != NULL) {
+        evidence_out->summary = (YanSemanticSummary){
+            YAN_SEMANTIC_INDEX_READY, meta.segments, meta.skipped, delivered};
+        evidence_out->identity = verified_identity;
+        memcpy(evidence_out->source_sha256, corpus->source_hash, 32u);
+    }
     result = YAN_SEMANTIC_OK;
 
 cleanup:
@@ -1157,7 +1166,36 @@ YanSemanticResult yan_semantic_search(YanSemantic *ctx, const uint8_t *query,
     }
     ctx->busy = true;
     const YanSemanticResult result =
-        search_locked(ctx, query, length, sink, sink_context, out);
+        search_locked(ctx, query, length, sink, sink_context, out, NULL);
+    ctx->busy = false;
+    return result;
+}
+
+YanSemanticResult yan_semantic_search_evidence(YanSemantic *ctx,
+    const uint8_t *query, size_t length, YanSemanticRowFn sink,
+    void *sink_context, YanSemanticEvidence *evidence_out)
+{
+    if (ctx == NULL || !span_ok(ctx, sizeof *ctx) || !ctx->initialized) {
+        return YAN_SEMANTIC_INVALID;
+    }
+    if (ctx->busy) {
+        return YAN_SEMANTIC_BUSY;
+    }
+    /* Guard the complete caller object before taking a member address or
+     * reading the query. In particular, identity/hash suffixes are protected. */
+    if (evidence_out == NULL || !span_ok(evidence_out, sizeof *evidence_out) ||
+        holder_conflicts(ctx, evidence_out, sizeof *evidence_out) ||
+        !span_ok(query, length) ||
+        spans_overlap(query, length, evidence_out, sizeof *evidence_out)) {
+        return YAN_SEMANTIC_INVALID;
+    }
+    YanSemanticEvidence pending = {0};
+    ctx->busy = true;
+    const YanSemanticResult result = search_locked(ctx, query, length, sink,
+        sink_context, NULL, &pending);
+    if (result == YAN_SEMANTIC_OK) {
+        *evidence_out = pending;
+    }
     ctx->busy = false;
     return result;
 }

@@ -32,6 +32,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from gate_fixture import copy_named_inputs, self_test_named_copy
 
 HERE = Path(__file__).resolve().parent
 FAILURES = []
@@ -196,9 +197,8 @@ def cli_missing_controls():
     base = tempfile.mkdtemp(prefix="editor-gate-cli-")
     try:
         tree = Path(base) / "source"
-        shutil.copytree(source, tree,
-                        ignore=shutil.ignore_patterns(".git", "build",
-                                                      "__pycache__", ".venv"))
+        self_test_named_copy()
+        copy_named_inputs(source, tree, EDITOR.REQUIRED_REPO + ["tests/run_editor_mutation.py"])
         unity = Path(base) / "unity"
         (unity / "src").mkdir(parents=True)
         (unity / "src" / "unity.c").write_text("/* fake unity for the gate */\n")
