@@ -1,11 +1,11 @@
 # 项目状态
 
-当前推进：[0029 Host侧语义检索](specs/0029-host-semantic-search.md)，于2026-10-14 21:11 +08:00经项目所有者整体认可并授权形成规格、继续实现。
+最新交付：[0029 Host侧语义检索](specs/0029-host-semantic-search.md)，于2026-10-14 21:11 +08:00经项目所有者整体认可并授权形成规格、继续实现。
 
 - 规格：可选Linux/WSL C17只读Host工具、本地模型受控进程、确定分段与物理出处、旁置索引身份失效及精确top20，已锁定。
-- 实现：只读Host来源、文本/分段、身份与索引、精确排名、受控provider和CLI已完成；Guest检索、YanFS格式与既有能力保持。独立只读dsh对齐和总审核已完成，尚未合入main。
+- 实现：只读Host来源、文本/分段、身份与索引、精确排名、受控provider和CLI已完成；Guest检索、YanFS格式与既有能力保持。独立只读dsh对齐和总审核已完成，经所有者批准合入main。
 - 验证：2026-10-15冻结树Release100/100（294.77 s）、ASan/UBSan100/100（423.51 s）、Windows MSVC65/65（141.66 s），统一十五组实际变异15/15（321.87 s），均0失败、0SKIP。Linux工具/provider开启配置注册100默认/115总计、八个默认puregate；生产工具真实模型复验另列。
-- 用户审查：整体方案已认可；实现交付、效果与合入待后续审查，学习理解由项目所有者判断。
+- 用户审查：整体方案已认可；项目所有者于2026-10-15明确批准PR #30按merge commit合入main并保留历史，学习理解由项目所有者判断。
 
 ### 0029 冻结树本机验收（2026-10-15）
 
@@ -17,7 +17,7 @@ BUILD_TESTING OFF生产工具重新构建，最终实际工具SHA-256 `19cb7a9df
 
 真实效果脚本`tests/semantic_model_check.py`由操作员显式运行，实际调用生产工具和外部模型，不使用fixture向量冒充模型；它不注册默认CTest、不进入普通CI。手动提供模型、runner与`/usr/bin/time`，缺生产工具硬失败，缺外部依赖明确77并保持效果待验。通用命令见README；fake向量/独立oracle验证可靠性，不能替代这项人工触发的真实效果验收。
 
-本机完整验收、真实复验及独立dsh/总审核已完成。功能提交`9ad39eddbe88e9abda5fe107e5989512917ff92d`已建立[PR #30](https://github.com/YanBo-maker/YanOS/pull/30)，保留前置Spec Lock `e29e04b`。2026-10-15，[CI运行38613451617](https://github.com/YanBo-maker/YanOS/actions/runs/38613451617)对应上述功能head，三项成功：Linux Release68/68（35.36 s）、Linux Debug ASan68/68（87.95 s）、Windows Debug65/65（90.61 s），均0失败、0SKIP。远端TOOLS/SEMANTIC均关闭，不等同本机工具/provider开启的100组、十五组实际变异或人工真实模型验收。实现交付与main合入仍待维护者批准。
+本机完整验收、真实复验及独立dsh/总审核已完成。功能提交`9ad39eddbe88e9abda5fe107e5989512917ff92d`已建立[PR #30](https://github.com/YanBo-maker/YanOS/pull/30)，保留前置Spec Lock `e29e04b`。2026-10-15，[CI运行38613451617](https://github.com/YanBo-maker/YanOS/actions/runs/38613451617)对应上述功能head，三项成功：Linux Release68/68（35.36 s）、Linux Debug ASan68/68（87.95 s）、Windows Debug65/65（90.61 s），均0失败、0SKIP。远端TOOLS/SEMANTIC均关闭，不等同本机工具/provider开启的100组、十五组实际变异或人工真实模型验收。项目所有者随后明确批准PR #30合入main，合并提交为`79fdde6a07eabff6f0f50cf0e90e0bc2cdb45cee`，树与已审8c8f2fe完全一致；前置规格e29e04b、功能9ad39ed及状态8c8f2fe阶段提交保留。
 
 提交前fake runner的执行位固定为100755，并移除provider/CLI测试自行chmod的两行，避免测试改变tracked文件模式。配套后验provider单项1/1（12.45 s）保持24场景，CLI单项1/1（1.81 s）保持31场景，日志为`build/search-semantic-fixture-mode-check.log`与`search-semantic-fixture-cli-check.log`。生产代码与断言不变，上述完整回归耗时保留原执行，不冒称因包装修正重跑。以下分项初验、失败与待验文字保留为当时阶段记录，由本节最新冻结树结果取代其当前状态，不删旧结论。
 
@@ -446,7 +446,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-审阅PR #30的实现与验证结果，由维护者决定是否合入main。可靠性、固定语料真实效果与合入批准分别记录，下一能力另行对齐。
+0029已交付main，阅读与运行入口见README及本页验收记录。可靠性、固定语料真实效果与合入批准分别记录，学习理解由项目所有者判断；下一能力另行对齐。
 
 ### 历史推进记录（M1a / M2a）
 
