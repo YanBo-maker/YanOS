@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import struct
 import sys
 import time
 from semantic_fixture import QUALITY_FILES, QUALITY_QUERIES, image
@@ -18,6 +19,7 @@ def digest(path):
 def main():
     parser=argparse.ArgumentParser()
     for name in ('tool','model','runner','work'): parser.add_argument('--'+name,required=True,type=Path)
+    parser.add_argument('--json-context', action='store_true')
     args=parser.parse_args()
     if not args.tool.is_file(): raise RuntimeError('FAIL implementation under test missing: '+str(args.tool))
     for dependency in (args.model,args.runner,Path('/usr/bin/time')):
@@ -46,7 +48,13 @@ def main():
     assert rebuilt=='OK rebuild segments=21 skipped=0\n',rebuilt
     status=run('status','status')
     assert status=='STATUS READY segments=21 skipped=0\n',status
-    results=[]
+    logical = hashlib.sha256()
+    for slot,(name,data) in sorted(enumerate(QUALITY_FILES), key=lambda entry: entry[1][0]):
+        encoded=name.encode('ascii')
+        logical.update(struct.pack('<II',slot,len(encoded))); logical.update(encoded)
+        logical.update(struct.pack('<I',len(data))); logical.update(data)
+    logical_hash=logical.hexdigest(); published_hash=digest(index)
+    results=[]; json_packets=[]
     for number,(query,relevant) in enumerate(QUALITY_QUERIES):
         output=run('query-%02d'%number,'search','--query',query)
         matches=[]
@@ -62,6 +70,27 @@ def main():
             assert start==data.index(b'@end\n')+5
             matches.append({'name':name,'score':float(score),'lines':[first,last],'bytes':[start,end]})
         assert len(matches)==20 and output.endswith('OK search shown=20 segments=21 skipped=0\n'),output
+        if args.json_context:
+            raw=run('json-%02d'%number,'search','--query',query,'--format','json')
+            packet=json.loads(raw)
+            assert raw.startswith('{') and raw.endswith('}\n') and raw.count('\n')==1
+            assert packet['schema_version']==1 and packet['query']==query
+            assert (packet['segments'],packet['skipped'],packet['shown'])==(21,0,20)
+            header=index.read_bytes()[:256]
+            assert packet['source_sha256']==logical_hash==header[32:64].hex()
+            assert packet['model_sha256']==model_hash==header[64:96].hex()
+            assert packet['runner_sha256']==runner_hash==header[96:128].hex()
+            assert packet['config_sha256']==header[128:160].hex()
+            assert len(packet['results'])==20
+            for row,match in zip(packet['results'],matches):
+                assert row['file']==match['name']
+                assert [row['start'],row['end']]==match['bytes']
+                assert [row['first_line'],row['last_line']]==match['lines']
+                source=dict(QUALITY_FILES)[row['file']]
+                assert row['text'].encode('utf-8')==source[row['start']:row['end']]
+                assert abs(row['score']-match['score'])<=0.000000500001
+            assert digest(index)==published_hash,'read-only JSON query changed index'
+            json_packets.append(packet)
         top5=[r['name'] for r in matches[:5]]
         hit=[i+1 for i,row in enumerate(matches) if row['name'] in relevant]
         literal_files=[name for name,data in QUALITY_FILES if query.encode() in data]
@@ -81,6 +110,8 @@ def main():
             'labeled_queries':len(labeled),'top5_queries_with_relevant':successes,
             'semantic_hits_without_literal':no_literal,'unrelated_queries':len(results)-len(labeled),
             'timings':timings,'results':results,
+            'logical_source_sha256':logical_hash,'json_context_queries':len(json_packets),
+            'json_context_packets':json_packets,
             'limitations':'No global corpus accuracy or confidence guarantee. Unrelated queries still return top20 candidates; inspect their top5 false positives.'}
     (args.work/'real-model-report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
     print('REAL labeled Top5 %d/%d; without literal %d; unrelated questions %d (candidates still returned)'%

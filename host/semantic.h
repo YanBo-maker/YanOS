@@ -44,6 +44,14 @@ typedef struct {
     YanSemanticIndexState state;
     uint32_t segments, skipped, shown;
 } YanSemanticSummary;
+
+/* 0030: one successful search's verified identities. Published only after all
+ * borrowed row callbacks succeed; failure preserves every output byte. */
+typedef struct {
+    YanSemanticSummary summary;
+    YanSemanticIdentity identity;
+    uint8_t source_sha256[32];
+} YanSemanticEvidence;
 typedef struct {
     YanSemanticProvenance provenance;
     double score;
@@ -78,4 +86,9 @@ YanSemanticResult yan_semantic_status(YanSemantic *, YanSemanticSummary *);
 YanSemanticResult yan_semantic_search(YanSemantic *, const uint8_t *query,
                                      size_t length, YanSemanticRowFn sink,
                                      void *sink_context, YanSemanticSummary *);
+/* Mandatory output: its entire span must be disjoint from query, facade and
+ * bound contexts. No second scan or post-query index read supplies identities.
+ * As with search, raw is borrowed only during each synchronous callback. */
+YanSemanticResult yan_semantic_search_evidence(YanSemantic *, const uint8_t *query,
+    size_t length, YanSemanticRowFn sink, void *sink_context, YanSemanticEvidence *);
 #endif

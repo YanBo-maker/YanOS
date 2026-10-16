@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "semantic_llama.h"
 #include "semantic_posix.h"
+#include "semantic_json.h"
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,7 @@ static void cancel(int signal_number) { (void)signal_number; cancelled = 1; }
 typedef struct {
     const char *command, *image, *index, *model, *runner, *query;
     unsigned startup, request;
+    bool json;
 } Options;
 static bool seconds(const char *text, unsigned *out)
 {
@@ -41,17 +43,38 @@ static bool parse(int argc, char **argv, Options *o)
         else if (!strcmp(argv[i], "--query")) { bit = 16; destination = &o->query; }
         else if (!strcmp(argv[i], "--startup-timeout")) bit = 32;
         else if (!strcmp(argv[i], "--request-timeout")) bit = 64;
+        else if (!strcmp(argv[i], "--format")) bit = 128;
         else return false;
         if (seen & bit) return false;
         seen |= bit;
         if (destination) { *destination = argv[i+1]; if (!**destination) return false; }
-        else if (!seconds(argv[i+1], bit == 32 ? &o->startup : &o->request)) return false;
+        else if (bit == 128) {
+            if (!strcmp(argv[i+1], "json")) o->json = true;
+            else if (strcmp(argv[i+1], "text")) return false;
+        } else if (!seconds(argv[i+1], bit == 32 ? &o->startup : &o->request)) return false;
     }
     if ((seen & 15) != 15) return false;
     if (!strcmp(o->command, "search"))
         return o->query && yan_semantic_query_valid((const uint8_t *)o->query, strlen(o->query));
-    return o->query == NULL;
+    return o->query == NULL && !(seen & 128);
 }
+
+/* The core's callback rows are borrowed. Copy at most 20 complete segments;
+ * neither a raw pointer nor an evidence identity is reconstructed afterwards. */
+typedef YanSemanticJsonRows SavedRows;
+
+static bool collect(void *opaque, const YanSemanticRow *row)
+{
+    SavedRows *saved = opaque;
+    if (cancelled || saved->count >= YAN_SEMANTIC_TOP || row->raw_length > 2048u)
+        return false;
+    YanSemanticJsonRow *item = &saved->rows[saved->count++];
+    item->row = *row;
+    memcpy(item->raw, row->raw, row->raw_length);
+    item->row.raw = item->raw;
+    return true;
+}
+
 static int error(YanSemanticResult r)
 {
     fprintf(stderr, "ERROR %s\n", r == YAN_SEMANTIC_STOPPED ? "OUTPUT" : yan_semantic_result_name(r));
@@ -101,6 +124,9 @@ int main(int argc, char **argv)
     YanSemanticPosix *adapter = calloc(1, sizeof *adapter);
     if (!adapter) return error(YAN_SEMANTIC_IO);
     adapter->image_fd = adapter->index_fd = -1;
+    SavedRows *saved = options.json ? calloc(1, sizeof *saved) : NULL;
+    if (options.json && saved == NULL) { free(adapter); return error(YAN_SEMANTIC_IO); }
+    YanSemanticEvidence evidence = {0};
     YanSemanticIdentity identity = {{0},{0},{0}};
     YanSemanticResult result = yan_semantic_posix_open(adapter, options.image,
         options.index, options.model, options.runner, &identity);
@@ -118,6 +144,8 @@ int main(int argc, char **argv)
     if (result == YAN_SEMANTIC_OK) {
         if (!strcmp(options.command, "rebuild")) result = yan_semantic_rebuild(&context, &summary);
         else if (!strcmp(options.command, "status")) result = yan_semantic_status(&context, &summary);
+        else if (options.json) result = yan_semantic_search_evidence(&context,
+            (const uint8_t *)options.query, strlen(options.query), collect, saved, &evidence);
         else result = yan_semantic_search(&context, (const uint8_t *)options.query,
             strlen(options.query), row, NULL, &summary);
     }
@@ -128,7 +156,20 @@ int main(int argc, char **argv)
     free(adapter);
     if (cancelled && (result == YAN_SEMANTIC_OK || result == YAN_SEMANTIC_STOPPED))
         result = YAN_SEMANTIC_CANCELLED;
-    if (result != YAN_SEMANTIC_OK) return error(result);
+    if (result != YAN_SEMANTIC_OK) { free(saved); return error(result); }
+    if (options.json) {
+        size_t length = 0;
+        char *encoded = yan_semantic_json_encode(options.query, saved, &evidence, &length, NULL);
+        free(saved);
+        if (encoded == NULL) return error(cancelled ? YAN_SEMANTIC_CANCELLED : YAN_SEMANTIC_IO);
+        if (cancelled) { free(encoded); return error(YAN_SEMANTIC_CANCELLED); }
+        bool written = fwrite(encoded, 1, length, stdout) == length;
+        bool flushed = fflush(stdout) == 0;
+        free(encoded);
+        if (cancelled) return error(YAN_SEMANTIC_CANCELLED);
+        if (!written || !flushed) return error(YAN_SEMANTIC_STOPPED);
+        return 0;
+    }
     int printed;
     if (!strcmp(options.command, "rebuild"))
         printed = printf("OK rebuild segments=%u skipped=%u\n", summary.segments, summary.skipped);

@@ -1,5 +1,46 @@
 # 项目状态
 
+当前推进：[0030 可核验检索上下文包](specs/0030-retrieval-context-json.md)，项目所有者于2026-10-16整体批准，授权形成规格后继续实现。
+
+- 规格：search可选text/json、同次证据身份与完整原文范围、成功后发布及输出失败边界已通过独立只读审核，于2026-10-16 15:21:58 +08:00锁定，已提交3e84826。
+- 实现：evidence共享路径、CLI格式参数、完整段收集与yyjson序列化已完成；分配失败验证、semantic实际变异扩充及命名输入夹具隔离已落实。
+- 验证：原生22例、JSON独立oracle40场景及1个Unity用例内16个分配失败注入点通过；semantic专项26个实际缺陷已检出。首轮完整默认回归的夹具失败已修复，Release102/102（270.73 s）、Windows65/65（123.03 s）复验通过；ASan/UBSan102/102（406.37 s）及统一十五组实际变异15/15（380.18 s）亦通过，均0失败、0SKIP。独立最终对齐及九项总审核通过，功能提交5299136对应三项远端CI已通过；维护者交付合入审查仍待。
+- 用户审查：整体方案已认可，实施交付与合入审查待进行；理解程度由项目所有者判断。
+
+### 0030 定向验证（2026-10-16）
+
+规格提交为`3e84826fcc48fd37bcc4259e46d81a09d4815c84`。`build/search-context-core-red.log`中原17例通过、新5例因UNSUPPORTED stub失败，随后`search-context-core-green.log`为22 Tests/0 Failures/0 Ignored。`search-context-json-red.log`实际执行旧CLI，收到ERROR USAGE/退出2，独立JSON验收未通过；实现后`search-context-json-green.log`记录JSON专项CTest1/1通过（5.30 s）。首次请求未获运行权限的动作没有执行，不算RED。JSON脚本内部场景数本条不推算。
+
+这些是阶段定向证据，尚非冻结树全量验收；实现还在修改，内存失败、扩充实际变异及完整回归待完成。独立实现对齐、CI、维护者交付与合入审查分别待进行，默认文本与0029历史结论保持。
+
+### 0030 首轮完整回归与夹具隔离修复（2026-10-16）
+
+首轮真实默认CTest未全绿：`build/search-context-full-release.log`为100/102通过（289.78 s），失败terminal/editor两个gate；`search-context-full-asan.log`为98/102通过（458.59 s），失败terminal/editor/search/search_terms四个gate；`context-full-windows.log`为63/65通过（136.78 s），失败search/search_terms两个gate。这些是默认回归失败，不是预定变异FAIL。
+
+四个旧gate的缺输入夹具以copytree复制整个仓库，只排除少数目录，越过了本任务输入边界；复制其它任务动态未跟踪文件时发生ENOENT/WinError。修复方向是按实际runner声明的命名输入复制，保留原分类、指定断言及硬缺输入/外依赖77控制，并验证助手不扫描仓库根或无关目录。此为验收夹具隔离问题，不能据此判定JSON语义失败，也不能在修后复验前宣称全回归通过。
+
+定向明细`build/context-targeted-detail.log`确认原生22例、JSON oracle40场景，以及1个Unity用例内部16个分配失败注入点（不是16个原生用例）。`search-context-mutation-verified.log`确认26个semantic实际缺陷匹配指定suite/owner/具体断言；该专项不等于全部十五组实际变异通过。真实模型及JSON上下文包生产验收仍待最终记录。旧0029测量保持具名历史。
+
+### 0030 修复后阶段验收（2026-10-16）
+
+`tests/gate_fixture.py`按明确的runner输入清单复制文件，四个旧gate不再遍历复制仓库根；缺文件或路径逃逸不静默通过。自造夹具用禁止scandir的控制复现旧方式失败，再核命名输入、缺文件和路径约束，原owner/断言/分类及硬1/77控制保持。Linux八gate专项8/8（10.35 s）、Windows8/8（20.03 s）通过，证据为`build/search-context-isolated-gates.log`、`context-isolated-gates-windows.log`；首轮默认失败历史仍保留。
+
+修后完整Release102/102（270.73 s）见`build/search-context-final-release.log`，Windows65/65（123.03 s）见`context-final-windows.log`，均0失败；ASan及统一十五组实际变异仍待终局。semantic定向12/12（22.92 s）见`search-context-semantic-targeted.log`；22个facade原生例、JSON40场景和1个Unity内部16个分配失败点、26个指定断言实际缺陷分别记录，不混作同种计数。独立子Agent增量实现及夹具审核通过，冻结树最终对齐尚待。
+
+生产工具实际SHA-256 `cc26bdbe108f3bebcd0eead11993967ba214391817f6696db8c4c5d91f310d20`与`build/context-real-json/real-model-report.json`一致。显式`--json-context`真实模型验收10查询、200个原文出处，核四身份、全文与排序；固定小语料仍8/8相关Top5、8个无literal命中，两个无关问题各返回20候选。报告的`source_sha256`是整镜像完整性hash（910f6498…2a00e），`logical_source_sha256`是上下文使用的逻辑库hash（cbbc2bf4…21ab8），两者不能互换。模型、runner及来源前后保持，结果不作为通用置信或零误检承诺。该显式效果验收不进默认CTest/普通CI。
+
+### 0030 本机最终复验（2026-10-16）
+
+最终默认Release102/102（270.73 s）、ASan/UBSan102/102（406.37 s）、Windows65/65（123.03 s），统一十五组实际变异15/15（380.18 s，-j3），均0失败、0SKIP。Linux工具/provider开启默认102组，含新增JSON与内存可靠性两项，连同实际变异共117组；实际组仍十五组、默认puregate仍八组，没有把新增断言当新增组。证据为`build/search-context-final-release.log`、`search-context-final-asan.log`、`context-final-windows.log`及`search-context-final-mutations.log`，各detail另存；实际变异使用独立CTest日志目录，避免并行默认回归覆盖明细。semantic组的26项缺陷再次匹配指定suite/owner/具体断言。
+
+实现与本机可靠性、JSON原文/身份验收完成；独立最终文档对齐及九项总审核通过，功能提交对应远端CI通过，维护者交付/合入审查尚待，不把0030通过写入0029历史。首轮100/102、98/102、63/65及阶段“待终局”记录保留为当时执行快照，由本条最终复验取代当前验证状态。
+
+### 0030 功能交付与远端CI（2026-10-16）
+
+规格提交`3e84826fcc48fd37bcc4259e46d81a09d4815c84`与功能提交`5299136172ab30594501cb978240ed69298e6acc`保留，[PR #32](https://github.com/YanBo-maker/YanOS/pull/32)待维护者交付与合入审查。独立只读子Agent第4轮及同角色必要复核关闭F1–F4，完整实现、实际证据和全文文档对齐通过；总审核九项通过，功能树为`0fd3637832b934e27d50e275d17af86ca1e929b4`。F1/F2修正下一步与历史导读的当前导航，F3修正全局当前102/117并保留0029具名历史，F4准确限定JSON分配失败的已验范围；历史数字和锁定行为不改。
+
+功能head5299136的[CI运行38900656017](https://github.com/YanBo-maker/YanOS/actions/runs/38900656017)三项成功：Linux Release68/68（28.18 s）、Linux Debug ASan68/68（89.14 s）、Windows Debug65/65（56.69 s），均0失败、0SKIP。CI使用TOOLS/SEMANTIC OFF，不覆盖本机102组的可选provider/JSON工具、十五组实际变异或人工真实模型验收。公开日志为`build/context-feature-ci.log`及对应JSON。该记录只对应上述功能head，不预先声称后续文档提交的CI结果。项目所有者已批准整体方案与实现范围，功能合入main仍待明确批准；理解由项目所有者判断。
+
 最新交付：[0029 Host侧语义检索](specs/0029-host-semantic-search.md)，于2026-10-14 21:11 +08:00经项目所有者整体认可并授权形成规格、继续实现。
 
 - 规格：可选Linux/WSL C17只读Host工具、本地模型受控进程、确定分段与物理出处、旁置索引身份失效及精确top20，已锁定。
@@ -232,7 +273,7 @@ YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0
 - `yan_gen` 随机 RV32IM 指令流生成器（给定种子确定输出），以及 5 个手写 Guest 用例。
 - C17 / CMake 构建、Unity 单元测试、CTest 及 GitHub Actions。
 
-详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前已验收0029工具/provider配置默认100组、开启实际变异后115组，完整验收见“0029 冻结树本机验收（2026-10-15）”；0028的90/104组及其日期化验收保留为历史；0025的55/66组、0024的49/59组、0023的47/57组、0022的43/52组与0020于2026-10-03的32/39组保留为本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；最新已执行结果见上述0029验收；各阶段历史结果见本页「验证」的对应日期记录。
+详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前已验收0030工具/provider配置默认102组、开启实际变异后117组，完整验收见“0030 本机最终复验（2026-10-16）”；0029的100/115组、0028的90/104组及其日期化验收保留为历史；0025的55/66组、0024的49/59组、0023的47/57组、0022的43/52组与0020于2026-10-03的32/39组保留为本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；最新已执行结果见上述0030验收；各阶段历史结果见本页「验证」的对应日期记录。
 
 ## 验证
 
@@ -384,7 +425,7 @@ Host 变异逐项绑定表中指定的测试断言，无关断言失败负控不
 
 ### 历史测量：M2a
 
-下段保留2026-09-20的原始测量与当时统计说明。其中“本页其它段落若残留旧口径以本段覆盖”仅适用于当时记录，不覆盖后续阶段；当前已执行配置与结果见“0029 冻结树本机验收（2026-10-15）”，0029规格批准、实现与审查状态见页首。
+下段保留2026-09-20的原始测量与当时统计说明。其中“本页其它段落若残留旧口径以本段覆盖”仅适用于当时记录，不覆盖后续阶段；当前已执行配置与结果见“0030 本机最终复验（2026-10-16）”，0030规格批准、实现与审查状态见页首。
 
 GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建注册 **21 组 Unity 套件**（共 **172 个用例**：`uart` 19、`plic` 15、`transport` 14，其余为既有分组；`boot` 由 4 增至 6，新增两条是 0017 的 A1 / A2）。启用 Guest 工具链与 `yan_run` 时默认另有 6 组 Guest 侧测试：`guest_trap_env`、`guest_terminal`、`guest_console`、`guest_golden`、`guest_runtime` 与 `guest_block`，合计 **28 组 CTest**；加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 时为 **33 组**（再注册 `guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`）。**以下数字以本段为准**，本页其它段落若残留旧口径以本段覆盖。**两次独立测量**：总审核角色在全新目录实测默认 **28/28 passed，25.21 s**、`ctest -R mutation` **5/5 passed，281.19 s**；主 Agent 在开关下实测整套 **33/33 passed，317.39 s**（`guest_console_mutation` 45.4 s、`device_mutation` 40.5 s、`guest_runtime_mutation` 48.2 s、`guest_block_mutation` 151.0 s、`guest_m2a_combined_mutation` 3.7 s）——两次测量量级一致，差异来自机器负载。变异检查默认不注册，只为不让慢证据主导默认套件；合并前必须显式跑一次，见 [CONTRIBUTING](../CONTRIBUTING.md) 的「合并前检查清单」与「提交前总审核检查清单」。
 
@@ -440,13 +481,13 @@ Guest 层同样做了变异检查：在副本里注入 10 个缺陷（不清 MSI
 - Guest trap 环境由自检程序验证，证据来自本仓库：它证明陷阱路径在**这台**实现上按规格工作，不构成与外部模型的一致性证据。外部中断（MEIP）无法从 Guest 侧驱动——PLIC 没有 Guest 可写的源寄存器，源线只能由平台按设备电平用 `yan_plic_set_level` 驱动，而两条设备线的置位都由 Host 侧动作触发（`yan_uart_push_rx`、Host 写入传输环）——因此 Guest 自检只覆盖 MSIP 与 MTIP 的进入 / 返回。Host 触发的 MEIP 投递由 `Interrupt` 那组 Host 测试覆盖；UART 接收线的整条路径（`push_rx` → 采样 → PLIC source 2 → MEIP）另由 UART 组的 `receive_interrupt_reaches_plic_source_two` 覆盖。
 - `yan_run` 现在按平台语义映射四个设备窗口并每条指令推进一次 `mtime`，`yan_difftest` 不映射设备、不推进时间。同一镜像在两个执行器下若读取 `mtime` 会得到不同结果，因此含设备访问的 Guest 只适用于 `yan_run`，这一条已在工具注释与规格里写明。
 
-Debug 启用 AddressSanitizer 和 UndefinedBehaviorSanitizer。内存分配失败分支尚未通过故障注入验证。
+Debug 启用 AddressSanitizer 和 UndefinedBehaviorSanitizer。0030的JSON编码分配（16个注入点）与结果收集缓冲已通过分配失败注入验证；其余内存分配失败分支尚未完成全面故障注入。
 
 CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验证层需要 NEMU 参考模型与 RISC-V 工具链，暂不在 CI 中运行，因此不对外部层做持续集成结论。各任务的运行结果与审查状态见 [Pull Requests](https://github.com/YanBo-maker/YanOS/pulls)。
 
 ## 下一步
 
-0029已交付main，阅读与运行入口见README及本页验收记录。可靠性、固定语料真实效果与合入批准分别记录，学习理解由项目所有者判断；下一能力另行对齐。
+0029已交付main，历史验收与运行入口保持。0030实现、本机验收、独立最终对齐及九项总审核已完成，PR #32功能提交的三项远端CI已通过，下一步由维护者审查交付与合入；学习理解仍由项目所有者判断。
 
 ### 历史推进记录（M1a / M2a）
 

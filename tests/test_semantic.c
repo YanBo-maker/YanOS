@@ -1,6 +1,8 @@
 #include "semantic.h"
 #include "unity.h"
 #include <string.h>
+#include <math.h>
+#include <stdlib.h>
 
 #define BLOB_CAP (256u + 32u * 4160u)
 typedef struct {
@@ -10,7 +12,7 @@ typedef struct {
     uint32_t reads, nexts, closed, starts, embeds, stops, writes, publishes;
     uint32_t callbacks, sink_limit;
     bool source_fail, fail_after_query, query_done, source_is_closed;
-    bool reenter, reenter_ok;
+    bool reenter, reenter_ok, precision;
     YanSemanticResult start_error, embed_error, stop_error, close_error;
     YanSemanticResult read_close_error, begin_error, write_error, finish_error, publish_error;
     bool exists, reading, writing;
@@ -23,6 +25,8 @@ static Fake fake;
 static YanSemantic ctx;
 static YanSemanticIdentity identity;
 static YanSemanticSummary summary;
+static YanSemanticEvidence *watched;
+static YanSemanticEvidence watched_before;
 
 static YanSemanticResult next_file(void *opaque, uint32_t *cursor, YanSemanticFile *out)
 {
@@ -72,6 +76,10 @@ static YanSemanticResult embed(void *opaque, const uint8_t *text, size_t length,
     for (uint32_t i = 0; i < 1024; ++i) out[i] = 0;
     if (length && text[0] == 'b') out[1] = 1;
     else out[0] = 1;
+    if (f->precision) {
+        out[0] = 1;
+        out[1] = f->query_done ? 0.0f : 2.0f;
+    }
     return f->embed_error;
 }
 static YanSemanticResult stop(void *opaque)
@@ -139,6 +147,18 @@ static bool sink(void *opaque, const YanSemanticRow *row)
     memcpy(f->snippets[i], row->raw, row->raw_length);
     return true;
 }
+static bool evidence_sink(void *opaque, const YanSemanticRow *row)
+{
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&watched_before, watched, sizeof *watched,
+                                      "evidence_not_published_during_callback");
+    uint32_t reads = fake.reads, nexts = fake.nexts;
+    TEST_ASSERT_EQUAL_MESSAGE(YAN_SEMANTIC_BUSY,
+        yan_semantic_search_evidence(&ctx, NULL, 100, NULL, NULL, NULL),
+        "evidence_reentrant_busy");
+    TEST_ASSERT_EQUAL_UINT32(reads, fake.reads);
+    TEST_ASSERT_EQUAL_UINT32(nexts, fake.nexts);
+    return sink(opaque, row);
+}
 static YanSemanticResult bind(void)
 {
     YanSemanticSource source = {&fake, sizeof fake, next_file, read_source};
@@ -159,6 +179,7 @@ void setUp(void)
     memset(&fake, 0, sizeof fake); memset(&ctx, 0, sizeof ctx);
     memset(&identity, 0x31, sizeof identity); memset(&summary, 0x55, sizeof summary);
     fake.sink_limit = 20;
+    watched = NULL;
 }
 void tearDown(void) {}
 static void rebuild(void)
@@ -581,6 +602,128 @@ static void test_wrapped_context_and_binding_query_rejected_before_dereference(v
     TEST_ASSERT_EQUAL_UINT32(0, fake.reads);
 }
 
+static void test_evidence_full_raw_identity_and_late_publication(void)
+{
+    char text[513]; memset(text, 'x', 512); text[512] = 0;
+    add("full", text); add("binary", "");
+    fake.texts[1] = (const uint8_t *)"\0"; fake.sizes[1] = 1;
+    rebuild();
+    YanSemanticEvidence evidence; memset(&evidence, 0xA5, sizeof evidence);
+    watched = &evidence; watched_before = evidence;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind());
+    TEST_ASSERT_EQUAL_MESSAGE(YAN_SEMANTIC_OK,
+        yan_semantic_search_evidence(&ctx, (const uint8_t *)"q", 1,
+            evidence_sink, &fake, &evidence), "evidence_search_ok");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(512, fake.rows[0].raw_length, "evidence_full_raw_length");
+    TEST_ASSERT_EQUAL_MEMORY(text, fake.snippets[0], 512);
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(fake.stored + 32, evidence.source_sha256, 32,
+                                      "evidence_source_same_scan");
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&identity, &evidence.identity, sizeof identity,
+                                      "evidence_verified_identity");
+    TEST_ASSERT_EQUAL_UINT32(1, evidence.summary.shown);
+    TEST_ASSERT_EQUAL_UINT32(1, evidence.summary.segments);
+    TEST_ASSERT_EQUAL_UINT32(1, evidence.summary.skipped);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INDEX_READY, evidence.summary.state);
+}
+static void test_evidence_complete_holder_guards_and_busy(void)
+{
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind());
+    YanSemanticEvidence evidence; memset(&evidence, 0xA5, sizeof evidence);
+    evidence.source_sha256[0] = 'q'; YanSemanticEvidence before = evidence;
+    TEST_ASSERT_EQUAL_MESSAGE(YAN_SEMANTIC_INVALID,
+        yan_semantic_search_evidence(&ctx, evidence.source_sha256, 1,
+            sink, &fake, &evidence), "evidence_query_suffix_alias");
+    TEST_ASSERT_EQUAL_MEMORY(&before, &evidence, sizeof before);
+    for (unsigned i = 0; i < 3; ++i) {
+        TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind());
+        /* A real empty Fake keeps a weakened-guard mutant safe: it must fail
+         * the INVALID assertion, rather than crashing in an invalid callback. */
+        uint8_t *region = calloc(1, sizeof evidence + sizeof(Fake));
+        TEST_ASSERT_NOT_NULL(region);
+        Fake *protected = (Fake *)(void *)(region + sizeof evidence);
+        YanSemanticEvidence *tail = (YanSemanticEvidence *)(void *)(region + 8);
+        if (i == 0) { ctx.source.context = protected; ctx.source.context_size = sizeof *protected; }
+        if (i == 1) { ctx.provider.context = protected; ctx.provider.context_size = sizeof *protected; }
+        if (i == 2) { ctx.store.context = protected; ctx.store.context_size = sizeof *protected; }
+        YanSemanticResult result = yan_semantic_search_evidence(&ctx,
+            (const uint8_t *)"q", 1, sink, &fake, tail);
+        free(region);
+        TEST_ASSERT_EQUAL_MESSAGE(YAN_SEMANTIC_INVALID, result, "evidence_binding_suffix_alias");
+    }
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind());
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_search_evidence(&ctx,
+        (const uint8_t *)"q", 1, sink, &fake, (YanSemanticEvidence *)&ctx));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_search_evidence(&ctx,
+        (const uint8_t *)"q", 1, sink, &fake,
+        (YanSemanticEvidence *)(uintptr_t)(UINTPTR_MAX - 4u)));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_search_evidence(&ctx,
+        (const uint8_t *)"q", 1, sink, &fake, NULL));
+    ctx.busy = true;
+    TEST_ASSERT_EQUAL_MESSAGE(YAN_SEMANTIC_BUSY, yan_semantic_search_evidence(&ctx,
+        NULL, 100, NULL, NULL, NULL), "evidence_busy_first");
+    TEST_ASSERT_EQUAL_UINT32(0, fake.nexts);
+    TEST_ASSERT_EQUAL_UINT32(0, fake.reads);
+    TEST_ASSERT_EQUAL_UINT32(0, fake.starts);
+    TEST_ASSERT_EQUAL_MEMORY(&before, &evidence, sizeof before);
+}
+static void test_evidence_all_failures_preserve_entire_holder(void)
+{
+    add("a", "alpha"); rebuild();
+    for (unsigned i = 0; i < 7; ++i) {
+        TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind());
+        fake.callbacks = 0; fake.sink_limit = 20; fake.exists = true;
+        fake.stop_error = fake.close_error = YAN_SEMANTIC_OK;
+        fake.fail_after_query = false;
+        YanSemanticResult expected;
+        if (i == 0) { fake.exists = false; expected = YAN_SEMANTIC_MISSING; }
+        else if (i == 1) { ctx.identity.model[0] ^= 1; expected = YAN_SEMANTIC_STALE; }
+        else if (i == 2) { fake.stored[0] ^= 1; expected = YAN_SEMANTIC_CORRUPT; }
+        else if (i == 3) { fake.stop_error = YAN_SEMANTIC_PROVIDER; expected = YAN_SEMANTIC_PROVIDER; }
+        else if (i == 4) { fake.close_error = YAN_SEMANTIC_IO; expected = YAN_SEMANTIC_IO; }
+        else if (i == 5) { fake.sink_limit = 0; expected = YAN_SEMANTIC_STOPPED; }
+        else { fake.fail_after_query = true; expected = YAN_SEMANTIC_IO; }
+        YanSemanticEvidence evidence; memset(&evidence, 0xA5, sizeof evidence);
+        YanSemanticEvidence before = evidence;
+        TEST_ASSERT_EQUAL(expected, yan_semantic_search_evidence(&ctx,
+            (const uint8_t *)"q", 1, sink, &fake, &evidence));
+        TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&before, &evidence, sizeof before,
+                                          "evidence_failure_preserves_all");
+        if (i == 2) fake.stored[0] ^= 1;
+    }
+}
+static void test_evidence_empty_source_has_complete_identity(void)
+{
+    static const uint8_t empty_sha[32] = {
+        0xe3,0xb0,0xc4,0x42,0x98,0xfc,0x1c,0x14,0x9a,0xfb,0xf4,0xc8,0x99,0x6f,0xb9,0x24,
+        0x27,0xae,0x41,0xe4,0x64,0x9b,0x93,0x4c,0xa4,0x95,0x99,0x1b,0x78,0x52,0xb8,0x55};
+    rebuild(); TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind());
+    YanSemanticEvidence evidence;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_search_evidence(&ctx,
+        (const uint8_t *)"q", 1, sink, &fake, &evidence));
+    TEST_ASSERT_EQUAL_MEMORY(empty_sha, evidence.source_sha256, 32);
+    TEST_ASSERT_EQUAL_MEMORY(&identity, &evidence.identity, sizeof identity);
+    TEST_ASSERT_EQUAL_UINT32(0, evidence.summary.shown);
+    TEST_ASSERT_EQUAL_UINT32(0, fake.callbacks);
+}
+static void test_evidence_old_new_agree_and_keep_score_precision(void)
+{
+    fake.precision = true; add("b", "beta"); add("a", "alpha"); rebuild();
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind());
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_search(&ctx,
+        (const uint8_t *)"q", 1, sink, &fake, &summary));
+    YanSemanticProvenance first = fake.rows[0].provenance;
+    double score = fake.rows[0].score; fake.callbacks = 0;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind());
+    YanSemanticEvidence evidence;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_search_evidence(&ctx,
+        (const uint8_t *)"q", 1, sink, &fake, &evidence));
+    TEST_ASSERT_EQUAL_MEMORY(&first, &fake.rows[0].provenance, sizeof first);
+    TEST_ASSERT_EQUAL_MEMORY(&summary, &evidence.summary, sizeof summary);
+    TEST_ASSERT_TRUE_MESSAGE(fake.rows[0].score == 1.0 / sqrt(5.0),
+                               "evidence_score_full_precision");
+    TEST_ASSERT_TRUE(score == fake.rows[0].score);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -601,5 +744,10 @@ int main(void)
     RUN_TEST(test_missing_and_corrupt_search_zero_match);
     RUN_TEST(test_index_close_error_cannot_be_a_successful_corrupt_observation);
     RUN_TEST(test_wrapped_context_and_binding_query_rejected_before_dereference);
+    RUN_TEST(test_evidence_full_raw_identity_and_late_publication);
+    RUN_TEST(test_evidence_complete_holder_guards_and_busy);
+    RUN_TEST(test_evidence_all_failures_preserve_entire_holder);
+    RUN_TEST(test_evidence_empty_source_has_complete_identity);
+    RUN_TEST(test_evidence_old_new_agree_and_keep_score_precision);
     return UNITY_END();
 }

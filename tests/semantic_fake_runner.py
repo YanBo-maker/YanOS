@@ -33,6 +33,8 @@ parser.add_argument('--host', required=True)
 parser.add_argument('--api-key', required=True)
 args, _ = parser.parse_known_args()
 assert args.host == '127.0.0.1'
+if os.environ.get('YAN_TEST_SERVER_PID_FILE'):
+    Path(os.environ['YAN_TEST_SERVER_PID_FILE']).write_text(str(os.getpid()))
 mode = Path(args.model).read_text().strip()
 if mode == 'ignore_term': signal.signal(signal.SIGTERM,signal.SIG_IGN)
 if mode == 'early_exit': raise SystemExit(9)
@@ -59,16 +61,22 @@ class Handler(BaseHTTPRequestHandler):
         try:
             value = json.loads(data)
             assert isinstance(value['input'], str)
-            if mode != 'universal': assert value['input'] == 'hello中'
+            if mode not in ('universal', 'precision'): assert value['input'] == 'hello中'
         except (ValueError, KeyError, AssertionError):
             self.reply(b'{}',400); return
         if mode == 'timeout': time.sleep(10)
+        if os.environ.get('YAN_TEST_EMBED_FAILURE'):
+            self.reply(b'{bad json'); return
+        if os.environ.get('YAN_TEST_EMBED_DELAY'):
+            time.sleep(float(os.environ['YAN_TEST_EMBED_DELAY']))
         if mode == 'redirect': self.reply(b'{}',302,'http://127.0.0.1:9/no'); return
         if mode == 'http_error': self.reply(b'{}',500); return
         if mode == 'malformed': self.reply(b'{not json'); return
         if mode == 'oversize': self.reply(b' '*(1024*1024+1)); return
         vector = [0.0]*1024
         vector[0] = 1.0
+        if mode == 'precision' and not value['input'].startswith('Instruct:'):
+            vector[1] = 2.0
         if mode == 'dimension': vector.pop()
         if mode == 'zero': vector[0] = 0.0
         if mode == 'nan': vector[0] = float('nan')
