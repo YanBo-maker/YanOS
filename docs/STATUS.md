@@ -3,8 +3,8 @@
 当前推进：[0031 面向Agent的只读MCP检索工具](specs/0031-mcp-retrieval-tools.md)，项目所有者已明确认可整体方案，授权形成规格并实现。
 
 - 规格：现代2026-07-28与legacy2025-11-25 stdio、两只读工具及schema、单任务/取消/owned生命周期已通过独立只读第2轮与同轮规范澄清复核，于2026-10-17 14:51:25 +08:00锁定，规格提交06463a3保留。
-- 实现：生产yan_mcp、协议校验、工具adapter与单任务/owned回收已编写，复用semantic证据C API；回答由Agent/harness生成，无生成模型或云API。独立第3轮I1–I6生产问题已复核关闭，I7测试桥已修复；提交前发现I8继承SIGCHLD忽略及控制信号阻塞问题，现已初始化本服务的信号状态，修后完整回归及统一实际变异通过，必要独立复核与新树九审待完成，旧树提交准许已暂停。
-- 验证：I8修后完整Release106/106（83.83 s）、ASan/UBSan106/106（126.47 s），统一实际16/16（285.08 s，-j3）通过，均0失败、0SKIP；MCP15个指定缺陷及负控通过，当前原生14例、wire19场景、fault13例、puregate6项。Windows编译输入未变，旧65/65（45.68 s）保留其原配置范围。新生产官方SDK2.3.0三实际协议模式及真实两查询/40出处复验通过；旧13缺陷/12故障及旧回归结果保留历史，远端CI与维护者交付合入仍待。
+- 实现：生产yan_mcp、协议校验、工具adapter与单任务/owned回收已编写，复用semantic证据C API；回答由Agent/harness生成，无生成模型或云API。独立第3轮I1–I6生产问题已复核关闭，I7测试桥已修复；提交前发现I8继承SIGCHLD忽略及控制信号阻塞问题，现已初始化本服务的信号状态，修后完整回归及统一实际变异通过，原独立角色必要复核与新树九项总审已完成，功能提交4452e11已建立PR #34；旧树18b038准许不恢复。
+- 验证：I8修后完整Release106/106（83.83 s）、ASan/UBSan106/106（126.47 s），统一实际16/16（285.08 s，-j3）通过，均0失败、0SKIP；MCP15个指定缺陷及负控通过，当前原生14例、wire19场景、fault13例、puregate6项。Windows编译输入未变，旧65/65（45.68 s）保留其原配置范围。新生产官方SDK2.3.0三实际协议模式及真实两查询/40出处复验通过；旧13缺陷/12故障及旧回归结果保留历史。功能4452e11对应远端CI三项通过，配置范围见下方交付记录；维护者交付与合入仍待。
 - 用户审查：整体方案已批准，实施交付与合入审查待进行；理解程度由项目所有者判断。
 
 ### 0031 历史阶段：实施与定向验证（2026-10-17）
@@ -54,6 +54,14 @@ BUILD_TESTING OFF/SEMANTIC ON生产server实算SHA-256 `8f95984e296a29a53eea6df3
 `yan_mcp.c`现将SIGCHLD disposition复位为默认且清除flags，并解除本服务SIGINT/TERM/CHLD的阻塞；不修改无关信号或协议/API。这是落实锁定的owned回收和退出保证，原文已有责任→补齐继承环境下初始化，依据main信号设置与waitid路径。永久用例先discover同步，再检查/proc SigIgn/SigBlk，随后执行真实READY status与SIGTERM143；故障用例扩至13，新增两项指定变异使MCP清单扩至15，已在修后统一实际变异中指定检出。
 
 修后生产OFF官方SDK三模式实际版本/两工具/取消重用/active-close通过，见`build/search-mcp-i8-sdk-production.log`。生产真实两固定查询40出处复验通过，见`search-mcp-i8-real-production.log`；server SHA为`57785ce3b8f36d506a1faa91945f3c117b48b126521b77d8e4171c5a661b144e`，模型/runner身份保持。新输入快照为`mcp-source-freeze-i8.json`；旧13缺陷、12故障与旧完整回归结果保留对应旧树历史，不冒作修后完整验证。修后完整Release106/106（83.83 s，0失败/0SKIP）已通过，见`build/search-mcp-i8-release-final.log`；另存`mcp-i8-release-LastTest.log`核当前14原生/19wire/13fault/pure6。完整ASan/UBSan106/106（126.47 s，0失败/0SKIP）亦已通过，见`build/search-mcp-i8-asan-final.log`及另存`mcp-i8-asan-LastTest.log`。Windows编译输入未变，旧65/65（45.68 s）仅在其原配置范围继续作为证据。统一16实际组16/16（285.08 s，-j3）亦通过，见`build/search-mcp-i8-all-actual.log`及另存`mcp-i8-actual-LastTest.log`（79137字节）；MCP157.20 s，15条DETECTED逐项匹配suite/owner/assertion，baseline/no-effect/wrong-owner/wrong-assertion负控通过，0存活/0harness。15份I8输入SHA快照与当前文件一致。同独立会话必要修复复核及新exact树九审待完成，当前不得沿旧准许提交，PR/CI/维护者合入仍待。
+
+### 0031 功能提交与远端验证（2026-10-17）
+
+原独立角色第4轮与唯一I8必要修复复核已完成，I1–I8无未闭合finding；新树`b06cb8f79632524ffc3343c2e6499097a23a4897`九项总审通过，旧18b038提交准许仍撤回。完整能力提交`4452e11c5b109549350c9a33593bc33f3e647b36`与该树一致，规格提交06463a34及失败/修复历史保留，已推送并建立[PR #34](https://github.com/YanBo-maker/YanOS/pull/34)。上述冻结时点“必要复核/九审/PR/CI待”的记录保留，其当前状态由本节取代。
+
+[CI运行39034985243](https://github.com/YanBo-maker/YanOS/actions/runs/39034985243)精确对应上述功能head，三项成功：Linux Release68/68（30.44 s）、Linux Debug ASan68/68（90.82 s）、Windows Debug65/65（84.71 s），0失败、0SKIP。远端配置TOOLS OFF、SEMANTIC OFF，不包含本机106组中的MCP/provider、SDK、真实模型与16实际变异验收；这些本机证据仍按各自范围记录。日志为`build/mcp-feature-ci-{release,asan,windows}.log`，run/jobs身份另存JSON。这里只记录已完成的功能head CI，不预写后续文档提交结果。
+
+实现与本机/远端相应范围验证、独立对齐及总审已完成；PR仍开放，尚未合入main，维护者交付与合入待批准，学习理解由项目所有者判断。AGY仅文稿建议，独立子Agent按用户本阶段替代dsh授权完成技术审核，不混称dsh或AGY技术PASS。
 
 最新交付：[0030 可核验检索上下文包](specs/0030-retrieval-context-json.md)，项目所有者于2026-10-16整体批准，授权形成规格后继续实现。
 
@@ -542,7 +550,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-0029已交付main，历史验收与运行入口保持。0030已交付main，历史验收与运行入口保持。0031实现已编写，I8修后完整复验已完成，当前进行同会话必要独立复核，再核新冻结树九项并提交PR、核实际远端CI，再由维护者审查交付与合入；学习理解仍由项目所有者判断。
+0029已交付main，历史验收与运行入口保持。0030已交付main，历史验收与运行入口保持。0031实现、I8修后完整复验、原独立角色必要复核与九项总审已完成，功能4452e11已建立PR #34并通过对应head远端CI；当前由维护者审查交付与合入；学习理解仍由项目所有者判断。
 
 ### 历史推进记录（M1a / M2a）
 
