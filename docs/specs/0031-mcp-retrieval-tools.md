@@ -1,6 +1,6 @@
 # 0031：面向Agent的只读MCP检索工具
 
-> 状态：**Spec Lock**（2026-10-17 14:51:25 +08:00）。项目所有者已明确认可MCP整体方案、授权形成规格并实现；独立只读第2轮及同轮规范澄清复核通过，工程契约已锁定。尚未实现或验证，交付与合入审查待进行，理解程度由项目所有者判断。
+> 状态：**Spec Lock**（2026-10-17 14:51:25 +08:00）。项目所有者已明确认可MCP整体方案、授权形成规格并实现；独立只读第2轮及同轮规范澄清复核通过，工程契约已锁定。生产实现已编写、专项与官方SDK定向验收通过，当前默认回归及真实MCP定向验收通过，I7检测桥已修复；提交前发现I8继承信号状态问题并补齐初始化，修后完整回归及扩充变异已通过，必要复核与新树九审待；交付与合入审查待进行，理解程度由项目所有者判断。
 
 ## INTENTION
 
@@ -98,7 +98,7 @@ stateDiagram-v2
 
 取消按typed requestId匹配当前任务。接受匹配取消后立刻抑制该请求后续response，不发送CANCELLED tool结果或成功上下文，清理owned资源后才释放BUSY；未知/已完成ID及畸形通知忽略，不取消别人的任务。取消处理前该响应已完整发送并flush成功的，可作为完成后迟到取消忽略。仍在队列且未发字节时取消则丢弃该响应；若只发了协议前缀才接受取消，不能再补完已取消请求，终止transport并清理、退出5，调用方丢弃不完整消息。不能把已发部分字节当成功提交来忽略取消。完整消息写失败亦按输出fatal退出。
 
-EOF、SIGINT/SIGTERM及fatal stdout停止接收新任务，取消当前执行，回收本server创建的worker及模型后代，不能杀其它服务或已有模型。Linux MCP parent设置私有child-subreaper，worker setpgid并完成ownership握手后才允许启动runner。worker立即将继承的MCP stdin/stdout断开到/dev/null，私有结果pipe使用CLOEXEC，避免runner消费协议或输出非MCP内容。信号升级期间保留尚未reap的group leader以避免PGID复用；强杀worker后由parent接管并reap本request自有后代，不对无关进程发信号。runner须可信且不daemonize、不离开ownedgroup，这是前置条件而不是sandbox。先TERM，最多5秒后KILL升级并持续wait/reap；不可中断kernel I/O可能延迟最终回收，不承诺固定总时限完成reap，未回收不得释放BUSY或宣称清理成功。控制通道及所有继承fd关闭。信号处理器只设安全flag，主loop执行清理。正常EOF且清理成功退出0，SIGINT退出130、SIGTERM退出143；自身I/O/清理或输出fatal退出5。清理失败不宣称正常成功。STDIO客户端关闭输入是主要正常退出方式。
+EOF、SIGINT/SIGTERM及fatal stdout停止接收新任务，取消当前执行，回收本server创建的worker及模型后代，不能杀其它服务或已有模型。Linux MCP parent安装自身控制handler，将SIGCHLD复位为默认且清除继承flags，解除SIGINT/SIGTERM/SIGCHLD阻塞，确保leader可wait及控制信号可达；设置私有child-subreaper，worker setpgid并完成ownership握手后才允许启动runner。worker立即将继承的MCP stdin/stdout断开到/dev/null，私有结果pipe使用CLOEXEC，避免runner消费协议或输出非MCP内容。信号升级期间保留尚未reap的group leader以避免PGID复用；强杀worker后由parent接管并reap本request自有后代，不对无关进程发信号。runner须可信且不daemonize、不离开ownedgroup，这是前置条件而不是sandbox。实现依赖Linux `/proc/thread-self/children`确认adopted owned后代，看到owned child后重扫直到稳定空；proc读取或关闭错误停止接收请求进入fatal清理并继续重试回收，不再正常服务，未证明回收不释放BUSY或声明成功。先TERM，最多5秒后KILL升级并持续wait/reap；不可中断kernel I/O可能延迟最终回收，不承诺固定总时限完成reap，未回收不得释放BUSY或宣称清理成功。控制通道及所有继承fd关闭。信号处理器只设安全flag，主loop执行清理。正常EOF且清理成功退出0，SIGINT退出130、SIGTERM退出143；自身I/O/清理或输出fatal退出5。清理失败不宣称正常成功。STDIO客户端关闭输入是主要正常退出方式。
 
 每请求原文/模型/索引变化及文件关闭失败边界沿0029/0030；server不吞provider错误或在部分关闭后继续发布。协议参数错误不打开源，BUSY不启动第二child；完成、取消、EOF、异常退出所有路径均需测试-owned后代回收。
 
@@ -119,7 +119,7 @@ EOF、SIGINT/SIGTERM及fatal stdout停止接收新任务，取消当前执行，
 
 ## IMPLE
 
-尚未实现。整体已批准的规格与工程计划已通过独立只读审核并锁定；没有生产工具、native/SDK验证或新增通过数。
+规格提交06463a34保留。生产tools/mcp_protocol、mcp_worker及yan_mcp已编写，可选SEMANTIC配置提供目标，BUILD_TESTING OFF构建通过。原生/stdio/fault/puregate与官方SDK2.3.0三模式已有定向验证；独立第3轮I1–I6生产修复复核关闭，默认回归与真实MCP定向验收通过；I7测试桥已修复并有永久控制/相关专项通过，旧13项实际缺陷清单与统一16实际组复验通过后，提交前发现I8；已修复信号初始化并新增永久用例及两项变异，修后完整验证已通过、必要独立复核与新树九审尚待，旧树提交准许已暂停，未作为整体交付。
 
 ## VERIFY
 
@@ -134,4 +134,12 @@ EOF、SIGINT/SIGTERM及fatal stdout停止接收新任务，取消当前执行，
 | 实际接入 | 独立oracle与固定官方SDK各自范围，production真实stdio检索/完整身份原文、取消与EOF；配置示例可用，未配置全局harness或隐式下载 |
 | 检测力与边界 | owner/assert实际变异负控，硬1/外依赖77，core/Guest/default CLI无变，统计真实suite与case并分列CI、用户审查 |
 
-本阶段未运行验证，0030原本机102/117、Windows65及十五组实际变异/真实模型均保留历史，不代表MCP兼容已通过；回答质量由外部Agent生成过程负责，引用或原文定位也不证明答案真实。
+早期阶段定向记录（后续当前结果见下段）：初始原生10例RED，随后原生CTest通过；修复专项4/4（20.34 s），官方SDK2.3.0实际modern/legacy/auto版本及两工具/取消重用/EOF回收通过。旧12项实际缺陷专项1/1（99.47 s）不替代最终扩充清单，完整回归与真实模型仍在推进；历史harness与修复证据见[STATUS](../STATUS.md)。0030原本机102/117、Windows65及十五组实际变异/真实模型保留历史，不代表新增MCP全部覆盖；回答质量由外部Agent生成过程负责，引用或原文定位也不证明答案真实。
+
+历史阶段当前实测（统一最终变异前）：默认Release106/106（65.97 s）、ASan/UBSan106/106（179.64 s）、Windows65/65（45.68 s）均通过；生产真实MCP2固定查询/40原文通过。统一实际变异首轮15/16（322.48 s）是harness未全绿，I7 stderr桥优先级修复/永久控制与相关专项已通过，统一最终清单复验仍待。原生14例/reply32限定分配点/当前stdio19/fault12/puregate6以另存ASan bridge明细核对，SDK生产复验实际三mode分别记录，细节与边界见[STATUS](../STATUS.md)；当前注册16实际组不等于已经全部通过。
+
+历史I7修复后验（统一最终变异前）：真实stderr控制RED后puregate6例GREEN，wire扩至19场景。完整Release106/106（65.97 s）重新通过；ASan先前完整106/106（179.64 s）与最后测试桥变动后MCP专项4/4（22.93 s）分列，不冒称后者是106组全跑。统一实际16组终局尚待，详细证据见[STATUS](../STATUS.md)。
+
+2026-10-17本机终局：Release106/106（65.97 s）、Windows65/65（45.68 s）；ASan全量106/106（179.64 s）与最后测试桥变动后四套件4/4（22.93 s）分列。统一实际16/16（279.58 s，-j3）通过，MCP13个指定suite/owner/断言缺陷及负控全部通过。SDK三actualmode、production OFF真实MCP两查询40出处通过；源码输入SHA一致。先前阶段失败/待验语句保持历史，由本条终局更新当前状态；原独立角色冻结树第4轮与九项总审核仍待报告，PR/CI及维护者合入另行记录，详见[STATUS](../STATUS.md)。
+
+I8修后当前终局：真实用例RED为13例1失败，修后完整Release106/106（83.83 s）、ASan/UBSan106/106（126.47 s），统一实际16/16（285.08 s，-j3）均0失败、0SKIP。MCP15个指定suite/owner/assertion缺陷及实际负控通过；原生14、wire19、故障13、puregate6分列。Windows编译输入未变，旧65/65（45.68 s）保留其范围；新生产OFF SDK三actualmode与真实两查询40出处已复验。旧13/12及279.58 s结果属于I8前历史，旧树准许仍暂停，待同一独立会话必要修复复核及新exact九审；不改变锁定时间或既有外部行为，证据见[STATUS](../STATUS.md)。

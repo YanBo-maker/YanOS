@@ -2,10 +2,58 @@
 
 当前推进：[0031 面向Agent的只读MCP检索工具](specs/0031-mcp-retrieval-tools.md)，项目所有者已明确认可整体方案，授权形成规格并实现。
 
-- 规格：现代2026-07-28与legacy2025-11-25 stdio、两只读工具及schema、单任务/取消/owned生命周期已通过独立只读第2轮与同轮规范澄清复核，于2026-10-17 14:51:25 +08:00锁定。
-- 实现：计划复用semantic证据C API与结构化结果，尚未实现；回答由Agent/harness生成，不引入生成模型或云API。
-- 验证：尚未执行本阶段测试或真实SDK验收，不沿用0030历史结果声明MCP兼容。
+- 规格：现代2026-07-28与legacy2025-11-25 stdio、两只读工具及schema、单任务/取消/owned生命周期已通过独立只读第2轮与同轮规范澄清复核，于2026-10-17 14:51:25 +08:00锁定，规格提交06463a3保留。
+- 实现：生产yan_mcp、协议校验、工具adapter与单任务/owned回收已编写，复用semantic证据C API；回答由Agent/harness生成，无生成模型或云API。独立第3轮I1–I6生产问题已复核关闭，I7测试桥已修复；提交前发现I8继承SIGCHLD忽略及控制信号阻塞问题，现已初始化本服务的信号状态，修后完整回归及统一实际变异通过，必要独立复核与新树九审待完成，旧树提交准许已暂停。
+- 验证：I8修后完整Release106/106（83.83 s）、ASan/UBSan106/106（126.47 s），统一实际16/16（285.08 s，-j3）通过，均0失败、0SKIP；MCP15个指定缺陷及负控通过，当前原生14例、wire19场景、fault13例、puregate6项。Windows编译输入未变，旧65/65（45.68 s）保留其原配置范围。新生产官方SDK2.3.0三实际协议模式及真实两查询/40出处复验通过；旧13缺陷/12故障及旧回归结果保留历史，远端CI与维护者交付合入仍待。
 - 用户审查：整体方案已批准，实施交付与合入审查待进行；理解程度由项目所有者判断。
+
+### 0031 历史阶段：实施与定向验证（2026-10-17）
+
+规格提交`06463a34`锁定整体行为。`tools/mcp_protocol.h/.c`负责有界消息、两era与响应，`mcp_worker.h/.c`复用既有语义C API，`yan_mcp.c`提供非阻塞stdio和owned进程管理；CMake在可选SEMANTIC配置提供生产yan_mcp目标。BUILD_TESTING OFF目标构建成功见`build/search-mcp-production-build.log`，不等同完整功能或真实模型验收。
+
+`build/search-mcp-native-red.log`最初10例均语义失败，随后`search-mcp-native-green.log`原生CTest1/1通过。`search-mcp-review-fixes.log`修后原生/stdio/fault/puregate4/4（20.34 s）通过。首轮修复验证曾3/4，因clock hook未命中属于harness；改为link --wrap=poll后复跑，不把未注入当通过。独立第3轮检查I1–I6后的实现复核尚待：已知metadata字段形状、deadline写前检查、收养后代重扫与pipe关闭错误均按锁定契约补齐，不改变工具行为。
+
+锁定后的工程细化：原owned回收条款要求subreaper确认并回收本请求后代；现明确Linux实现以`/proc/thread-self/children`确认adopted child，发现owned child后重扫到稳定空，读取或关闭失败进入fatal清理并重试，不再正常接收任务、释放BUSY或假称成功。依据`yan_mcp.c`的reap_descendants/finish_task路径，保持原所有权和失败不发布契约，未改变已批准行为。
+
+官方`mcp==2.3.0`实际生产SDK复验日志`build/search-mcp-sdk-production-final.log`分别记录modern pin=2026-07-28、legacy=2025-11-25、auto=2026-07-28，并在每种模式通过两工具、INVALID、取消后重用与active close/后代回收。SDK实际版本断言防止全部静默落到legacy；依赖只在独立调用方环境，不改系统或harness全局配置。
+
+实际变异首轮因Unity footer缺separator判harness，修formatter后旧12缺陷清单专项通过，CTest1/1（99.47 s）见`build/search-mcp-actual.log`；最终加入deadline expired-write的清单仍待完整执行，不把旧专项写成最终实际组全绿。完整默认回归、最终变异、生产真实模型、冻结树独立对齐及九项总审核待本轮证据收齐；旧0030统计保持历史。
+
+### 0031 历史阶段：首轮回归与检测桥边界（2026-10-17）
+
+`build/search-mcp-release-final.log`、`search-mcp-asan-final.log`和`mcp-windows-final.log`记录上述默认回归。细项引用另存的`build/mcp-asan-bridge-LastTest.log`：原生14例、reply分配失败32点（只list/status-success/tool-error三mode）、stdio19场景、故障12例及puregate6控制。初期stdio18场景是此前阶段范围，I7后扩至19；计数单位分开，不声称所有分配路径覆盖。Release默认明细副本已仅剩header/footer，不能作为这些细项的证据；其完整106组汇总仍以原执行stdout日志为准。只读注册快照当前122总计=106默认+16实际组，含9个默认puregate；新四个默认测试与mcp_mutation均在可选Linux配置，Windows65不等同Linux覆盖。
+
+统一实际首轮`build/search-mcp-all-actual-final.log`为15组通过、1组失败（322.48 s），失败mcp_mutation中的expired-write未由指定断言干净检出，归harness。随后独立第3轮发现I7：Wire.close丢弃stderr会使owner断言与sanitizer并存时误归owner-fail，须保留sanitizer最高harness优先级。测试桥修复与相关专项已通过，最终13缺陷清单及统一实际组复验终局尚待；旧12缺陷的当时通过记录保留，不作最终检测力证明，也不把harness计作检出。I1–I6生产实现修复已复核关闭，I7是测试桥问题，不改变锁定MCP行为。
+
+BUILD_TESTING OFF/SEMANTIC ON生产server实算SHA-256 `8f95984e296a29a53eea6df3ce0c87192ddc680b1979355261347bdf41e2f669`，与`build/search-mcp-real-production.log`相符。已有Qwen embedding资产经真实MCP服务完成2个固定中英查询、40个完整原文/出处身份，没有生成回答，不作通用质量或所有harness兼容承诺。模型与runner沿既有固定身份。
+
+文档机械对齐：README简介“计划实现”改为已交付的RV32IM功能模拟器、Guest系统与文件实验、终端笔记和本地检索；目录分区补充实际host/检索与tools/服务职责，保留apps→os及生产不依赖tests约束。依据当前源码目录与main已交付0030范围；MCP仍在任务分支，不宣传为main已发布，不改变规格行为。
+
+### 0031 I7桥修复后验（2026-10-17）
+
+`build/search-mcp-stderr-red.log`真实子进程控制复现sanitizer误归非harness（5例1失败）；修后`search-mcp-stderr-green.log`6例通过。Wire.close先保留并检查stderr的SAN/UBSan，再判断返回码和owner；Python3.10 tearDown补查延迟_outcome.errors，避免指定断言失败被错误地升级为退出码harness。两个问题分别影响harness优先和owner归属，不可通过削弱其中一条解决。当前wire19场景、puregate6控制，fault仍12例。
+
+修后Release重新完整106/106（65.97 s）；ASan完整106/106（179.64 s）属于此前全量，最后三个测试文件改动后四个MCP套件定向4/4（22.93 s）见`build/search-mcp-asan-bridge-final.log`。两次执行范围明确分开，不宣称最新树又完整跑了106组ASan。实际expired-write变异已能命中唯一指定断言，统一16组最终复验仍待；先前15/16失败历史保留。
+
+### 0031 本机最终验收（2026-10-17）
+
+本节保留I8发现前的验收快照；修后当前状态见下节“I8：继承信号状态修复与复验”，不得据旧树通过记录提交。
+
+最新完整Release106/106（65.97 s）、Windows65/65（45.68 s）通过。ASan/UBSan完整106/106（179.64 s）是最后三份测试桥文件变动前的全量，变动后MCP四套件定向4/4（22.93 s）通过；这两个执行范围保持分列。上述默认及后验均0失败、0SKIP。Linux可选工具/provider配置注册122总=106默认+16实际组、9默认puregate；SDK是显式外部集成验收，不计默认CTest或普通CI。
+
+统一最终实际变异16/16（279.58 s，-j3）通过，证据`build/search-mcp-all-actual-current.log`及立即保存的`mcp-all-actual-current-LastTest.log`（78885字节）。其中mcp_mutation132.23 s，13个缺陷全部匹配指定suite、owner与具体断言，baseline/no-effect/wrong-owner/wrong-assertion控制通过，0存活、0harness。expired-write现命中唯一指定断言mcp_expired_output_not_written；先前15/16的harness失败原值保留，不能算检出或删去。I7修后puregate6、wire19等细项以ASan bridge保存明细为证；release空明细不作为细项来源。
+
+15份生产/CMake/fake/测试文件的最终SHA快照与当前输入逐一一致；测试桥三个文件变动另有delta，生产实现未因门禁错误修改。官方SDK2.3.0在生产工具上三模式实际版本、两工具/错误/取消/复用/active close通过；production OFF真实MCP两固定中英查询共40出处已验，结果仅证明该语料和接口范围，不生成回答或承诺普遍检索质量。
+
+本机实现及验证完成，原独立I1–I6审查与I7发现保留；复用原独立角色第4轮，检查冻结树源码、测试证据与全文文档对齐；结果待报告，九项总审尚待。AGY仅编辑建议，Root实现者矩阵不冒称独立技术PASS；远端PR/CI未执行，功能未合入main，维护者交付与合入仍须审查。以上阶段待验语句保留为当时记录，当前验证状态由本节取代。
+
+### 0031 I8：继承信号状态修复与复验（2026-10-17）
+
+此前树18b038的独立第4轮与九项审核通过后，提交前发现I8：继承SIGCHLD忽略会自动回收worker，破坏waitable leader与PGID保留；继承阻塞SIGINT/TERM也会使约定的信号退出失效。旧树提交准许已暂停，未提交。`build/search-mcp-i8-red.log`实际13例1失败，唯一断言mcp_child_exit_stays_waitable；这是生产回归用例失败，不是变异检出。
+
+`yan_mcp.c`现将SIGCHLD disposition复位为默认且清除flags，并解除本服务SIGINT/TERM/CHLD的阻塞；不修改无关信号或协议/API。这是落实锁定的owned回收和退出保证，原文已有责任→补齐继承环境下初始化，依据main信号设置与waitid路径。永久用例先discover同步，再检查/proc SigIgn/SigBlk，随后执行真实READY status与SIGTERM143；故障用例扩至13，新增两项指定变异使MCP清单扩至15，已在修后统一实际变异中指定检出。
+
+修后生产OFF官方SDK三模式实际版本/两工具/取消重用/active-close通过，见`build/search-mcp-i8-sdk-production.log`。生产真实两固定查询40出处复验通过，见`search-mcp-i8-real-production.log`；server SHA为`57785ce3b8f36d506a1faa91945f3c117b48b126521b77d8e4171c5a661b144e`，模型/runner身份保持。新输入快照为`mcp-source-freeze-i8.json`；旧13缺陷、12故障与旧完整回归结果保留对应旧树历史，不冒作修后完整验证。修后完整Release106/106（83.83 s，0失败/0SKIP）已通过，见`build/search-mcp-i8-release-final.log`；另存`mcp-i8-release-LastTest.log`核当前14原生/19wire/13fault/pure6。完整ASan/UBSan106/106（126.47 s，0失败/0SKIP）亦已通过，见`build/search-mcp-i8-asan-final.log`及另存`mcp-i8-asan-LastTest.log`。Windows编译输入未变，旧65/65（45.68 s）仅在其原配置范围继续作为证据。统一16实际组16/16（285.08 s，-j3）亦通过，见`build/search-mcp-i8-all-actual.log`及另存`mcp-i8-actual-LastTest.log`（79137字节）；MCP157.20 s，15条DETECTED逐项匹配suite/owner/assertion，baseline/no-effect/wrong-owner/wrong-assertion负控通过，0存活/0harness。15份I8输入SHA快照与当前文件一致。同独立会话必要修复复核及新exact树九审待完成，当前不得沿旧准许提交，PR/CI/维护者合入仍待。
 
 最新交付：[0030 可核验检索上下文包](specs/0030-retrieval-context-json.md)，项目所有者于2026-10-16整体批准，授权形成规格后继续实现。
 
@@ -115,7 +163,7 @@ POSIX open在后续依赖失败时可仍持有镜像描述符，调用者在任�
 - 用户审查：整体方案已批准；项目所有者于2026-10-14明确回复“合入吧”，PR #26已合入main，学习理解由项目所有者判断。
 
 
-功能实现提交`be99b8e18c713e225111c1e6deb54463ce904ba8`已推送并建立[PR #26](https://github.com/YanBo-maker/YanOS/pull/26)，Spec Lock提交`3b3d068`保留。2026-10-14，[CI运行38507466007](https://github.com/YanBo-maker/YanOS/actions/runs/38507466007)对应上述功能head，三项成功：Linux Debug ASan60/60（47.24 s）、Linux Release60/60（30.98 s）、Windows58/58（77.59 s）。远端配置为TOOLS OFF，不等同本机90组工具/Guest与十四组实际变异。项目所有者随后明确批准merge commit，PR #26已合入main；合并提交`8349b7d5dfacd6ab86119045e0e25417d4687eec`的树与已审fcafb46完全一致，规格3b3d068、功能be99b8e及状态fcafb46阶段提交保留。0028交付后的阶段安排为阅读与运行，后续0029规格批准另见页首；学习理解仍由项目所有者判断。
+功能实现提交`be99b8e18c713e225111c1e6deb54463ce904ba8`已推送并建立[PR #26](https://github.com/YanBo-maker/YanOS/pull/26)，Spec Lock提交`3b3d068`保留。2026-10-14，[CI运行38507466007](https://github.com/YanBo-maker/YanOS/actions/runs/38507466007)对应上述功能head，三项成功：Linux Debug ASan60/60（47.24 s）、Linux Release60/60（30.98 s）、Windows58/58（77.59 s）。远端配置为TOOLS OFF，不等同本机90组工具/Guest与十四组实际变异。项目所有者随后明确批准merge commit，PR #26已合入main；合并提交`8349b7d5dfacd6ab86119045e0e25417d4687eec`的树与已审fcafb46完全一致，规格3b3d068、功能be99b8e及状态fcafb46阶段提交保留。0028交付后的阶段安排为阅读与运行，后续0029规格批准另见本页“已交付基线：0029 Host侧语义检索”；学习理解仍由项目所有者判断。
 
 ### 0028 本机验收（2026-10-14复测）
 
@@ -280,7 +328,7 @@ YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0
 - `yan_gen` 随机 RV32IM 指令流生成器（给定种子确定输出），以及 5 个手写 Guest 用例。
 - C17 / CMake 构建、Unity 单元测试、CTest 及 GitHub Actions。
 
-详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前已验收0030工具/provider配置默认102组、开启实际变异后117组，完整验收见“0030 本机最终复验（2026-10-16）”；0029的100/115组、0028的90/104组及其日期化验收保留为历史；0025的55/66组、0024的49/59组、0023的47/57组、0022的43/52组与0020于2026-10-03的32/39组保留为本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；最新已执行结果见上述0030验收；各阶段历史结果见本页「验证」的对应日期记录。
+详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前本机已验收0031工具/provider配置默认106组、开启实际变异后122组，完整记录见“0031 本机最终验收（2026-10-17）”；0030的102/117组、0029的100/115组、0028的90/104组及其日期化验收保留为历史；0025的55/66组、0024的49/59组、0023的47/57组、0022的43/52组与0020于2026-10-03的32/39组保留为本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；最新已执行结果见上述0031验收；各阶段历史结果见本页「验证」的对应日期记录。
 
 ## 验证
 
@@ -432,7 +480,7 @@ Host 变异逐项绑定表中指定的测试断言，无关断言失败负控不
 
 ### 历史测量：M2a
 
-下段保留2026-09-20的原始测量与当时统计说明。其中“本页其它段落若残留旧口径以本段覆盖”仅适用于当时记录，不覆盖后续阶段；当前已执行配置与结果见“0030 本机最终复验（2026-10-16）”，0030规格批准、实现与审查状态见页首。
+下段保留2026-09-20的原始测量与当时统计说明。其中“本页其它段落若残留旧口径以本段覆盖”仅适用于当时记录，不覆盖后续阶段；当前已执行配置与结果见“0031 本机最终验收（2026-10-17）”，0031规格批准、实现与审查状态见页首。
 
 GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建注册 **21 组 Unity 套件**（共 **172 个用例**：`uart` 19、`plic` 15、`transport` 14，其余为既有分组；`boot` 由 4 增至 6，新增两条是 0017 的 A1 / A2）。启用 Guest 工具链与 `yan_run` 时默认另有 6 组 Guest 侧测试：`guest_trap_env`、`guest_terminal`、`guest_console`、`guest_golden`、`guest_runtime` 与 `guest_block`，合计 **28 组 CTest**；加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 时为 **33 组**（再注册 `guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`）。**以下数字以本段为准**，本页其它段落若残留旧口径以本段覆盖。**两次独立测量**：总审核角色在全新目录实测默认 **28/28 passed，25.21 s**、`ctest -R mutation` **5/5 passed，281.19 s**；主 Agent 在开关下实测整套 **33/33 passed，317.39 s**（`guest_console_mutation` 45.4 s、`device_mutation` 40.5 s、`guest_runtime_mutation` 48.2 s、`guest_block_mutation` 151.0 s、`guest_m2a_combined_mutation` 3.7 s）——两次测量量级一致，差异来自机器负载。变异检查默认不注册，只为不让慢证据主导默认套件；合并前必须显式跑一次，见 [CONTRIBUTING](../CONTRIBUTING.md) 的「合并前检查清单」与「提交前总审核检查清单」。
 
@@ -488,13 +536,13 @@ Guest 层同样做了变异检查：在副本里注入 10 个缺陷（不清 MSI
 - Guest trap 环境由自检程序验证，证据来自本仓库：它证明陷阱路径在**这台**实现上按规格工作，不构成与外部模型的一致性证据。外部中断（MEIP）无法从 Guest 侧驱动——PLIC 没有 Guest 可写的源寄存器，源线只能由平台按设备电平用 `yan_plic_set_level` 驱动，而两条设备线的置位都由 Host 侧动作触发（`yan_uart_push_rx`、Host 写入传输环）——因此 Guest 自检只覆盖 MSIP 与 MTIP 的进入 / 返回。Host 触发的 MEIP 投递由 `Interrupt` 那组 Host 测试覆盖；UART 接收线的整条路径（`push_rx` → 采样 → PLIC source 2 → MEIP）另由 UART 组的 `receive_interrupt_reaches_plic_source_two` 覆盖。
 - `yan_run` 现在按平台语义映射四个设备窗口并每条指令推进一次 `mtime`，`yan_difftest` 不映射设备、不推进时间。同一镜像在两个执行器下若读取 `mtime` 会得到不同结果，因此含设备访问的 Guest 只适用于 `yan_run`，这一条已在工具注释与规格里写明。
 
-Debug 启用 AddressSanitizer 和 UndefinedBehaviorSanitizer。0030的JSON编码分配（16个注入点）与结果收集缓冲已通过分配失败注入验证；其余内存分配失败分支尚未完成全面故障注入。
+Debug 启用 AddressSanitizer 和 UndefinedBehaviorSanitizer。0030的JSON编码分配（16个注入点）与结果收集缓冲，以及0031 reply的32个限定注入点（list/status-success/tool-error）已通过分配失败注入验证；其余内存分配失败分支尚未完成全面故障注入。
 
 CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验证层需要 NEMU 参考模型与 RISC-V 工具链，暂不在 CI 中运行，因此不对外部层做持续集成结论。各任务的运行结果与审查状态见 [Pull Requests](https://github.com/YanBo-maker/YanOS/pulls)。
 
 ## 下一步
 
-0029已交付main，历史验收与运行入口保持。0030已交付main，历史验收与运行入口保持。当前按已锁定0031只读MCP规格tests-first实施并验真实SDK；实施交付、CI与维护者合入分别记录，学习理解仍由项目所有者判断。
+0029已交付main，历史验收与运行入口保持。0030已交付main，历史验收与运行入口保持。0031实现已编写，I8修后完整复验已完成，当前进行同会话必要独立复核，再核新冻结树九项并提交PR、核实际远端CI，再由维护者审查交付与合入；学习理解仍由项目所有者判断。
 
 ### 历史推进记录（M1a / M2a）
 

@@ -14,6 +14,19 @@ if os.environ.get('YAN_TEST_CHILD_LOG'):
     with Path(os.environ['YAN_TEST_CHILD_LOG']).open('a') as log:
         log.write('version\n' if '--version' in sys.argv else 'server\n')
 if '--version' in sys.argv:
+    # Explicit MCP integration control. A runner must inherit EOF on stdin,
+    # and no private result/control pipe may survive exec. Other suites do
+    # not enable this check or change their fixed runner version string.
+    if os.environ.get('YAN_MCP_FD_CHECK'):
+        assert os.read(0, 1) == b'', 'runner inherited MCP input'
+        for entry in Path('/proc/self/fd').iterdir():
+            if int(entry.name) < 3:
+                continue
+            try:
+                target = entry.readlink()
+            except FileNotFoundError:
+                continue  # the directory enumeration's own fd
+            assert not str(target).startswith('pipe:'), 'runner inherited private pipe'
     version_mode = os.environ.get('YAN_TEST_VERSION_MODE','normal')
     if version_mode == 'empty': raise SystemExit(0)
     if version_mode == 'long': print('x'*2048); raise SystemExit(0)
@@ -35,8 +48,20 @@ args, _ = parser.parse_known_args()
 assert args.host == '127.0.0.1'
 if os.environ.get('YAN_TEST_SERVER_PID_FILE'):
     Path(os.environ['YAN_TEST_SERVER_PID_FILE']).write_text(str(os.getpid()))
+if os.environ.get('YAN_TEST_FORK_TREE'):
+    child = os.fork()
+    if child == 0:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        grandchild = os.fork()
+        fd = os.open(os.environ['YAN_TEST_DESCENDANTS_FILE'], os.O_WRONLY|os.O_APPEND|os.O_CREAT, 0o600)
+        os.write(fd, (str(os.getpid())+'\n').encode()); os.close(fd)
+        if grandchild == 0:
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        while True:
+            time.sleep(30)
 mode = Path(args.model).read_text().strip()
-if mode == 'ignore_term': signal.signal(signal.SIGTERM,signal.SIG_IGN)
+if mode == 'ignore_term' or os.environ.get('YAN_TEST_IGNORE_TERM'):
+    signal.signal(signal.SIGTERM,signal.SIG_IGN)
 if mode == 'early_exit': raise SystemExit(9)
 if mode == 'startup_timeout': time.sleep(10)
 
