@@ -1,8 +1,8 @@
 # YanOS
 
-YanOS 是一个用于学习计算机系统的项目，计划实现 RISC-V 模拟器、操作系统、文件系统和终端知识工具。
+YanOS 是一个用于学习计算机系统的项目，包含 C17 编写的 RISC-V RV32IM 功能模拟器、Guest 上的操作系统与文件系统实验，以及终端笔记和本地知识检索工具。
 
-开发从 YanCPU 开始。逐步实现指令执行、设备、异常、中断和持久化存储。每项能力都应有具体需求、明确规格和可复现的验证结果。
+开发从指令执行逐步推进到设备、异常、中断和持久化存储，保持 Host / Guest 与软硬件边界，每项能力以明确规格和可复现验证交付。
 
 ## 状态
 
@@ -29,6 +29,8 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 [Host语义检索](docs/specs/0029-host-semantic-search.md)整体方案已批准并锁定，提供独立可选Linux/WSL工具，以本地模型为只读YanFS原文段落建立旁置向量索引，返回带物理出处的前20个候选。Guest检索与磁盘格式保持。已实现并完成本机完整回归、实际变异及固定小语料真实模型复验；独立只读dsh对齐与总审核已完成，功能提交9ad39ed已通过[PR #30](https://github.com/YanBo-maker/YanOS/pull/30)对应的三项远端CI；项目所有者于2026-10-15明确批准，经PR #30合入main（79fdde6），阶段提交保留，学习理解由项目所有者判断。
 
 [可核验检索上下文包](docs/specs/0030-retrieval-context-json.md)整体方案已于2026-10-16批准，为Host search增加可选JSON输出，携带完整命中段、物理出处和同次来源/模型/runner/配置身份；默认文本输出保持。规格锁定提交3e84826已保留；evidence API与JSON层已实现，原生及JSON定向验证通过，旧门禁夹具复制范围问题已修复；Release/ASan/Windows完整复验及统一十五组实际变异通过，显式JSON真模型验收亦通过。独立最终对齐及九项总审核已通过，功能提交5299136已通过[PR #32](https://github.com/YanBo-maker/YanOS/pull/32)对应三项远端CI；项目所有者于2026-10-16明确批准，经PR #32合入main（5170cf0），阶段提交保留，学习理解仍由项目所有者判断。
+
+[面向Agent的MCP检索入口](docs/specs/0031-mcp-retrieval-tools.md)在任务分支已实现Linux/WSL只读服务，Agent可发现和调用`yanos_search`与`yanos_index_status`，复用0030完整原文与出处身份；回答由调用方生成。既有本机回归与检测力验证通过后发现继承信号状态问题，现已补齐初始化并重验官方SDK与固定语料；修后完整回归、扩充变异、原独立角色必要复核与精确树九项总审已通过。功能提交`4452e11`已建立[PR #34](https://github.com/YanBo-maker/YanOS/pull/34)，对应功能head的三项远端CI通过；维护者交付与合入仍待批准，尚未在main发布。
 
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
@@ -158,7 +160,62 @@ python3 -B tests/semantic_model_check.py --tool build/semantic/yan_semantic \
 
 脚本实际调用生产工具，保存身份、原文出处、预标签Top5结果和耗时/RSS报告。只有显式添加`--json-context`才同时检查完整JSON上下文包的身份、排名和原文范围；不添加时保留原文本效果验收。工具缺失硬失败；外部依赖缺失明确返回77，表示效果待验，不能当通过或静默跳过。默认fake provider/oracle通过不能替代这项效果验证。
 
-变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 可注册十五组：`semantic_mutation`、`note_relations_mutation`、`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `semantic_mutation_gate`、`note_relations_mutation_gate`、`note_metadata_mutation_gate`、`search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
+### Agent/harness MCP接入
+
+同一可选语义工具配置可构建`yan_mcp`；生产目标不要求测试依赖：
+
+```sh
+cmake --build build/semantic --target yan_mcp --parallel
+build/semantic/yan_mcp --disk-image /absolute/path/notes.img \
+  --index /absolute/path/notes.index --model /absolute/path/embedding.gguf \
+  --runner /absolute/path/llama-server
+```
+
+stdio server的stdout只含协议，不是交互式命令行。调用方以子进程连接，发现yanos_search与yanos_index_status；只固定启动路径，工具参数不能指定文件或执行命令。来源镜像须停止Guest并在调用期间保持稳定，索引需预先用yan_semantic显式rebuild；服务不自动重建、写笔记或生成回答。取消与EOF会停止当前任务并回收本服务拥有的后代，kernel I/O阻塞不承诺固定总回收时限。兼容范围与结果schema见[0031](docs/specs/0031-mcp-retrieval-tools.md)。
+
+通用stdio启动参数示例，字段对应SDK的启动配置；不同harness的注册位置由调用方适配，不自动修改全局配置：
+
+```json
+{
+  "command": "/absolute/path/yan_mcp",
+  "args": ["--disk-image", "/absolute/path/notes.img", "--index", "/absolute/path/notes.index", "--model", "/absolute/path/embedding.gguf", "--runner", "/absolute/path/llama-server"]
+}
+```
+
+官方Python SDK本阶段固定`mcp==2.3.0`，可在调用方自己的环境使用以下接口。`mode="2026-07-28"`明确选现代协议；定向验收另覆盖`legacy`与`auto`并检查实际版本，不把自动回退当现代兼容通过：
+
+```python
+import asyncio
+import json
+from mcp import Client
+from mcp.client.stdio import StdioServerParameters
+
+async def main():
+    target = StdioServerParameters(
+        command="/absolute/path/yan_mcp",
+        args=["--disk-image", "/absolute/path/notes.img",
+              "--index", "/absolute/path/notes.index",
+              "--model", "/absolute/path/embedding.gguf",
+              "--runner", "/absolute/path/llama-server"])
+    async with Client(target, mode="2026-07-28",
+                      read_timeout_seconds=150) as client:
+        assert client.protocol_version == "2026-07-28"
+        tools = await client.list_tools()
+        result = await client.call_tool(
+            "yanos_search", {"query": "设备如何叫醒处理器"})
+        value = result.model_dump(by_alias=True, exclude_none=True)
+        if value["isError"]:
+            raise RuntimeError(value["content"][0]["text"])
+        context = value["structuredContent"]
+        assert json.loads(value["content"][0]["text"]) == context
+        print(json.dumps(context, ensure_ascii=False))
+
+asyncio.run(main())
+```
+
+Agent/harness取得完整原文、出处和四身份后自行回答；引用存在不证明答案内容真实。官方SDK是显式集成验收依赖，不是生产C工具或默认核心构建依赖。当前本机全量及真实模型验收进度见[STATUS](docs/STATUS.md)，不由上述用法示例推导已完成覆盖。
+
+变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 在Linux工具/provider开启配置可注册十六组：`mcp_mutation`、`semantic_mutation`、`note_relations_mutation`、`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `mcp_mutation_gate`、`semantic_mutation_gate`、`note_relations_mutation_gate`、`note_metadata_mutation_gate`、`search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
 
 `yan_run` 的默认执行路径由 `guest_golden` 用基准工件逐字节守住：改动默认行为会让它失败，先读差异再决定是否有意为之。生成与重生成见 [`tests/guest/golden/README.md`](tests/guest/golden/README.md)。
 
@@ -191,13 +248,13 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 | YanFS | 单根目录文件系统，格式与失败边界见 [0021](docs/specs/0021-yanfs.md) |
 | Yan Knowledge System | 笔记、问题、关系和探索路径的终端交互 |
 
-代码按职责分区：Host 侧的 `src/` 与 `include/`（CPU、Bus、设备与工具）、Guest 上的 `os/`（驱动、任务运行时与文件系统）、`apps/`（生产 Guest 应用），以及 `tests/`（本机与 Guest 验证程序）。依赖方向为 `apps/` → `os/`，生产应用与 `os/` 不引用 `tests/`；测试可以引用生产层。旧控制台分层约束见 [0017](docs/specs/0017-console-and-os-layout.md)，独立应用入口见 [0022](docs/specs/0022-terminal-file-operations.md)。
+代码按职责分区：Host侧`src/`与`include/`负责CPU、Bus与设备，`host/`负责检索核心、索引与只读来源适配，`tools/`负责Host CLI和MCP服务；Guest侧`os/`负责驱动、运行时与YanFS，`apps/`为Guest生产应用，`tests/`负责验证。依赖方向为`apps/` → `os/`，生产应用与`os/`不引用`tests/`；测试可以引用生产层。旧控制台分层约束见[0017](docs/specs/0017-console-and-os-layout.md)，独立应用入口见[0022](docs/specs/0022-terminal-file-operations.md)。
 
 各组件的完整能力将分阶段实现。浏览器支持计划通过 WebAssembly 和界面适配接入；新增能力的时机由实际使用决定。
 
 ## 开发
 
-参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)、[控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)、[块请求协议规格](docs/specs/0018-block-protocol.md)、[协作式运行时规格](docs/specs/0019-cooperative-runtime.md)、[持久化块镜像规格](docs/specs/0020-persistent-block-image.md)、[YanFS 规格](docs/specs/0021-yanfs.md) 、[终端文件操作规格](docs/specs/0022-terminal-file-operations.md) 、[多行文本编辑规格](docs/specs/0023-multiline-text-editor.md) 、[重命名与复制规格](docs/specs/0024-file-rename-copy.md) 、[知识检索规格](docs/specs/0025-knowledge-search.md) 、[词项搜索与索引规格](docs/specs/0026-term-search-index.md) 、[笔记元数据规格](docs/specs/0027-note-metadata.md) 、[知识关系导航规格](docs/specs/0028-knowledge-relations.md) 、[Host语义检索规格](docs/specs/0029-host-semantic-search.md) 和 [检索上下文包规格](docs/specs/0030-retrieval-context-json.md)。
+参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)、[控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)、[块请求协议规格](docs/specs/0018-block-protocol.md)、[协作式运行时规格](docs/specs/0019-cooperative-runtime.md)、[持久化块镜像规格](docs/specs/0020-persistent-block-image.md)、[YanFS 规格](docs/specs/0021-yanfs.md) 、[终端文件操作规格](docs/specs/0022-terminal-file-operations.md) 、[多行文本编辑规格](docs/specs/0023-multiline-text-editor.md) 、[重命名与复制规格](docs/specs/0024-file-rename-copy.md) 、[知识检索规格](docs/specs/0025-knowledge-search.md) 、[词项搜索与索引规格](docs/specs/0026-term-search-index.md) 、[笔记元数据规格](docs/specs/0027-note-metadata.md) 、[知识关系导航规格](docs/specs/0028-knowledge-relations.md) 、[Host语义检索规格](docs/specs/0029-host-semantic-search.md) 、[检索上下文包规格](docs/specs/0030-retrieval-context-json.md) 和 [MCP检索工具规格](docs/specs/0031-mcp-retrieval-tools.md)。
 
 ## 许可证
 

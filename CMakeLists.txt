@@ -227,6 +227,14 @@ if(YAN_BUILD_SEMANTIC)
     target_link_libraries(yan_semantic PRIVATE yan_semantic_posix yan_semantic_llama
                           yan_semantic_json yyjson::yyjson)
     target_compile_options(yan_semantic PRIVATE ${YAN_WARNINGS})
+    add_library(yan_mcp_protocol STATIC tools/mcp_protocol.c)
+    target_include_directories(yan_mcp_protocol PUBLIC tools)
+    target_link_libraries(yan_mcp_protocol PUBLIC yan_semantic_text yyjson::yyjson)
+    target_compile_options(yan_mcp_protocol PRIVATE ${YAN_WARNINGS})
+    add_executable(yan_mcp tools/yan_mcp.c tools/mcp_worker.c)
+    target_link_libraries(yan_mcp PRIVATE yan_mcp_protocol yan_semantic_posix yan_semantic_llama
+                          yan_semantic_json yyjson::yyjson)
+    target_compile_options(yan_mcp PRIVATE ${YAN_WARNINGS})
 endif()
 
 include(CTest)
@@ -272,6 +280,42 @@ if(BUILD_TESTING)
                  "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_semantic_mutation_gate.py")
         set_tests_properties(semantic_mutation_gate PROPERTIES TIMEOUT 120)
         if(YAN_BUILD_SEMANTIC)
+            add_executable(test_mcp_protocol tests/test_mcp_protocol.c)
+            target_link_libraries(test_mcp_protocol PRIVATE yan_mcp_protocol unity::framework)
+            target_compile_options(test_mcp_protocol PRIVATE ${YAN_WARNINGS})
+            add_test(NAME mcp_protocol COMMAND test_mcp_protocol)
+            add_test(NAME mcp_stdio COMMAND "${Python3_EXECUTABLE}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_checks.py"
+                $<TARGET_FILE:yan_mcp> $<TARGET_FILE:yan_semantic>
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_fake_runner.py")
+            set_tests_properties(mcp_protocol mcp_stdio PROPERTIES TIMEOUT 120)
+            add_executable(mcp_fault_probe tools/yan_mcp.c tools/mcp_worker.c tests/mcp_fault_hooks.c)
+            target_compile_definitions(mcp_fault_probe PRIVATE _exit=yan_mcp_test_exit
+                clock_gettime=yan_mcp_test_clock_gettime)
+            target_link_libraries(mcp_fault_probe PRIVATE yan_mcp_protocol yan_semantic_posix yan_semantic_llama
+                                  yan_semantic_json yyjson::yyjson)
+            target_link_options(mcp_fault_probe PRIVATE -Wl,--wrap=yan_semantic_posix_cleanup
+                                -Wl,--wrap=yan_semantic_llama_stop -Wl,--wrap=calloc
+                                -Wl,--wrap=write -Wl,--wrap=read -Wl,--wrap=close -Wl,--wrap=fopen -Wl,--wrap=poll)
+            target_compile_options(mcp_fault_probe PRIVATE ${YAN_WARNINGS})
+            add_test(NAME mcp_faults COMMAND "${Python3_EXECUTABLE}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_fault_checks.py"
+                $<TARGET_FILE:yan_mcp> $<TARGET_FILE:mcp_fault_probe> $<TARGET_FILE:yan_semantic>
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_fake_runner.py")
+            set_tests_properties(mcp_faults PROPERTIES TIMEOUT 120)
+            add_test(NAME mcp_mutation_gate COMMAND "${Python3_EXECUTABLE}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mcp_mutation_gate.py")
+            set_tests_properties(mcp_mutation_gate PROPERTIES TIMEOUT 120)
+            if(YAN_ENABLE_MUTATION_TESTS)
+                add_test(NAME mcp_mutation COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_mcp_mutation.py"
+                    --repo "${CMAKE_CURRENT_SOURCE_DIR}" --build "${CMAKE_BINARY_DIR}"
+                    --unity "${unity_SOURCE_DIR}" --cc "${CMAKE_C_COMPILER}"
+                    --yyjson-include "$<JOIN:$<TARGET_PROPERTY:yyjson::yyjson,INTERFACE_INCLUDE_DIRECTORIES>,|>"
+                    --yyjson-lib "$<TARGET_FILE:yyjson::yyjson>"
+                    --work "${CMAKE_BINARY_DIR}/mcp-mutation")
+                set_tests_properties(mcp_mutation PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
+            endif()
             add_executable(test_semantic_json tests/test_semantic_json.c)
             target_include_directories(test_semantic_json PRIVATE tools)
             target_link_libraries(test_semantic_json PRIVATE yan_semantic_json yyjson::yyjson unity::framework)
