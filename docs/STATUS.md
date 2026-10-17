@@ -1,6 +1,17 @@
 # 项目状态
 
-当前交付：[0031 面向Agent的只读MCP检索工具](specs/0031-mcp-retrieval-tools.md)，项目所有者于2026-10-17明确批准PR #34按merge commit合入main，合并提交a9a1e9c。
+当前推进：[0032 具名块与精确正文引用](specs/0032-block-references.md)，项目所有者已明确“认可整体方案，形成规格并继续实现”。
+
+- 规格：文件内ID、单marker范围、精确引用、四命令、文本/错误域、64块/top20及兼容边界整体已批准；工程条款于2026-10-18 03:38:42 +08:00标记Spec Lock；独立第1轮F1–F3已同批修订，修后复核尚待。
+- 实现：计划独立纯格式层、只读YanFS服务与Guest shell/app适配，尚未实现；不改变旧元数据头、三关系命令、编辑语义、0030或MCP schema。
+- 验证：尚未执行0032测试或预算测量，不沿用0031通过数声明新能力可用。
+- 用户审查：整体方案已批准；实现交付与合入另行审查，学习理解仍由项目所有者判断。
+
+### 0032 第1轮工程澄清与锁定（2026-10-18）
+
+整体方案批准日期2026-10-17保留；独立第1轮完整清单仅F1–F3，当前同批修订并于2026-10-18 03:38:42 +08:00标记锁定，修后独立审核及exact九审仍待，原143a09草案树不提交。F1原公共责任未声明首次零初始化→service/parser/text对象首次init前由caller零初始化，结果holder不泛化；依据既有relation/editor生命周期。F2原“输出失败无OK/不发成功回执”→检测失败后不继续回执/文件I/O；terminal putc可能接受最后byte后postcheck失败，已交付前缀可能含完整OK，但shell/app必须fatal、不得健康成功，沿0028及现terminal实现。F3原致命FS名单漏UNSUPPORTED→补CORRUPT/UNSUPPORTED沿旧shell一致映射。三项只钉清既有工程契约，无新增能力或所有者新裁定；尚无0032实现、测试、预算或通过结论。
+
+已交付基线：[0031 面向Agent的只读MCP检索工具](specs/0031-mcp-retrieval-tools.md)，项目所有者于2026-10-17明确批准PR #34按merge commit合入main，合并提交a9a1e9c。
 
 - 规格：现代2026-07-28与legacy2025-11-25 stdio、两只读工具及schema、单任务/取消/owned生命周期已通过独立只读第2轮与同轮规范澄清复核，于2026-10-17 14:51:25 +08:00锁定，规格提交06463a3保留。
 - 实现：生产yan_mcp、协议校验、工具adapter与单任务/owned回收已编写，复用semantic证据C API；回答由Agent/harness生成，无生成模型或云API。独立第3轮I1–I6生产问题已复核关闭，I7测试桥已修复；提交前发现I8继承SIGCHLD忽略及控制信号阻塞问题，现已初始化本服务的信号状态，修后完整回归及统一实际变异通过，原独立角色必要复核与新树九项总审已完成，功能提交4452e11已随PR #34获批合入main；旧树18b038准许不恢复。
@@ -488,7 +499,7 @@ Host 变异逐项绑定表中指定的测试断言，无关断言失败负控不
 
 ### 历史测量：M2a
 
-下段保留2026-09-20的原始测量与当时统计说明。其中“本页其它段落若残留旧口径以本段覆盖”仅适用于当时记录，不覆盖后续阶段；当前已执行配置与结果见“0031 本机最终验收（2026-10-17）”，0031规格批准、实现与审查状态见页首。
+下段保留2026-09-20的原始测量与当时统计说明。其中“本页其它段落若残留旧口径以本段覆盖”仅适用于当时记录，不覆盖后续阶段；当前已执行配置与结果见“0031 本机最终验收（2026-10-17）”，0031规格批准、实现与审查状态见本页“已交付基线：0031”；0032当前计划见页首。
 
 GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建注册 **21 组 Unity 套件**（共 **172 个用例**：`uart` 19、`plic` 15、`transport` 14，其余为既有分组；`boot` 由 4 增至 6，新增两条是 0017 的 A1 / A2）。启用 Guest 工具链与 `yan_run` 时默认另有 6 组 Guest 侧测试：`guest_trap_env`、`guest_terminal`、`guest_console`、`guest_golden`、`guest_runtime` 与 `guest_block`，合计 **28 组 CTest**；加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 时为 **33 组**（再注册 `guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`）。**以下数字以本段为准**，本页其它段落若残留旧口径以本段覆盖。**两次独立测量**：总审核角色在全新目录实测默认 **28/28 passed，25.21 s**、`ctest -R mutation` **5/5 passed，281.19 s**；主 Agent 在开关下实测整套 **33/33 passed，317.39 s**（`guest_console_mutation` 45.4 s、`device_mutation` 40.5 s、`guest_runtime_mutation` 48.2 s、`guest_block_mutation` 151.0 s、`guest_m2a_combined_mutation` 3.7 s）——两次测量量级一致，差异来自机器负载。变异检查默认不注册，只为不让慢证据主导默认套件；合并前必须显式跑一次，见 [CONTRIBUTING](../CONTRIBUTING.md) 的「合并前检查清单」与「提交前总审核检查清单」。
 
@@ -550,7 +561,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-0029已交付main，历史验收与运行入口保持。0030已交付main，历史验收与运行入口保持。0031实现、I8修后完整复验、原独立角色必要复核与九项总审已完成，已获项目所有者批准并经PR #34合入main（a9a1e9c）。当前供阅读与运行，下一项能力另行整体对齐；学习理解仍由项目所有者判断。
+0029已交付main，历史验收与运行入口保持。0030已交付main，历史验收与运行入口保持。0031实现、I8修后完整复验、原独立角色必要复核与九项总审已完成，已获项目所有者批准并经PR #34合入main（a9a1e9c）。0031供阅读与运行；当前按已锁定0032完成同轮工程澄清复核与exact规格九审，再tests-first实施，交付/验证/合入分别记录，学习理解仍由项目所有者判断。
 
 ### 历史推进记录（M1a / M2a）
 
