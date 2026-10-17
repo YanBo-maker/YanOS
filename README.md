@@ -30,7 +30,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [可核验检索上下文包](docs/specs/0030-retrieval-context-json.md)整体方案已于2026-10-16批准，为Host search增加可选JSON输出，携带完整命中段、物理出处和同次来源/模型/runner/配置身份；默认文本输出保持。规格锁定提交3e84826已保留；evidence API与JSON层已实现，原生及JSON定向验证通过，旧门禁夹具复制范围问题已修复；Release/ASan/Windows完整复验及统一十五组实际变异通过，显式JSON真模型验收亦通过。独立最终对齐及九项总审核已通过，功能提交5299136已通过[PR #32](https://github.com/YanBo-maker/YanOS/pull/32)对应三项远端CI；项目所有者于2026-10-16明确批准，经PR #32合入main（5170cf0），阶段提交保留，学习理解仍由项目所有者判断。
 
-[面向Agent的MCP检索入口](docs/specs/0031-mcp-retrieval-tools.md)在任务分支已实现Linux/WSL只读服务，Agent可发现和调用`yanos_search`与`yanos_index_status`，复用0030完整原文与出处身份；回答由调用方生成。既有本机回归与检测力验证通过后发现继承信号状态问题，现已补齐初始化并重验官方SDK与固定语料；修后完整回归、扩充变异、原独立角色必要复核与精确树九项总审已通过。功能提交`4452e11`已建立[PR #34](https://github.com/YanBo-maker/YanOS/pull/34)，对应功能head的三项远端CI通过；维护者交付与合入仍待批准，尚未在main发布。
+[面向Agent的MCP检索入口](docs/specs/0031-mcp-retrieval-tools.md)已实现Linux/WSL只读服务，Agent可发现和调用`yanos_search`与`yanos_index_status`，复用0030完整原文与出处身份；回答由调用方生成。既有本机回归与检测力验证通过后发现继承信号状态问题，现已补齐初始化并重验官方SDK与固定语料；修后完整回归、扩充变异、原独立角色必要复核与精确树九项总审已通过。功能提交`4452e11`已建立[PR #34](https://github.com/YanBo-maker/YanOS/pull/34)，对应功能head的三项远端CI通过；项目所有者于2026-10-17明确批准，经PR #34按merge commit合入main（`a9a1e9c`），阶段历史保留；学习理解仍由项目所有者判断。
 
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
