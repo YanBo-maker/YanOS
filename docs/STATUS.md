@@ -2,14 +2,64 @@
 
 当前推进：[0032 具名块与精确正文引用](specs/0032-block-references.md)，项目所有者已明确“认可整体方案，形成规格并继续实现”。
 
-- 规格：文件内ID、单marker范围、精确引用、四命令、文本/错误域、64块/top20及兼容边界整体已批准；工程条款于2026-10-18 03:38:42 +08:00标记Spec Lock；独立第1轮F1–F3已同批修订，修后复核尚待。
-- 实现：计划独立纯格式层、只读YanFS服务与Guest shell/app适配，尚未实现；不改变旧元数据头、三关系命令、编辑语义、0030或MCP schema。
-- 验证：尚未执行0032测试或预算测量，不沿用0031通过数声明新能力可用。
+- 规格：文件内ID、单marker范围、精确引用、四命令、文本/错误域、64块/top20及兼容边界整体已批准；工程条款于2026-10-18 03:38:42 +08:00标记Spec Lock；独立第1轮F1–F3同批修订及复核通过，exact规格九审完成，已提交2f1d07cd。
+- 实现：纯格式、只读YanFS服务、shell block族及生产app绑定已编写；CMake原生目标定向与生产OFF构建通过。新Guest健康/故障/API及完整默认、统一实际变异已执行通过；独立第3轮恢复完成集成技术审核；第4轮精确树冻结对齐及F4-D1修后复核已通过；提交前exact九审与Git交付仍待，不改变旧元数据头、三关系命令、编辑语义、0030或MCP schema。
+- 验证：当前完整默认Release114/114（111.66 s）、ASan/UBSan114/114（172.64 s）、Windows70/70（67.44 s），0失败、0SKIP；新Guest健康6组、RV32 API和故障43项通过。新块实际26项已检出，统一17实际组17/17（322.77 s）零失败、零SKIP通过。资源实测见阶段记录；独立第3轮恢复完成并正式PASS；第4轮精确树冻结对齐及F4-D1修后复核已通过；exact九审、PR/CI及维护者交付合入待，原额度中断保留历史。
 - 用户审查：整体方案已批准；实现交付与合入另行审查，学习理解仍由项目所有者判断。
 
-### 0032 第1轮工程澄清与锁定（2026-10-18）
+### 0032 第1轮工程澄清与锁定（2026-10-18，历史阶段）
 
 整体方案批准日期2026-10-17保留；独立第1轮完整清单仅F1–F3，当前同批修订并于2026-10-18 03:38:42 +08:00标记锁定，修后独立审核及exact九审仍待，原143a09草案树不提交。F1原公共责任未声明首次零初始化→service/parser/text对象首次init前由caller零初始化，结果holder不泛化；依据既有relation/editor生命周期。F2原“输出失败无OK/不发成功回执”→检测失败后不继续回执/文件I/O；terminal putc可能接受最后byte后postcheck失败，已交付前缀可能含完整OK，但shell/app必须fatal、不得健康成功，沿0028及现terminal实现。F3原致命FS名单漏UNSUPPORTED→补CORRUPT/UNSUPPORTED沿旧shell一致映射。三项只钉清既有工程契约，无新增能力或所有者新裁定；尚无0032实现、测试、预算或通过结论。
+
+### 0032 局部实施与定向验证（2026-10-18，历史阶段）
+
+规格提交`2f1d07cd5097a91e4ecb95dd95257addeda4f708`的树与24e4f21锁定准审树相同，第1轮F1–F3及规格九审已完成。上节“修后待审/尚无实现测试”的文字保留锁定时点历史，当前进展由本节取代，批准与锁定时间不改。
+
+纯格式角色只编写`os/note_blocks_format.h/.c`及`tests/test_note_blocks_format.c`。真正编译stub的原生RED为25 Tests/25 Failures/0 Ignored，strict C17 GREEN及ASan分别25/25，见`build/block-format-{red,green,asan}-20261018.log`。Host尺寸`block-format-size-20261018.log`为parser3536B、text validator16B；`block-format-stack.su`最大单帧80B，非RV32或完整调用链/中断栈峰值，也不证明总静态<=2MiB。
+
+Root编写`os/note_blocks.h/.c`与`tests/test_note_blocks.c`，借FS经公开API做预检/结构/目标状态与流式show。实际编译stub RED为14 Tests/13 Failures/0 Ignored、direct binary退出1，随后strict C17 GREEN为14/14，见`build/block-service-{red,green}-20261018.log`；首次返回码桥接错误不作RED判据。该14例strict结果保留具名历史。随后加入show晚IO前缀/STOPPED/protocol三例，ASan/UBSan17/17通过，见`build/block-service-asan-20261018.log`。首轮新增故障检查2失败是夹具把byte9起4096字节逻辑读取误计成一个物理块，实际跨两块；修正注入位置after3后通过，未迁就夹具改变服务逻辑。
+
+服务随后为RV32移除hosted string.h，改用memory.h与有界32字节名称比较；上述17例ASan日志早于这项最小移植修正，当前源由独立6项FS边界strict ASan/UBSan探针复核通过，完整定向仍待Root当前构建绑定。独立格式探针1005输入/4020分块比较及这6项证据见`build/block-independent-implementation-probes-20261018.log`；只作本轮局部核查，不表示冻结树全验。
+
+CMake已声明共享yan_search_text、yan_blocks_format/yan_blocks及format/service/shell三native测试目标，当前重新配置/编译及实际注册数尚待核实；shell仅compiled stub和8项tests-first准备，未称实现。纯格式角色复用为实际变异harness实施，不冒独立审核。Guest/故障、全量默认、实际变异、Host/RV32总预算、最终全文冻结审核及CI/交付仍待，旧0031统计不冒当前0032验收。
+
+### 0032 集成定向、检测力与资源阶段（2026-10-18，历史阶段）
+
+shell/app已实施，新块上下文静态注入，block族调用公开只读服务；初始化失败使用BLOCK_INIT/应用原因码23，不改旧原因码。CMake定向当前ASan三套件3/3（0.11 s），用例数分别25/17/9，见`build/block-native-current-asan-20261018.log`。Windows/MSVC三native加新增mutation puregate4/4（5.10 s），见`block-windows-native-20261018.log`。旧Guest gate3/3（13.610 s）见`block-old-guest-gate-20261018.log`，只是既有验证入口兼容，不是新Guest功能验收。
+
+新增块实际变异独立组26/26指定suite/owner/assertion检出，baseline与实际负控通过、0存活/0harness（25.901 s），见`build/block-mutation-final-20261018.log`；这是新组定向证据，统一全17实际组尚未执行。BUILD_TESTING OFF且TOOLS/SEMANTIC ON构建yanfs_terminal、yan_run、yan_mkfs、yan_semantic、yan_mcp五目标成功，见`block-off-build-20261018.log`；仅构建成功，不称新健康场景已跑。
+
+`build/block-resources-20261018.log`当前Host/RV32块context为26440/26424B，均<=64KiB；规格所列index/note/shell/relation/block五context合计1645568/1645488B，低于2MiB，该合计不包含程序全部对象或任务栈。生产ELF text108932/data40/bss1735792B。RV32格式/service/shell/app最大单函数帧分别64/192/256/240B，ISR汇编frame80B；这些是各自测量，不是完整调用链或ISR嵌套栈峰值证明。早期Host格式80B单帧与当前RV3264B分别保留范围，不能混算。
+
+两实施/独立角色本轮因账户usage limit中断，Root接手未完部分；原独立第3轮只有中途暂无阻塞消息，没有正式PASS，不新建或反复重试规避额度。前一轮局部源码审核与探针证据保留，不能替代当前集成或最终冻结树审核。新Guest健康/故障/API、全量默认、统一17实际组、最终独立对齐及exact九项仍待；没有远端CI或所有者交付合入批准。上述早期“shell stub/CMake配置待/新增actual未验”保持阶段历史，由本节更新当前进度。
+
+### 0032 当前集成默认回归与Guest范围（2026-10-18）
+
+31份源码/测试/CMake输入快照`build/block-integration-source-freeze-20261018.json`已与当前文件逐项SHA核对一致。Root接手未完成的新Guest脚本和独立Python oracle后，真实生产健康6组通过（5.220 s，`block-guest-development-20261018.log`）：基本/旧关系、跨块及大文本、格式/文本错误、top20/晚坏结构、ASCII反链/完整计数/二进制skip、编辑/重启/mv/cp/重建；通过仅限这些固定夹具，不表示任意笔记性能或全面语法枚举。
+
+RV32 API要求实际导出tohost地址的4字节值1及NOTE_BLOCKS_API_PASS，具名检查码2–36共35项，含真实callback BUSY/STOPPED、wrap/别名/无I/O及summary保持，见`block-api-development-20261018.log`。新Guest gate4/4（15.535 s）另核分类/独立literal oracle/缺输入硬1与外部77；不把puregate计作实际变异组。
+
+`block-fault-development-20261018.log`为43项（18.465 s）：4健康基线、38读I/O/协议/TX注入、1真实链接wrapper BLOCK_INIT启动失败。读失败绑定response_count及致命码/零写盘；show晚流读故障可有前缀但无成功回执；TX检查精确已接受字节前缀，末回执字节postcheck失败可已包含OK，仍致命且无后续读取。IO请求选择只在私有driver副本注入唯一seam，复用既有fail_next，不改production逻辑。
+
+启动wrapper首次遇验收fixture不一致：Python已知最高reason23，C hostdriver仍为22而误归harness；同步C上界23后43项通过，未知24仍harness。此为验收修正，不是产品错误或变异检出，不能写成最终默认失败。共享driver的23更新纳本次输入，私有IO seam不入生产。
+
+完整默认Release114/114（111.66 s）、ASan/UBSan114/114（172.64 s）、Windows70/70（67.44 s），均0失败、0SKIP；日志`build/block-{release,asan,windows}-default-20261018.log`及各自已保存LastTest副本。计数为该配置实际执行组数，不将25/17/9原生用例或6/43场景混作组。新增实际26/26及资源/OFF证据保留上节；统一实际17/17（322.77 s）零失败/零SKIP通过，见`build/block-actual-all-20261018.log`及另存`block-actual-all-LastTest-20261018.log`。其中新块组26个指定suite/owner/assertion及实际负控通过，CTest耗时14.94 s；先前单组25.901 s保留其独立执行范围，不能相加作统一耗时。31输入后验SHA仍全一致。新活动定义17实际/10pure按已生成名单核，现存三份注册JSON分别实得：Release131总/114默认/17实际/10puregate；ASan114总/114默认/0实际/10puregate（mutation OFF）；Windows70总/70默认/0实际/9puregate。文件为`build/block-{release,asan,windows}-registered-20261018.json`，注册查询不算新回归或由一配置推算其它配置。
+
+总审核本轮已核当前源码/API/脚本和具名日志，原中断第3轮由同角色恢复完成，正式集成技术审核PASS见下节；第4轮精确树冻结对齐及唯一机械finding修后复核已正式通过，见本轮记录。全局结构错误/文本资格和原文范围、late IO/输出前缀以及新旧reason边界已逐处核，当前未发现新的可复现production阻塞。程序和测试继续以当前冻结输入为准，exact九审/提交/PR/CI/维护者合入仍待；旧阶段“新Guest/full待”由本节具名结果更新。
+
+### 0032 第3轮恢复完成与注册核对（2026-10-18）
+
+原独立角色在同会话、原预算内恢复被中断的第3主轮，正式报告续节`build/block-independent-implementation-review-20261018.md`确认集成技术审核PASS、无阻塞源码或验证框架finding；31份冻结输入逐项SHA仍一致。原usage中断及当时“无正式PASS”文字保持历史，其当前状态由本节更新，不另算审核轮或把实现者自查当独立审核。
+
+该角色实际自造当前shell/service strict C17+ASan/UBSan探针7/7（包括uint64边界、UTF8/CRLF跨块、TX已发完整OK仍fatal、late IO前缀、双向alias与旧help），并独立执行新增mutation gate9/9、Guest gate4/4通过。探针早期编译/夹具问题保留其报告，不作产品缺陷或额外回归组；这些补充也不取代第4轮冻结树审核。
+
+一次完整机械请求仅D1/D2：原“注册总数无查询”→分别读取Release131/ASan114/Windows70三JSON及各default/actual/pure配置；原“第3轮中断无PASS/独立集成待”→本轮恢复完成PASS。源码、测试、锁定语义、历史测量无变。本节记录第4轮前的状态；当前审核进展见下节，chief九项终审及提交/PR/真实CI/维护者交付合入仍待。
+
+### 0032 第4轮主体对齐与机械修订（2026-10-18）
+
+原独立角色第4轮已完成当前实现、接口、测试证据和全文读者文档核对，完整finding清单仅F4-D1：0032 VERIFY表后导语仍把已记录的完整默认/实际组、耗时与覆盖边界写为待后续记录。现改为指向下方具名阶段记录，保留验证矩阵作为验收要求，不宣称任意组合已穷尽。其余源码、API与证据无新增finding；批准行为、历史测量和原额度中断记录不改。
+
+修订冻结时点，旧45cb树不作最终提交准许，新精确树复核与九项仍待。此待审时点保持历史，现由正式第4轮报告取代：同一独立角色对20ef7267a768d6e7edf4bb68465e4a99de0babb3完成精确对齐PASS，F4-D1关闭、无剩余finding，31工作文件及暂存blob与实测输入一致。独立集成与冻结对齐均已完成，报告为`build/block-independent-final-review-20261018.md`。本次仅同步该审核事实；提交准许由随后精确树九项报告独立给出，实现提交、PR、远端CI和维护者交付合入尚待。
 
 已交付基线：[0031 面向Agent的只读MCP检索工具](specs/0031-mcp-retrieval-tools.md)，项目所有者于2026-10-17明确批准PR #34按merge commit合入main，合并提交a9a1e9c。
 
@@ -347,7 +397,7 @@ YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0
 - `yan_gen` 随机 RV32IM 指令流生成器（给定种子确定输出），以及 5 个手写 Guest 用例。
 - C17 / CMake 构建、Unity 单元测试、CTest 及 GitHub Actions。
 
-详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前本机已验收0031工具/provider配置默认106组、开启实际变异后122组，完整记录见“0031 本机最终验收（2026-10-17）”；0030的102/117组、0029的100/115组、0028的90/104组及其日期化验收保留为历史；0025的55/66组、0024的49/59组、0023的47/57组、0022的43/52组与0020于2026-10-03的32/39组保留为本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；最新已执行结果见上述0031验收；各阶段历史结果见本页「验证」的对应日期记录。
+详细分层、覆盖边界与退出码见 [CPU 验证规格](specs/0011-cpu-validation.md)；该规格的「CTest 汇总」记的是 M1a 阶段的 21 / 22 / 28 / 29 组（已在规格里标注为当时快照）。当前0032注册查询为Release131总/114默认/17实际、ASan114默认（实际开关OFF）、Windows70默认；Linux默认114组及Windows70组、统一17实际组均已通过，最新范围见“0032 当前集成默认回归与Guest范围”；0031默认106/总122及完整记录保留为“0031 本机最终验收（2026-10-17）”历史；0030的102/117组、0029的100/115组、0028的90/104组及其日期化验收保留为历史；0025的55/66组、0024的49/59组、0023的47/57组、0022的43/52组与0020于2026-10-03的32/39组保留为本页历史测量。该规格另记下「外部验证层的测试只在 `YAN_BUILD_TOOLS=ON` 时注册」这条前提；最新已执行结果见上述0032集成记录；各阶段历史结果见本页「验证」的对应日期记录。
 
 ## 验证
 
@@ -499,7 +549,7 @@ Host 变异逐项绑定表中指定的测试断言，无关断言失败负控不
 
 ### 历史测量：M2a
 
-下段保留2026-09-20的原始测量与当时统计说明。其中“本页其它段落若残留旧口径以本段覆盖”仅适用于当时记录，不覆盖后续阶段；当前已执行配置与结果见“0031 本机最终验收（2026-10-17）”，0031规格批准、实现与审查状态见本页“已交付基线：0031”；0032当前计划见页首。
+下段保留2026-09-20的原始测量与当时统计说明。其中“本页其它段落若残留旧口径以本段覆盖”仅适用于当时记录，不覆盖后续阶段；当前已执行配置与结果见“0032 当前集成默认回归与Guest范围”，0032当前实现与待审状态见页首；0031历史规格与交付状态见本页“已交付基线：0031”。
 
 GCC 11.4、CMake 3.22.1 下的 Debug 与 Release 构建注册 **21 组 Unity 套件**（共 **172 个用例**：`uart` 19、`plic` 15、`transport` 14，其余为既有分组；`boot` 由 4 增至 6，新增两条是 0017 的 A1 / A2）。启用 Guest 工具链与 `yan_run` 时默认另有 6 组 Guest 侧测试：`guest_trap_env`、`guest_terminal`、`guest_console`、`guest_golden`、`guest_runtime` 与 `guest_block`，合计 **28 组 CTest**；加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 时为 **33 组**（再注册 `guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`）。**以下数字以本段为准**，本页其它段落若残留旧口径以本段覆盖。**两次独立测量**：总审核角色在全新目录实测默认 **28/28 passed，25.21 s**、`ctest -R mutation` **5/5 passed，281.19 s**；主 Agent 在开关下实测整套 **33/33 passed，317.39 s**（`guest_console_mutation` 45.4 s、`device_mutation` 40.5 s、`guest_runtime_mutation` 48.2 s、`guest_block_mutation` 151.0 s、`guest_m2a_combined_mutation` 3.7 s）——两次测量量级一致，差异来自机器负载。变异检查默认不注册，只为不让慢证据主导默认套件；合并前必须显式跑一次，见 [CONTRIBUTING](../CONTRIBUTING.md) 的「合并前检查清单」与「提交前总审核检查清单」。
 
@@ -561,7 +611,7 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 
 ## 下一步
 
-0029已交付main，历史验收与运行入口保持。0030已交付main，历史验收与运行入口保持。0031实现、I8修后完整复验、原独立角色必要复核与九项总审已完成，已获项目所有者批准并经PR #34合入main（a9a1e9c）。0031供阅读与运行；当前按已锁定0032完成同轮工程澄清复核与exact规格九审，再tests-first实施，交付/验证/合入分别记录，学习理解仍由项目所有者判断。
+0029已交付main，历史验收与运行入口保持。0030已交付main，历史验收与运行入口保持。0031实现、I8修后完整复验、原独立角色必要复核与九项总审已完成，已获项目所有者批准并经PR #34合入main（a9a1e9c）。0031供阅读与运行；0032规格已提交，纯格式/只读服务局部实现与定向验证已完成；新Guest健康/故障/API及全量默认已通过，统一17实际组终局亦已通过；独立第3轮已恢复完成集成技术审核，第4轮精确树冻结对齐及唯一机械finding修后复核已正式通过，当前按规范完成exact九审后提交PR并核对应真实CI，再交维护者审查交付与合入，交付/验证/合入分别记录，学习理解仍由项目所有者判断。
 
 ### 历史推进记录（M1a / M2a）
 

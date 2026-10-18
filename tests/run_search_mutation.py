@@ -43,12 +43,12 @@ RUN_TIMEOUT = 120
 # 0026 term headers and the freestanding memory declarations are needed because
 # os/shell.c now consumes the term facade; os/memory.c itself is not compiled
 # here because the native C library supplies memcpy/memset/memcmp/strlen.
-OS_HEADERS = ["search.h", "search_linear.h", "yanfs.h", "shell.h", "note_relations.h", "note_metadata.h", "platform.h",
+OS_HEADERS = ["search.h", "search_linear.h", "yanfs.h", "shell.h", "note_relations.h", "note_blocks.h", "note_blocks_format.h", "note_metadata.h", "platform.h",
               "task.h", "block.h", "console.h", "editor.h", "line.h",
               "terminal.h", "yanfs_block.h", "memory.h", "search_terms.h", "note_metadata_format.h",
               "search_terms_core.h", "search_terms_index.h",
               "search_terms_linear.h", "search_text.h"]
-OS_SOURCES = ["search.c", "search_linear.c", "yanfs.c", "shell.c", "note_relations.c", "note_metadata.c",
+OS_SOURCES = ["search.c", "search_linear.c", "yanfs.c", "shell.c", "note_relations.c", "note_blocks.c", "note_blocks_format.c", "note_metadata.c",
               "search_terms.c", "note_metadata_format.c", "search_terms_linear.c", "search_terms_core.c",
               "search_terms_index.c", "search_text.c"]
 TEST_FILES = ["test_search.c", "test_shell.c"]
@@ -62,7 +62,7 @@ SUITES = {
         "test": "tests/test_search.c",
     },
     "shell": {
-        "sources": ["tests/test_shell.c", "os/shell.c", "os/note_relations.c", "os/note_metadata.c", "os/search.c",
+        "sources": ["tests/test_shell.c", "os/shell.c", "os/note_relations.c", "os/note_blocks.c", "os/note_blocks_format.c", "os/note_metadata.c", "os/search.c",
                     "os/search_linear.c", "os/search_terms.c", "os/note_metadata_format.c",
                     "os/search_terms_linear.c", "os/search_terms_core.c",
                     "os/search_terms_index.c", "os/search_text.c", "os/yanfs.c"],

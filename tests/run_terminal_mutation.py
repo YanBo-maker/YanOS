@@ -82,7 +82,7 @@ except Exception as error:
 # ------------------------------------------------------------- native suites
 
 NATIVE_SUITES = {
-    "shell": {"sources": ["tests/test_shell.c", "os/shell.c", "os/note_relations.c", "os/note_metadata.c", "os/search.c",
+    "shell": {"sources": ["tests/test_shell.c", "os/shell.c", "os/note_relations.c", "os/note_blocks.c", "os/note_blocks_format.c", "os/note_metadata.c", "os/search.c",
                           "os/search_linear.c", "os/search_terms.c", "os/note_metadata_format.c",
                           "os/search_terms_linear.c", "os/search_terms_core.c",
                           "os/search_terms_index.c", "os/search_text.c", "os/yanfs.c"],
@@ -95,7 +95,7 @@ NATIVE_SUITES = {
 # headers). Missing any is a hard failure (1).
 NATIVE_HEADERS = [
     "tests/test_shell.c", "tests/test_line.c",
-    "os/shell.h", "os/note_relations.h", "os/note_metadata.h", "os/search.h", "os/search_linear.h", "os/yanfs.h",
+    "os/shell.h", "os/note_relations.h", "os/note_blocks.h", "os/note_blocks_format.h", "os/note_metadata.h", "os/search.h", "os/search_linear.h", "os/yanfs.h",
     "os/line.h", "os/platform.h", "os/block.h",
     "os/task.h", "os/console.h", "os/terminal.h", "os/yanfs_block.h",
     "tests/run_yanfs_mutation.py", "os/editor.h",
@@ -107,7 +107,7 @@ NATIVE_HEADERS = [
 PRODUCTION_SOURCES = [
     "apps/yanfs_terminal/main.c", "os/trap_entry.S", "os/task_switch.S",
     "os/task.c", "os/block.c", "os/console.c", "os/yanfs.c",
-    "os/yanfs_block.c", "os/shell.c", "os/note_relations.c", "os/note_metadata.c", "os/search.c", "os/search_linear.c",
+    "os/yanfs_block.c", "os/shell.c", "os/note_relations.c", "os/note_blocks.c", "os/note_blocks_format.c", "os/note_metadata.c", "os/search.c", "os/search_linear.c",
     "os/line.c", "os/terminal.c",
     "os/memory.c", "os/editor.c",
     "os/search_terms.c", "os/note_metadata_format.c", "os/search_terms_core.c", "os/search_terms_linear.c",

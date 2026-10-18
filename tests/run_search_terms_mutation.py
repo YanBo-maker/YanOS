@@ -47,10 +47,10 @@ RUN_TIMEOUT = 240
 # declarations in memory.h are needed by the term index.
 OS_HEADERS = ["yanfs.h", "memory.h", "search.h", "search_linear.h",
               "search_terms.h", "note_metadata_format.h", "search_terms_core.h", "search_terms_linear.h",
-              "search_terms_index.h", "search_text.h", "shell.h", "note_relations.h", "note_metadata.h"]
+              "search_terms_index.h", "search_text.h", "shell.h", "note_relations.h", "note_blocks.h", "note_blocks_format.h", "note_metadata.h"]
 OS_SOURCES = ["yanfs.c", "search.c", "search_linear.c", "search_terms.c", "note_metadata_format.c",
               "search_terms_core.c", "search_terms_linear.c",
-              "search_terms_index.c", "search_text.c", "shell.c", "note_relations.c", "note_metadata.c"]
+              "search_terms_index.c", "search_text.c", "shell.c", "note_relations.c", "note_blocks.c", "note_blocks_format.c", "note_metadata.c"]
 TEST_FILES = ["test_search_terms.c", "test_search_index.c",
               "test_shell_terms.c", "test_yanfs_source_exhaustion.c"]
 REQUIRED_FILES = TEST_FILES + ["run_search_terms_mutation.py"]
@@ -74,7 +74,7 @@ SUITES = {
         "test": "tests/test_search_index.c",
     },
     "shell": {
-        "sources": ["tests/test_shell_terms.c", "os/shell.c", "os/note_relations.c", "os/note_metadata.c", "os/search.c",
+        "sources": ["tests/test_shell_terms.c", "os/shell.c", "os/note_relations.c", "os/note_blocks.c", "os/note_blocks_format.c", "os/note_metadata.c", "os/search.c",
                     "os/search_linear.c", "os/search_terms_index.c"] + TERM_CORE,
         "target": "test_shell_terms",
         "define": None,
