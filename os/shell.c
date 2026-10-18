@@ -2104,6 +2104,142 @@ static YanShellResult run_relation(YanShell *shell, const uint8_t *line,
     return YAN_SHELL_OK;
 }
 
+typedef enum { BLOCK_LIST, BLOCK_SHOW, BLOCK_REFS, BLOCK_BACKLINKS } BlockCommand;
+typedef struct {
+    YanShell *shell;
+    BlockCommand command;
+    Utf8Stream stream;
+    uint32_t line;
+    bool line_open;
+} BlockOutput;
+
+/* Decimal doubling avoids requiring a freestanding 64-bit division helper on
+ * RV32. The full occurrence count must not be narrowed to 32 bits for display. */
+static bool shell_put_decimal64(YanShell *shell, uint64_t value)
+{
+    uint8_t digits[20] = {0};
+    uint32_t hi = (uint32_t)(value >> 32), lo = (uint32_t)value;
+    for (uint32_t bit = 64; bit > 0; --bit) {
+        uint32_t index = bit - 1u;
+        uint32_t carry = index >= 32u ? (hi >> (index - 32u)) & 1u : (lo >> index) & 1u;
+        for (uint32_t i = 20; i > 0; --i) {
+            uint32_t n = digits[i - 1u] * 2u + carry;
+            digits[i - 1u] = (uint8_t)(n % 10u); carry = n / 10u;
+        }
+    }
+    uint32_t start = 0;
+    while (start < 19u && digits[start] == 0u) ++start;
+    for (uint32_t i = start; i < 20u; ++i)
+        if (!shell_putc(shell, (uint8_t)('0' + digits[i]))) return false;
+    return true;
+}
+static bool block_output_row(void *opaque, const YanBlockRow *row)
+{
+    BlockOutput *out = opaque;
+    YanShell *s = out->shell;
+    if (out->command == BLOCK_SHOW) { out->line = row->block.first_line; return true; }
+    if (out->command == BLOCK_LIST) {
+        const YanBlockDecl *b = &row->block;
+        return shell_puts(s, "BLOCK ") && shell_puts(s, row->source) && shell_puts(s, "#") &&
+            shell_puts(s, b->id) && shell_puts(s, " marker=") && shell_put_decimal(s, b->marker_line) &&
+            shell_puts(s, " first=") && shell_put_decimal(s, b->first_line) &&
+            shell_puts(s, " last=") && shell_put_decimal(s, b->last_line) &&
+            shell_puts(s, " bytes=") && shell_put_decimal(s, b->start) && shell_puts(s, ":") &&
+            shell_put_decimal(s, b->end) && shell_puts(s, "\r\n");
+    }
+    const YanBlockReference *r = &row->reference;
+    if (!shell_puts(s, out->command == BLOCK_REFS ? "REF source=" : "BACKLINK source=") ||
+        !shell_puts(s, row->source) || !shell_puts(s, " block=")) return false;
+    if (r->has_source_id) {
+        if (!shell_puts(s, "#") || !shell_puts(s, r->source_id)) return false;
+    } else if (!shell_puts(s, "NONE")) return false;
+    if (!shell_puts(s, " line=") || !shell_put_decimal(s, r->line) ||
+        !shell_puts(s, " bytes=") || !shell_put_decimal(s, r->start) || !shell_puts(s, ":") ||
+        !shell_put_decimal(s, r->end) || !shell_puts(s, " target=") ||
+        !shell_puts(s, r->target.name) || !shell_puts(s, "#") || !shell_puts(s, r->target.id)) return false;
+    if (out->command == BLOCK_REFS &&
+        (!shell_puts(s, " state=") || !shell_puts(s, yan_block_target_name(row->state)))) return false;
+    return shell_puts(s, "\r\n");
+}
+static bool block_output_chunk(void *opaque, uint32_t offset, const uint8_t *bytes, uint32_t length)
+{
+    (void)offset;
+    BlockOutput *out = opaque;
+    for (uint32_t i = 0; i < length; ++i) {
+        uint8_t byte = bytes[i];
+        if (!out->line_open) {
+            if (!shell_put_decimal(out->shell, out->line) || !shell_puts(out->shell, " ")) return false;
+            out->line_open = true;
+        }
+        if (byte == '\n') {
+            if (!cat_flush(out->shell, &out->stream) || !shell_puts(out->shell, "\r\n")) return false;
+            out->line_open = false; ++out->line;
+        } else if (byte != '\r' && !cat_feed(out->shell, &out->stream, byte)) return false;
+    }
+    return true;
+}
+static YanShellResult block_error(YanShell *shell, YanBlockResult result)
+{
+    if (result == YAN_BLOCK_STOPPED) return YAN_SHELL_FATAL;
+    if (!shell_puts(shell, "ERROR ") || !shell_puts(shell, yan_block_result_name(result)) ||
+        !shell_puts(shell, "\r\n")) return YAN_SHELL_FATAL;
+    switch (result) {
+    case YAN_BLOCK_NOT_MOUNTED: case YAN_BLOCK_FAULTED: case YAN_BLOCK_IO:
+    case YAN_BLOCK_PROTOCOL: case YAN_BLOCK_CORRUPT: case YAN_BLOCK_UNSUPPORTED:
+        return YAN_SHELL_FATAL;
+    default: return YAN_SHELL_OK;
+    }
+}
+static YanShellResult run_block(YanShell *shell, const uint8_t *line, uint32_t length, uint32_t position)
+{
+    uint32_t sub, sub_length, arg, arg_length;
+    if (!meta_next_token(line, length, &position, &sub, &sub_length) ||
+        !meta_next_token(line, length, &position, &arg, &arg_length) ||
+        !meta_only_spaces_left(line, length, position)) return emit_status(shell, "ERROR USAGE\r\n");
+    BlockCommand command;
+    if (token_is(line, sub, sub_length, "list")) command = BLOCK_LIST;
+    else if (token_is(line, sub, sub_length, "show")) command = BLOCK_SHOW;
+    else if (token_is(line, sub, sub_length, "refs")) command = BLOCK_REFS;
+    else if (token_is(line, sub, sub_length, "backlinks")) command = BLOCK_BACKLINKS;
+    else return emit_status(shell, "ERROR USAGE\r\n");
+    YanBlockAddress address;
+    if (command == BLOCK_LIST || command == BLOCK_REFS) {
+        if (!yan_note_name_valid(line + arg, arg_length)) return emit_status(shell, "ERROR USAGE\r\n");
+        /* The legacy copy helper deliberately accepts a 32-byte invalid token
+         * into 33 bytes. This grammar already validated the 31-byte maximum. */
+        memcpy(shell->names[0], line + arg, arg_length);
+        shell->names[0][arg_length] = '\0';
+    } else if (yan_block_address_parse(line + arg, arg_length, &address) != YAN_BLOCK_OK) {
+        return emit_status(shell, "ERROR USAGE\r\n");
+    }
+    BlockOutput out = {shell, command, {{0}, 0, 0}, 0, false};
+    YanBlockSummary summary;
+    YanBlockResult result;
+    switch (command) {
+    case BLOCK_LIST:
+        result = yan_blocks_list(shell->blocks, shell->names[0], block_output_row, &out, &summary); break;
+    case BLOCK_REFS:
+        result = yan_blocks_refs(shell->blocks, shell->names[0], block_output_row, &out, &summary); break;
+    case BLOCK_BACKLINKS:
+        result = yan_blocks_backlinks(shell->blocks, &address, block_output_row, &out, &summary); break;
+    case BLOCK_SHOW:
+        result = yan_blocks_show(shell->blocks, &address, block_output_row, block_output_chunk, &out, &summary); break;
+    default: return YAN_SHELL_FATAL;
+    }
+    if (result == YAN_BLOCK_STOPPED) return YAN_SHELL_FATAL;
+    if (out.line_open && (!cat_flush(shell, &out.stream) || !shell_puts(shell, "\r\n"))) return YAN_SHELL_FATAL;
+    if (result != YAN_BLOCK_OK) return block_error(shell, result);
+    const char *verb = command == BLOCK_LIST ? "list" : command == BLOCK_SHOW ? "show" :
+                       command == BLOCK_REFS ? "refs" : "backlinks";
+    if (!shell_puts(shell, "OK block ") || !shell_puts(shell, verb) || !shell_puts(shell, " total=") ||
+        !shell_put_decimal64(shell, summary.total) || !shell_puts(shell, " shown=") ||
+        !shell_put_decimal(shell, summary.shown)) return YAN_SHELL_FATAL;
+    if (command == BLOCK_BACKLINKS &&
+        (!shell_puts(shell, " skipped=") || !shell_put_decimal(shell, summary.skipped) ||
+         !shell_puts(shell, " target=") || !shell_puts(shell, yan_block_target_name(summary.target_state)))) return YAN_SHELL_FATAL;
+    return shell_puts(shell, "\r\n") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
+}
+
 static YanShellResult run_line(YanShell *shell, const uint8_t *line,
                                uint32_t length)
 {
@@ -2132,6 +2268,11 @@ static YanShellResult run_line(YanShell *shell, const uint8_t *line,
         if (shell->relations != NULL && !shell_puts(shell, HELP_RELATIONS)) {
             return YAN_SHELL_FATAL;
         }
+        if (shell->blocks != NULL && !shell_puts(shell,
+            "block list NAME: list named blocks\r\n"
+            "block show NAME#ID: show a named block\r\n"
+            "block refs NAME: list exact body references\r\n"
+            "block backlinks NAME#ID: find exact body references\r\n")) return YAN_SHELL_FATAL;
         return emit_ok(shell, "help") ? YAN_SHELL_OK : YAN_SHELL_FATAL;
     }
     if (token_is(line, command_start, command_length, "ls")) {
@@ -2236,6 +2377,10 @@ static YanShellResult run_line(YanShell *shell, const uint8_t *line,
             links ? RELATION_CMD_LINKS
                   : (backlinks ? RELATION_CMD_BACKLINKS : RELATION_CMD_RELATED);
         return run_relation(shell, line, length, position, relation_command);
+    }
+    if (token_is(line, command_start, command_length, "block")) {
+        if (shell->blocks == NULL) return emit_status(shell, "ERROR UNKNOWN_COMMAND\r\n");
+        return run_block(shell, line, length, position);
     }
     if (token_is(line, command_start, command_length, "exit")) {
         if (!rest_is_spaces(line, length, position)) {
@@ -2435,6 +2580,7 @@ YanShellResult yan_shell_init(YanShell *shell, YanFs *fs, YanSearch *search,
      * and the old query behaviour are unchanged until a caller opts in. */
     shell->metadata = NULL;
     shell->relations = NULL;
+    shell->blocks = NULL;
     shell->output = output;
     shell->initialized = true;
     shell->busy = false;
@@ -2512,6 +2658,9 @@ YanShellResult yan_shell_bind_metadata(YanShell *shell, YanNoteContext *note)
                        sizeof(YanNoteContext))) {
         return YAN_SHELL_INVALID;
     }
+    if (shell->blocks != NULL &&
+        ranges_overlap((uintptr_t)shell->blocks, sizeof *shell->blocks,
+                       note_base, sizeof *note)) return YAN_SHELL_INVALID;
     /* The borrowed source must be the shell's own filesystem, and the service
      * must be initialized and idle. The source state is deliberately left to
      * each command's own service call, which maps it with the note error
@@ -2596,6 +2745,9 @@ YanShellResult yan_shell_bind_relations(YanShell *shell,
                         sizeof(YanRelationContext)))) {
         return YAN_SHELL_INVALID;
     }
+    if (shell->blocks != NULL &&
+        ranges_overlap((uintptr_t)shell->blocks, sizeof *shell->blocks,
+                       relations_base, sizeof *relations)) return YAN_SHELL_INVALID;
     /* The relation field is read only after every span and alias check. The
      * borrowed source must be the shell's own filesystem and the service must
      * be initialized and idle. */
@@ -2609,6 +2761,32 @@ YanShellResult yan_shell_bind_relations(YanShell *shell,
         return YAN_SHELL_INVALID;
     }
     shell->relations = relations;
+    return YAN_SHELL_OK;
+}
+
+YanShellResult yan_shell_bind_blocks(YanShell *shell, YanBlockContext *blocks)
+{
+    if (!shell_span_valid((uintptr_t)shell, sizeof *shell)) return YAN_SHELL_INVALID;
+    if (!shell->initialized) return YAN_SHELL_INVALID;
+    if (shell->busy) return YAN_SHELL_BUSY;
+    if (blocks == NULL) { shell->blocks = NULL; return YAN_SHELL_OK; }
+    if (!shell_span_valid((uintptr_t)blocks, sizeof *blocks)) return YAN_SHELL_INVALID;
+    const void *bases[] = {shell, shell->fs, shell->search, shell->terms,
+        shell->search->backend.context, shell->search->backend.source_context,
+        shell->terms->backend.context, shell->terms->backend.source_context,
+        shell->metadata, shell->relations};
+    const uint64_t sizes[] = {sizeof *shell, sizeof *shell->fs, sizeof *shell->search,
+        sizeof *shell->terms, shell->search->backend.context_size, shell->search->backend.source_size,
+        shell->terms->backend.context_size, shell->terms->backend.source_size,
+        shell->metadata != NULL ? sizeof *shell->metadata : 0u,
+        shell->relations != NULL ? sizeof *shell->relations : 0u};
+    for (uint32_t i = 0; i < sizeof bases / sizeof bases[0]; ++i) {
+        if (!shell_span_valid((uintptr_t)bases[i], sizes[i]) ||
+            ranges_overlap((uintptr_t)bases[i], sizes[i], (uintptr_t)blocks, sizeof *blocks)) return YAN_SHELL_INVALID;
+    }
+    if (!blocks->initialized || blocks->fs != shell->fs) return YAN_SHELL_INVALID;
+    if (blocks->busy) return YAN_SHELL_BUSY;
+    shell->blocks = blocks;
     return YAN_SHELL_OK;
 }
 
@@ -2694,6 +2872,9 @@ YanShellResult yan_shell_execute(YanShell *shell, const uint8_t *line,
                            (uint64_t)length)) {
             return YAN_SHELL_INVALID;
         }
+        if (shell->blocks != NULL &&
+            ranges_overlap((uintptr_t)shell->blocks, sizeof *shell->blocks,
+                           begin, length)) return YAN_SHELL_INVALID;
     }
 
     shell->busy = true;

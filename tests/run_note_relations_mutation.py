@@ -9,7 +9,7 @@ from run_note_metadata_mutation import classify_suites
 from run_yanfs_mutation import classify_run, parse_unity, HarnessError
 
 CORE_SOURCES = ('note_relations.c', 'note_metadata_format.c', 'yanfs.c')
-SHELL_SOURCES = CORE_SOURCES + ('shell.c', 'note_metadata.c', 'search.c', 'search_linear.c',
+SHELL_SOURCES = CORE_SOURCES + ('note_blocks.c', 'note_blocks_format.c', 'shell.c', 'note_metadata.c', 'search.c', 'search_linear.c',
     'search_terms.c', 'search_terms_linear.c', 'search_terms_index.c', 'search_terms_core.c', 'search_text.c')
 REQUIRED = tuple('os/' + name for name in SHELL_SOURCES) + tuple(
     'os/' + name.replace('.c', '.h') for name in SHELL_SOURCES) + (

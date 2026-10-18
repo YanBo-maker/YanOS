@@ -72,11 +72,15 @@ target_compile_options(yan_search PRIVATE ${YAN_WARNINGS})
 # backend and the in-memory index object. The facade is filesystem-independent;
 # the linear and index backends borrow a YanFs, so the library is the one link
 # edge to yan_fs.
+add_library(yan_search_text STATIC os/search_text.c)
+target_include_directories(yan_search_text PUBLIC os)
+target_compile_options(yan_search_text PRIVATE ${YAN_WARNINGS})
+
 add_library(yan_search_terms STATIC os/search_terms.c os/search_terms_linear.c
-                                 os/search_terms_core.c os/search_text.c
+                                 os/search_terms_core.c
                                  os/search_terms_index.c)
 target_include_directories(yan_search_terms PUBLIC os)
-target_link_libraries(yan_search_terms PUBLIC yan_fs)
+target_link_libraries(yan_search_terms PUBLIC yan_fs yan_search_text)
 target_compile_options(yan_search_terms PRIVATE ${YAN_WARNINGS})
 
 # The shell consumes the two unified facades (literal and term) and never
@@ -119,6 +123,18 @@ target_include_directories(yan_relation PUBLIC os)
 target_link_libraries(yan_relation PUBLIC yan_note_format yan_fs)
 target_compile_options(yan_relation PRIVATE ${YAN_WARNINGS})
 target_link_libraries(yan_shell PUBLIC yan_relation)
+
+# 0032: pure streaming syntax and read-only navigation are independent of the
+# shell; the shared UTF-8 library keeps the format target free of filesystem I/O.
+add_library(yan_blocks_format STATIC os/note_blocks_format.c)
+target_include_directories(yan_blocks_format PUBLIC os)
+target_link_libraries(yan_blocks_format PUBLIC yan_note_format yan_search_text)
+target_compile_options(yan_blocks_format PRIVATE ${YAN_WARNINGS})
+add_library(yan_blocks STATIC os/note_blocks.c)
+target_include_directories(yan_blocks PUBLIC os)
+target_link_libraries(yan_blocks PUBLIC yan_blocks_format yan_fs)
+target_compile_options(yan_blocks PRIVATE ${YAN_WARNINGS})
+target_link_libraries(yan_shell PUBLIC yan_blocks)
 
 # 0029 pure Host preprocessing has no model, HTTP or Guest dependency.
 add_library(yan_semantic_text STATIC host/semantic_sha256.c host/semantic_text.c)
@@ -180,6 +196,8 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         "${CMAKE_CURRENT_SOURCE_DIR}/os/note_metadata_format.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/note_metadata.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/note_relations.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/note_blocks_format.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/note_blocks.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms_linear.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms_core.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms_index.c"
@@ -191,7 +209,7 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         list(APPEND _yan_terminal_sources "${CMAKE_CURRENT_SOURCE_DIR}/os/memory.c")
     endif()
     set(_yan_terminal_headers)
-    foreach(_header note_relations note_metadata note_metadata_format block console editor memory line platform search search_linear search_terms search_terms_core search_terms_index search_terms_linear search_text shell task terminal yanfs yanfs_block)
+    foreach(_header note_blocks note_blocks_format note_relations note_metadata note_metadata_format block console editor memory line platform search search_linear search_terms search_terms_core search_terms_index search_terms_linear search_text shell task terminal yanfs yanfs_block)
         list(APPEND _yan_terminal_headers "${CMAKE_CURRENT_SOURCE_DIR}/os/${_header}.h")
     endforeach()
 
@@ -453,6 +471,22 @@ if(BUILD_TESTING)
     set_tests_properties(note_metadata_format PROPERTIES TIMEOUT 30)
 
     add_executable(test_note_relations tests/test_note_relations.c)
+
+    add_executable(test_note_blocks_format tests/test_note_blocks_format.c)
+    target_link_libraries(test_note_blocks_format PRIVATE yan_blocks_format unity::framework)
+    target_compile_options(test_note_blocks_format PRIVATE ${YAN_WARNINGS})
+    add_test(NAME note_blocks_format COMMAND test_note_blocks_format)
+    set_tests_properties(note_blocks_format PROPERTIES TIMEOUT 30)
+    add_executable(test_note_blocks tests/test_note_blocks.c)
+    target_link_libraries(test_note_blocks PRIVATE yan_blocks unity::framework)
+    target_compile_options(test_note_blocks PRIVATE ${YAN_WARNINGS})
+    add_test(NAME note_blocks COMMAND test_note_blocks)
+    set_tests_properties(note_blocks PROPERTIES TIMEOUT 60)
+    add_executable(test_shell_blocks tests/test_shell_blocks.c)
+    target_link_libraries(test_shell_blocks PRIVATE yan_shell unity::framework)
+    target_compile_options(test_shell_blocks PRIVATE ${YAN_WARNINGS})
+    add_test(NAME shell_blocks COMMAND test_shell_blocks)
+    set_tests_properties(shell_blocks PROPERTIES TIMEOUT 60)
     target_link_libraries(test_note_relations PRIVATE yan_relation unity::framework)
     target_compile_options(test_note_relations PRIVATE ${YAN_WARNINGS})
     add_test(NAME note_relations COMMAND test_note_relations)
@@ -636,6 +670,14 @@ if(BUILD_TESTING)
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_relations_mutation_gate.py")
         set_tests_properties(note_relations_mutation_gate PROPERTIES TIMEOUT 30)
+        add_test(NAME note_blocks_guest_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_blocks_guest_gate.py")
+        set_tests_properties(note_blocks_guest_gate PROPERTIES TIMEOUT 180)
+        add_test(NAME note_blocks_mutation_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_blocks_mutation_gate.py")
+        set_tests_properties(note_blocks_mutation_gate PROPERTIES TIMEOUT 30)
         add_test(NAME note_metadata_guest_gate
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_metadata_guest_gate.py")
@@ -688,6 +730,15 @@ if(BUILD_TESTING)
                             --mkfs "$<TARGET_FILE:yan_mkfs>"
                             --guest "${YAN_TERMINAL_ELF}")
                 set_tests_properties(guest_note_relations PROPERTIES TIMEOUT 600)
+                add_test(NAME guest_note_blocks
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_note_blocks.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-note-blocks"
+                            --run "$<TARGET_FILE:yan_run>"
+                            --mkfs "$<TARGET_FILE:yan_mkfs>"
+                            --guest "${YAN_TERMINAL_ELF}")
+                set_tests_properties(guest_note_blocks PROPERTIES TIMEOUT 600)
             endif()
             if(TARGET yanfs_terminal)
                 set(_yan_search_fault_args)
@@ -738,6 +789,16 @@ if(BUILD_TESTING)
                             --guest "${YAN_TERMINAL_ELF}"
                             ${_yan_search_fault_args})
                 set_tests_properties(guest_note_relations_faults PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+                add_test(NAME guest_note_blocks_faults
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_note_blocks_faults.py"
+                            --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                            --work "${CMAKE_BINARY_DIR}/guest-note-blocks-faults"
+                            --cc "${CMAKE_C_COMPILER}"
+                            --gcc "${YAN_RISCV_GCC}"
+                            --guest "${YAN_TERMINAL_ELF}"
+                            ${_yan_search_fault_args})
+                set_tests_properties(guest_note_blocks_faults PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
             endif()
             if(TARGET yanfs_terminal AND TARGET yan_mkfs AND TARGET yan_run_disk_close_fault)
                 add_test(NAME guest_terminal_files
@@ -963,6 +1024,14 @@ if(BUILD_TESTING)
                     --run "$<TARGET_FILE:yan_run>"
                     --work "${CMAKE_BINARY_DIR}/note-relations-api")
         set_tests_properties(guest_note_relations_api PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+        add_test(NAME guest_note_blocks_api
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_note_blocks_api.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --gcc "${YAN_RISCV_GCC}"
+                    --run "$<TARGET_FILE:yan_run>"
+                    --work "${CMAKE_BINARY_DIR}/note-blocks-api")
+        set_tests_properties(guest_note_blocks_api PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
     endif()
 
     # The console needs the UART terminal backend, which lives on the Host; the
@@ -1145,6 +1214,14 @@ if(BUILD_TESTING)
                     --unity "${unity_SOURCE_DIR}"
                     --work "${YAN_MUTATION_WORK_ROOT}/note-relations")
         set_tests_properties(note_relations_mutation PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 240)
+        add_test(NAME note_blocks_mutation
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_note_blocks_mutation.py"
+                    --repo "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --cc "${CMAKE_C_COMPILER}"
+                    --unity "${unity_SOURCE_DIR}"
+                    --work "${YAN_MUTATION_WORK_ROOT}/note-blocks")
+        set_tests_properties(note_blocks_mutation PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
         add_test(NAME persistent_block_mutation
             COMMAND "${Python3_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_persistent_mutation.py"

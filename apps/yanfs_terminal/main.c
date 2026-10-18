@@ -11,6 +11,7 @@
  * and `index status|clear` front ends, the 0027 `meta` family plus the
  * `search tag:TAG ...` operator after the metadata binding below, and the 0028
  * `links`, `backlinks` and `related` commands after the relation binding.
+ * 0032 adds the optional `block list|show|refs|backlinks` service binding.
  *
  * Layout:
  *   main          runs on the boot stack from os/trap_entry.S, configures the
@@ -41,8 +42,9 @@
  * terminal close. Every other end writes 0x71000000 | reason, so a host can
  * tell an application failure from the runtime's panic codes (0x80000000) and
  * the filesystem corpus' 0x60000000. A relation service initialization or
- * binding failure uses reason 22 (token RELATION_INIT) instead of the shared
- * SHELL_INIT path. The exact output lines are listed in the
+ * binding failure uses reason 22 (token RELATION_INIT); block service
+ * initialization or binding uses reason 23 (token BLOCK_INIT), rather than
+ * the shared SHELL_INIT path. The exact output lines are listed in the
  * delivery report; a failure prints "ERROR <token>\r\n" and the mount failure
  * prints the filesystem result's own name.
  *
@@ -60,6 +62,7 @@
 #include "line.h"
 #include "note_metadata.h"
 #include "note_relations.h"
+#include "note_blocks.h"
 #include "platform.h"
 #include "search.h"
 #include "search_linear.h"
@@ -99,6 +102,7 @@ extern volatile uint32_t tohost;
 #define APP_REASON_EDITOR_INVALID 20u
 #define APP_REASON_EDITOR_BUSY 21u
 #define APP_REASON_RELATION_INIT 22u
+#define APP_REASON_BLOCK_INIT 23u
 
 /* ---------------------------------------------------------- static storage */
 
@@ -125,6 +129,8 @@ static YanNoteContext note_context;
  * 63-row table, so it is static for the whole session exactly like the note
  * service above. */
 static YanRelationContext relation_context;
+/* 0032 bounded workspace; no whole-library body or graph cache. */
+static YanBlockContext block_context;
 
 /* --------------------------------------------------------------- reporting */
 
@@ -417,6 +423,10 @@ _Noreturn static void app_session(void)
     }
     if (yan_shell_bind_relations(&shell, &relation_context) != YAN_SHELL_OK) {
         app_fail(APP_REASON_RELATION_INIT, "RELATION_INIT");
+    }
+    if (yan_blocks_init(&block_context, &fs) != YAN_BLOCK_OK ||
+        yan_shell_bind_blocks(&shell, &block_context) != YAN_SHELL_OK) {
+        app_fail(APP_REASON_BLOCK_INIT, "BLOCK_INIT");
     }
     if (yan_editor_init(&editor, &fs, output) != YAN_EDITOR_OK) {
         app_fail(APP_REASON_EDITOR_INIT, "EDITOR_INIT");

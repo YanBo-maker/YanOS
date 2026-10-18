@@ -15,7 +15,7 @@ REQUIRED = ("os/note_metadata_format.c", "os/note_metadata_format.h",
             "os/search_terms_core.c", "os/search_terms_core.h", "os/search_text.c", "os/search_text.h",
             "tests/test_note_metadata.c", "tests/test_note_metadata_faults.c",
             "tests/test_search_metadata.c", "tests/test_shell_metadata.c",
-            "os/shell.c", "os/note_relations.c", "os/shell.h", "os/note_relations.h", "os/search.c", "os/search.h",
+            "os/shell.c", "os/note_relations.c", "os/note_blocks.c", "os/note_blocks_format.c", "os/shell.h", "os/note_relations.h", "os/note_blocks.h", "os/note_blocks_format.h", "os/search.c", "os/search.h",
             "os/search_linear.c", "os/search_linear.h")
 SUITE = "format"
 # Exact suite / Unity owner / assertion; a failure elsewhere is insufficient.
@@ -87,7 +87,7 @@ def main():
         "service": ("test_note_metadata.c", ["note_metadata_format.c", "note_metadata.c", "yanfs.c"]),
         "fault": ("test_note_metadata_faults.c", ["note_metadata_format.c", "note_metadata.c", "yanfs.c"]),
         "filter": ("test_search_metadata.c", ["note_metadata_format.c", "yanfs.c", "search_terms.c", "search_terms_linear.c", "search_terms_index.c", "search_terms_core.c", "search_text.c"]),
-        "shell": ("test_shell_metadata.c", ["shell.c", "note_relations.c", "note_metadata.c", "note_metadata_format.c", "yanfs.c", "search.c", "search_linear.c", "search_terms.c", "search_terms_linear.c", "search_terms_index.c", "search_terms_core.c", "search_text.c"]),
+        "shell": ("test_shell_metadata.c", ["shell.c", "note_relations.c", "note_blocks.c", "note_blocks_format.c", "note_metadata.c", "note_metadata_format.c", "yanfs.c", "search.c", "search_linear.c", "search_terms.c", "search_terms_linear.c", "search_terms_index.c", "search_terms_core.c", "search_text.c"]),
     }
     def run_variant(name, old=None, new=None, suite="format", changed="note_metadata_format.c"):
         sources = []

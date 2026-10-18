@@ -32,6 +32,8 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [面向Agent的MCP检索入口](docs/specs/0031-mcp-retrieval-tools.md)已实现Linux/WSL只读服务，Agent可发现和调用`yanos_search`与`yanos_index_status`，复用0030完整原文与出处身份；回答由调用方生成。既有本机回归与检测力验证通过后发现继承信号状态问题，现已补齐初始化并重验官方SDK与固定语料；修后完整回归、扩充变异、原独立角色必要复核与精确树九项总审已通过。功能提交`4452e11`已建立[PR #34](https://github.com/YanBo-maker/YanOS/pull/34)，对应功能head的三项远端CI通过；项目所有者于2026-10-17明确批准，经PR #34按merge commit合入main（`a9a1e9c`），阶段历史保留；学习理解仍由项目所有者判断。
 
+[具名块与精确正文引用](docs/specs/0032-block-references.md)整体方案已于2026-10-17获批准，工程规格于2026-10-18锁定并提交`2f1d07c`。纯格式、只读FS服务及shell/app接入已编写，原生定向和新增变异组通过；新Guest健康/故障/API及Linux/Windows完整默认回归已通过；统一17实际组亦已通过，独立第3轮已恢复完成集成技术审核，第4轮精确树冻结对齐及F4-D1修后复核已通过，精确树九项总审通过；功能提交`11b0c247`已建立[PR #36](https://github.com/YanBo-maker/YanOS/pull/36)，对应功能head三项远端默认CI通过，维护者交付与合入仍待批准，尚未在main发布。能力采用文件内显式ID定位正文块、观察精确引用与出现位置反链；改名会断旧地址，不自动修链，旧整文件关系和Host/MCP schema保持。
+
 S/U 模式、分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
 
 ## 构建与测试
@@ -95,6 +97,26 @@ exit
 编辑时提示符为 `edit> `。`a`追加LF行，`r N TEXT`替换第N行并保留原行终止符，`d N`删除一行；`p`只显示内存稿。`w`一次保存并返回shell，`q`取消且不写盘。草稿最多16384字节，命令行最多1023字节；容量或输入错误保留原稿。仅载入合法UTF-8文本，允许已有TAB和LF/CRLF，二进制仍用cat查看。公开接口见 [编辑核心](os/editor.h)。
 
 回到shell后可用 `mv OLD NEW` 改名、`cp SRC DEST` 复制。mv源存在且新旧名称相同时成功而不写盘，cp同名报EXISTS；已有目标均不会被覆盖。复制需要新的连续空闲extent，目录满或碎片可能使其失败。编辑态须先w成功或q退出，才能执行两命令。
+
+0032任务分支已实施以下只读块导航，具名默认回归与统一实际变异已通过，独立第3轮集成技术审核已完成，第4轮精确树冻结对齐已通过，精确树九项总审与功能提交、PR建立均已完成，功能head远端默认CI通过，仍待维护者交付与合入审查。用`edit irq.txt`新建正文，保存后块地址只在该文件内随编辑稳定：
+
+```text
+@block irq-entry
+设备通过中断控制器通知处理器。
+@block irq-handler
+处理器进入中断处理程序。
+```
+
+另用`edit notes.txt`保存`见 [[irq.txt#irq-entry]]。`，然后在SHELL模式运行：
+
+```text
+block list irq.txt
+block show irq.txt#irq-entry
+block refs notes.txt
+block backlinks irq.txt#irq-entry
+```
+
+list按声明顺序显示ID、物理行和半开字节范围；show按物理行号显示完整块，refs/backlinks显示前20处引用并统计全部出现，自引用和重复出现均计。未命名区域的引用也保留；缺文件或缺块明确显示断链，坏头/坏块不是断链。每文件最多64个不同ID，大文本查询不受编辑器16KiB保存容量限制。改名会断旧地址，删除后同名同ID重建会重新绑定，复制不会改写显式引用；原`links/backlinks/related`仍只看元数据头。接口见[块服务](os/note_blocks.h)，语法与错误边界见[0032](docs/specs/0032-block-references.md)；Host/MCP暂不扩schema。
 
 保存后可用 `grep 修订` 或 `grep "第二行 修订"` 查询字面字节子串。结果按目录槽和行号排列，以 `FILE:LINE:CONTENT` 显示完整匹配行，同一行只显示一次；零匹配仍输出 `OK grep`。LF/CRLF 分行，裸 CR 保留为内容。含 NUL 的文件整文件跳过，检索不写镜像；编辑态须先保存或取消，才能执行 grep。长行不受 16KiB 草稿容量限制。接口见 [Search](os/search.h) 与 [线性 backend](os/search_linear.h)。
 
@@ -215,7 +237,7 @@ asyncio.run(main())
 
 Agent/harness取得完整原文、出处和四身份后自行回答；引用存在不证明答案内容真实。官方SDK是显式集成验收依赖，不是生产C工具或默认核心构建依赖。当前本机全量及真实模型验收进度见[STATUS](docs/STATUS.md)，不由上述用法示例推导已完成覆盖。
 
-变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 在Linux工具/provider开启配置可注册十六组：`mcp_mutation`、`semantic_mutation`、`note_relations_mutation`、`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `mcp_mutation_gate`、`semantic_mutation_gate`、`note_relations_mutation_gate`、`note_metadata_mutation_gate`、`search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
+变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 在Linux工具/provider开启配置可注册十七组（0032统一执行结果另见STATUS）：`note_blocks_mutation`、`mcp_mutation`、`semantic_mutation`、`note_relations_mutation`、`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `note_blocks_mutation_gate`、`mcp_mutation_gate`、`semantic_mutation_gate`、`note_relations_mutation_gate`、`note_metadata_mutation_gate`、`search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
 
 `yan_run` 的默认执行路径由 `guest_golden` 用基准工件逐字节守住：改动默认行为会让它失败，先读差异再决定是否有意为之。生成与重生成见 [`tests/guest/golden/README.md`](tests/guest/golden/README.md)。
 
@@ -254,7 +276,7 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 
 ## 开发
 
-参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)、[控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)、[块请求协议规格](docs/specs/0018-block-protocol.md)、[协作式运行时规格](docs/specs/0019-cooperative-runtime.md)、[持久化块镜像规格](docs/specs/0020-persistent-block-image.md)、[YanFS 规格](docs/specs/0021-yanfs.md) 、[终端文件操作规格](docs/specs/0022-terminal-file-operations.md) 、[多行文本编辑规格](docs/specs/0023-multiline-text-editor.md) 、[重命名与复制规格](docs/specs/0024-file-rename-copy.md) 、[知识检索规格](docs/specs/0025-knowledge-search.md) 、[词项搜索与索引规格](docs/specs/0026-term-search-index.md) 、[笔记元数据规格](docs/specs/0027-note-metadata.md) 、[知识关系导航规格](docs/specs/0028-knowledge-relations.md) 、[Host语义检索规格](docs/specs/0029-host-semantic-search.md) 、[检索上下文包规格](docs/specs/0030-retrieval-context-json.md) 和 [MCP检索工具规格](docs/specs/0031-mcp-retrieval-tools.md)。
+参阅 [开发准则](CONTRIBUTING.md)、[阶段 0 规格](docs/specs/0003-machine-bus-ram.md)、[CPU 状态与取指规格](docs/specs/0004-cpu-state-fetch.md)、[ADDI 单步执行规格](docs/specs/0005-addi-step.md)、[整数计算规格](docs/specs/0006-integer-alu.md)、[控制转移规格](docs/specs/0007-control-flow.md)、[Load / Store 规格](docs/specs/0008-load-store.md)、[Guest 异常规格](docs/specs/0009-guest-traps.md)、[M 扩展规格](docs/specs/0010-m-extension.md)、[CPU 验证规格](docs/specs/0011-cpu-validation.md)、[机器模式中断规格](docs/specs/0012-machine-interrupts.md)、[Guest 启动与统一 trap 环境规格](docs/specs/0013-guest-trap-environment.md)、[Host 传输通道规格](docs/specs/0014-host-transport-channel.md)、[UART 字符设备规格](docs/specs/0015-uart-device.md)、[PLIC 网关与设备中断线规格](docs/specs/0016-plic-gateway-and-irq-lines.md)、[控制台与 `os/` 层规格](docs/specs/0017-console-and-os-layout.md)、[块请求协议规格](docs/specs/0018-block-protocol.md)、[协作式运行时规格](docs/specs/0019-cooperative-runtime.md)、[持久化块镜像规格](docs/specs/0020-persistent-block-image.md)、[YanFS 规格](docs/specs/0021-yanfs.md) 、[终端文件操作规格](docs/specs/0022-terminal-file-operations.md) 、[多行文本编辑规格](docs/specs/0023-multiline-text-editor.md) 、[重命名与复制规格](docs/specs/0024-file-rename-copy.md) 、[知识检索规格](docs/specs/0025-knowledge-search.md) 、[词项搜索与索引规格](docs/specs/0026-term-search-index.md) 、[笔记元数据规格](docs/specs/0027-note-metadata.md) 、[知识关系导航规格](docs/specs/0028-knowledge-relations.md) 、[Host语义检索规格](docs/specs/0029-host-semantic-search.md) 、[检索上下文包规格](docs/specs/0030-retrieval-context-json.md)、[MCP检索工具规格](docs/specs/0031-mcp-retrieval-tools.md) 和 [具名块与正文引用规格](docs/specs/0032-block-references.md)。
 
 ## 许可证
 

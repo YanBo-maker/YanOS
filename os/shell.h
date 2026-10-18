@@ -3,6 +3,7 @@
 
 #include "note_metadata.h"
 #include "note_relations.h"
+#include "note_blocks.h"
 #include "search.h"
 #include "search_terms.h"
 #include "yanfs.h"
@@ -25,6 +26,8 @@
  * 0028 adds an optional relation binding behind yan_shell_bind_relations; the
  * relation service itself is the independent os/note_relations.h object, so the
  * shell never walks the filesystem or ranks candidates by itself.
+ * 0032 adds the optional block navigation binding over os/note_blocks.h;
+ * parsing file bodies and resolving addresses remain in that service.
  *
  * The layer performs no Host I/O of its own. Every produced byte goes through
  * the borrowed YanShellOutput callback; every file operation goes through a
@@ -91,17 +94,20 @@ typedef struct {
  * 0027 adds an optional metadata binding and its long-lived scratch. The
  * scratch is inside the shell so no command ever builds a large object on the
  * stack: one parsed info, one borrowed tag selection and the 1023-byte keyword
- * window the tag-stripped query is assembled into. `metadata` and `relations`
+ * window the tag-stripped query is assembled into. `metadata`, `relations`
+ * and `blocks`
  * stay NULL after the original yan_shell_init, so an unbound shell keeps
  * exactly the 0022-0026 behaviour and never grows the new commands by accident.
  * 0028 adds the optional relation binding; its long-lived relation context
- * lives in the caller's os/note_relations.h object rather than in the shell. */
+ * lives in the caller's os/note_relations.h object rather than in the shell.
+ * The 0032 block context likewise lives in the caller's os/note_blocks.h object. */
 typedef struct {
     YanFs *fs;
     YanSearch *search;
     YanSearchTerms *terms;
     YanNoteContext *metadata;
     YanRelationContext *relations;
+    YanBlockContext *blocks;
     YanShellOutput output;
     bool initialized;
     bool busy;
@@ -172,6 +178,11 @@ YanShellResult yan_shell_bind_metadata(YanShell *, YanNoteContext *note);
  * return YAN_SHELL_INVALID, while a busy relation context returns
  * YAN_SHELL_BUSY. */
 YanShellResult yan_shell_bind_relations(YanShell *, YanRelationContext *);
+
+/* Optional 0032 binding. Same filesystem and protected-span lifetime rules as
+ * the other bindings; NULL unbinds, BUSY precedes all bind parameters. The
+ * unbound shell keeps its previous command set and help byte-for-byte. */
+YanShellResult yan_shell_bind_blocks(YanShell *, YanBlockContext *);
 
 /* Runs one net line, already stripped of CR/LF by the caller's line reader.
  *
