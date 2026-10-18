@@ -64,7 +64,7 @@ ISA 行为遵循 Spec → Test → Implementation：先写用例并确认预期�
 3. 文档自洽核对：由总审核角色核对状态行、规格索引、计数与链接。
 4. **新增或改动被忽略扩展名的工件时，确认它真的能进提交**：判据是 `git add --dry-run <路径>` 是否列出该文件，**不是** `git check-ignore` 的返回码——命中取反规则时它也返回 0。仓库已经踩过一次：golden 基准的 `.jsonl` / `.hex` 被"验证产物不提交"的规则吃掉，基准进不了仓库，测试会在别的机器上静默 SKIP。
 
-0032当前阶段（2026-10-18）：当前生成的CTest定义含17实际组、10默认mutation puregate，10个puregate已随默认回归执行；完整默认Linux Release114/114（111.66 s）、ASan/UBSan114/114（172.64 s）、Windows70/70（67.44 s），0失败、0SKIP。新增块26项实际缺陷专项通过，统一17/17（322.77 s）零失败/零SKIP通过，指定suite/owner/assertion与负控保留；已保存注册查询分别为Release131总/114默认/17实际/10puregate、ASan114总/114默认/0实际/10puregate（mutation OFF）、Windows70总/70默认/0实际/9puregate；查询不作新回归。独立第3轮恢复完成集成技术审核，第4轮精确树冻结对齐及F4-D1修后复核已通过，9b59954精确树九项总审已通过，功能11b0c247已提交并建立PR #36，对应功能head三项远端默认CI通过；维护者交付合入仍待，配置范围与当前状态详见[STATUS](docs/STATUS.md)，旧0031及更早结果保留具名历史。
+0032当前阶段（2026-10-18）：当前生成的CTest定义含17实际组、10默认mutation puregate，10个puregate已随默认回归执行；完整默认Linux Release114/114（111.66 s）、ASan/UBSan114/114（172.64 s）、Windows70/70（67.44 s），0失败、0SKIP。新增块26项实际缺陷专项通过，统一17/17（322.77 s）零失败/零SKIP通过，指定suite/owner/assertion与负控保留；已保存注册查询分别为Release131总/114默认/17实际/10puregate、ASan114总/114默认/0实际/10puregate（mutation OFF）、Windows70总/70默认/0实际/9puregate；查询不作新回归。独立第3轮恢复完成集成技术审核，第4轮精确树冻结对齐及F4-D1修后复核已通过，9b59954精确树九项总审已通过，功能11b0c247已提交并建立PR #36，对应功能head三项远端默认CI通过；项目所有者已批准PR #36合入main（d8804be），最终head b58432b三项远端默认CI亦已通过，配置范围与当前状态详见[STATUS](docs/STATUS.md)，旧0031及更早结果保留具名历史。
 
 0031 I8修后当前本机配置（2026-10-17）：注册保持106默认/122总、16实际组/9puregate；完整Release106/106（83.83 s）、ASan/UBSan106/106（126.47 s）、统一实际16/16（285.08 s，-j3）通过，0失败、0SKIP。MCP15个指定suite/owner/assertion缺陷及负控全部通过；Windows编译输入未变，旧65/65（45.68 s）仅保留其配置范围。新生产SDK/真实模型复验另列；独立审核、PR/CI与维护者合入状态见[STATUS](docs/STATUS.md)。
 
