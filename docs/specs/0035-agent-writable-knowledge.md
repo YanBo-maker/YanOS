@@ -47,12 +47,12 @@
 ## 需求与验收
 
 ### 0035-R1：写工具默认不可见
-当 `yan_mcp` 启动时没有 `--allow-write`，除 `serverInfo.version` 外，`tools/list` 和所有工具调用的行为与 0033 逐字节相同；调用写工具名返回与未知工具相同的结果。
+当 `yan_mcp` 启动时没有 `--allow-write`，除 `serverInfo.version`（无论是否开启写入都为 `0035`）外，`tools/list` 和所有工具调用的行为与 0033 逐字节相同；调用写工具名返回与未知工具相同的结果。
 - 0035-R1-AC1：Given 不带 `--allow-write` 启动，When `tools/list`，Then 输出与 0033 的六工具列表逐字节相同。
 - 0035-R1-AC2：Given 同上，When 调用 `yanos_note_create`，Then 返回值与调用一个不存在的工具名相同，镜像 SHA-256 不变。
 
 ### 0035-R2：开启后增加两个写工具，注解如实
-当带 `--allow-write` 启动时，`tools/list` 在原六个工具之后追加 `yanos_note_create`、`yanos_note_replace`。两者的注解都是 `readOnlyHint:false`、`openWorldHint:false`；replace 另带 `destructiveHint:true`、`idempotentHint:true`；create 带 `destructiveHint:false`。原六个工具不变。`serverInfo.version` 改为 `0035`。
+当带 `--allow-write` 启动时，`tools/list` 在原六个工具之后追加 `yanos_note_create`、`yanos_note_replace`。两者的注解都是 `readOnlyHint:false`、`openWorldHint:false`；replace 另带 `destructiveHint:true`、`idempotentHint:true`；create 带 `destructiveHint:false`。原六个工具不变。（`serverInfo.version` 无论是否开启写入都为 `0035`，见 R1。）
 - 0035-R2-AC1：Given 带 `--allow-write` 启动，When 用官方 SDK 列工具，Then 依次为原六个加两个新工具，注解与上述一致。
 
 ### 0035-R3：新建笔记
@@ -125,12 +125,12 @@ name 沿用 YanFS 名称规则；text 必须满足 0032 的文本资格，长度
 - 0035-R10-AC5：Given 不合格的输入（同 0035-R7-AC1），When `dry_run:true`，Then 返回与提交相同的 INVALID，不打开镜像。
 
 ### 0035-R11：两个镜像，两个实例
-学习镜像和普通笔记镜像各由一个 `yan_mcp` 进程服务，在 MCP 客户端里配置成两个 server。每个进程仍然只接受一个 `--image`，所有工具都作用在这一个镜像上；锁文件（`realpath(image).lock`）和库身份都只属于这个镜像，因此天然独立。`yan_mcp` 的启动参数、工具名和参数都不变。学习实例照 0033 的规则也必须给出 index/model/runner 三个路径（可以指向不存在的文件，0033 的块工具不打开它们）；在学习实例上调用 `yanos_search` 会得到它现有的「索引缺失」结果。
+学习镜像和普通笔记镜像各由一个 `yan_mcp` 进程服务，在 MCP 客户端里配置成两个 server。每个进程仍然只接受一个 `--disk-image`，所有工具都作用在这一个镜像上；锁文件（`realpath(image).lock`）和库身份都只属于这个镜像，因此天然独立。`yan_mcp` 的启动参数、工具名和参数都不变。学习实例照 0033 的规则也必须给出 index/model/runner 三个路径（可以指向不存在的文件，0033 的块工具不打开它们）；在学习实例上调用 `yanos_search` 会得到它现有的「索引缺失」结果。
 
 选「两个实例」、不在工具参数里加库枚举的理由：0033 的身份、锁、错误、启动参数都是按「一个进程一个镜像」设计的，开两个进程就直接得到独立的锁和身份，不改任何协议和 schema，0033 的只读工具也自然兼容。加枚举则要给六个旧工具加参数（改 schema、改兼容测试），还要在一个进程里管理两套挂载状态和锁，换来的只是客户端少配一个 server。
 - 0035-R11-AC1：Given 两个实例分别服务 `notes.img` 和 `learning.img`，When 另一进程持有 `learning.img.lock` 的排他锁，Then 普通笔记实例的提交照常成功，学习实例的提交返回 BUSY；反过来持有 `notes.img.lock` 时，学习实例照常成功，普通笔记实例返回 BUSY。
 - 0035-R11-AC2：Given 两个实例都空闲（没有任何进程持锁），When 在学习实例上提交一次写入，Then 普通笔记实例上 0033 计算的 `source_sha256` 和 `notes.img` 的 SHA-256 都不变；反过来也一样。
-- 0035-R11-AC3：Given 两个实例以 `--image` 指向同一个文件（`realpath` 相同），Then 两者共用同一把锁，行为退回单镜像情形，不额外报错（本规格不防这种误配，见假设）。
+- 0035-R11-AC3：Given 两个实例以 `--disk-image` 指向同一个文件（`realpath` 相同），Then 两者共用同一把锁，行为退回单镜像情形，不额外报错（本规格不防这种误配，见假设）。
 - 0035-R11-AC4：Given 学习实例启动时 index/model/runner 三个路径都指向不存在的文件，Then 启动成功；块工具和写工具正常工作；`yanos_search` 返回 0033 现有的索引缺失结果。
 
 ### 0035-R12：只读工具对两个镜像的兼容
@@ -160,7 +160,7 @@ name 沿用 YanFS 名称规则；text 必须满足 0032 的文本资格，长度
 
 ## 假设
 
-- [假设] 两个实例的 `--image` 指向不同的文件由使用者配置保证；指向同一文件时退回单镜像行为（0035-R11-AC3），不专门检测。
+- [假设] 两个实例的 `--disk-image` 指向不同的文件由使用者配置保证；指向同一文件时退回单镜像行为（0035-R11-AC3），不专门检测。
 - [假设] 写这个镜像的只有 `yan_run --disk-image` 和 MCP 写工具两个入口；`yan_mkfs` 只新建镜像，不在锁的范围内。不处理硬链接或多路径别名指向同一镜像的情况。
 - [假设] 实际使用的镜像在 MiB 量级以下，整份复制的代价可以忽略；不设镜像大小上限。
 - [假设] 整库级身份带来的 STALE 频率可以接受：持锁期间只有一个写者，只有闫博在两次 Agent 调用之间改过库，才会出现 STALE。
@@ -177,3 +177,11 @@ name 沿用 YanFS 名称规则；text 必须满足 0032 的文本资格，长度
 ## 开放问题
 
 无。
+
+## 实施澄清（develop-gpt，2026-10-20，回应 develop-deepseek 的探查）
+- 启动参数沿用现有的 `--disk-image`。spec 原文里的 `--image` 已全部改成 `--disk-image`。
+- `serverInfo.version` 不论是否带 `--allow-write`，一律为 `0035`。
+- R8-AC2 的 Guest 读回用现有的 guest_* ctest 驱动方式，随 0034 PR-1 已启用的 Guest CI 一起跑。
+- 两个镜像实际放在哪个目录，属于部署配置，不在本 spec 范围。测试用临时目录；README 给出示例路径，并注明镜像不能放在同一个文件上。
+- 本 spec 链接了 `../decisions/0001-roadmap-A-D-B.md`，这个文件随 0034 PR-2 一起加入。如果实现 PR 比 PR-2 先合入，就把这处链接改成纯文本。
+- 拆成两个 PR，不再按 R 的顺序逐条提交：PR-A 是 Host 侧模块，覆盖 R5–R7，不挂到 MCP 上；PR-B 是 MCP 接入，覆盖 R1–R4、R8–R12，以及 R5-AC1、R5-AC2。每个 PR 内部的提交仍然要能追溯到对应的 R/AC。
