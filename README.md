@@ -1,6 +1,6 @@
 # YanOS
 
-当前分支：[Agent的只读块导航](docs/specs/0033-block-mcp-navigation.md)已实现并完成本机验证，可列出具名块、按64KiB分页读取原文，并查询正文引用与反向引用。审核中发现的旧控制台测试判据已修正并完成独立复核。0033尚未合入main，维护者合入审查另行完成；main已交付能力以0032为基线。
+[Agent的只读块导航](docs/specs/0033-block-mcp-navigation.md)已实现并完成本机验证，可列出具名块、按64KiB分页读取原文，并查询正文引用与反向引用。审核中发现的旧控制台测试判据已修正并完成独立复核。0033已随 [PR #38](https://github.com/YanBo-maker/YanOS/pull/38) 合入 main（75e057a）。
 
 YanOS 是一个用于学习计算机系统的项目，包含 C17 编写的 RISC-V RV32IM 功能模拟器、Guest 上的操作系统与文件系统实验，以及终端笔记和本地知识检索工具。
 
@@ -118,7 +118,7 @@ block refs notes.txt
 block backlinks irq.txt#irq-entry
 ```
 
-list按声明顺序显示ID、物理行和半开字节范围；show按物理行号显示完整块，refs/backlinks显示前20处引用并统计全部出现，自引用和重复出现均计。未命名区域的引用也保留；缺文件或缺块明确显示断链，坏头/坏块不是断链。每文件最多64个不同ID，大文本查询不受编辑器16KiB保存容量限制。改名会断旧地址，删除后同名同ID重建会重新绑定，复制不会改写显式引用；原`links/backlinks/related`仍只看元数据头。接口见[块服务](os/note_blocks.h)，语法与错误边界见[0032](docs/specs/0032-block-references.md)；0032阶段未扩展Host/MCP schema，当前分支的后续扩展见[0033](docs/specs/0033-block-mcp-navigation.md)，尚未交付。
+list按声明顺序显示ID、物理行和半开字节范围；show按物理行号显示完整块，refs/backlinks显示前20处引用并统计全部出现，自引用和重复出现均计。未命名区域的引用也保留；缺文件或缺块明确显示断链，坏头/坏块不是断链。每文件最多64个不同ID，大文本查询不受编辑器16KiB保存容量限制。改名会断旧地址，删除后同名同ID重建会重新绑定，复制不会改写显式引用；原`links/backlinks/related`仍只看元数据头。接口见[块服务](os/note_blocks.h)，语法与错误边界见[0032](docs/specs/0032-block-references.md)；0032阶段未扩展Host/MCP schema。Host/MCP 块工具见[0033](docs/specs/0033-block-mcp-navigation.md)，已随 [PR #38](https://github.com/YanBo-maker/YanOS/pull/38) 合入 main。
 
 保存后可用 `grep 修订` 或 `grep "第二行 修订"` 查询字面字节子串。结果按目录槽和行号排列，以 `FILE:LINE:CONTENT` 显示完整匹配行，同一行只显示一次；零匹配仍输出 `OK grep`。LF/CRLF 分行，裸 CR 保留为内容。含 NUL 的文件整文件跳过，检索不写镜像；编辑态须先保存或取消，才能执行 grep。长行不受 16KiB 草稿容量限制。接口见 [Search](os/search.h) 与 [线性 backend](os/search_linear.h)。
 
@@ -195,7 +195,7 @@ build/semantic/yan_mcp --disk-image /absolute/path/notes.img \
   --runner /absolute/path/llama-server
 ```
 
-stdio server的stdout只含协议，不是交互式命令行。调用方以子进程连接；0031/0032已交付基线提供yanos_search与yanos_index_status。当前分支0033增加yanos_block_list、yanos_block_read、yanos_block_refs和yanos_block_backlinks，已完成本机验收，尚未合入main。四个启动路径参数仍必需；块工具只读取镜像，不要求索引、模型或runner文件存在，也不启动模型。工具参数不能指定Host路径或执行命令。来源镜像须停止Guest并在调用期间保持稳定；旧搜索工具的索引需预先用yan_semantic显式rebuild；服务不自动重建、写笔记或生成回答。取消与EOF会停止当前任务并回收本服务拥有的后代，kernel I/O阻塞不承诺固定总回收时限。兼容范围与既有工具schema见[0031](docs/specs/0031-mcp-retrieval-tools.md)，新块工具结果与分页见[0033](docs/specs/0033-block-mcp-navigation.md)。
+stdio server的stdout只含协议，不是交互式命令行。调用方以子进程连接；0031/0032已交付基线提供yanos_search与yanos_index_status。0033增加yanos_block_list、yanos_block_read、yanos_block_refs和yanos_block_backlinks，已完成本机验收并随 [PR #38](https://github.com/YanBo-maker/YanOS/pull/38) 合入 main（75e057a）。四个启动路径参数仍必需；块工具只读取镜像，不要求索引、模型或runner文件存在，也不启动模型。工具参数不能指定Host路径或执行命令。来源镜像须停止Guest并在调用期间保持稳定；旧搜索工具的索引需预先用yan_semantic显式rebuild；服务不自动重建、写笔记或生成回答。取消与EOF会停止当前任务并回收本服务拥有的后代，kernel I/O阻塞不承诺固定总回收时限。兼容范围与既有工具schema见[0031](docs/specs/0031-mcp-retrieval-tools.md)，新块工具结果与分页见[0033](docs/specs/0033-block-mcp-navigation.md)。
 
 通用stdio启动参数示例，字段对应SDK的启动配置；不同harness的注册位置由调用方适配，不自动修改全局配置：
 
@@ -239,7 +239,7 @@ asyncio.run(main())
 
 Agent/harness取得完整原文、出处和四身份后自行回答；引用存在不证明答案内容真实。官方SDK是显式集成验收依赖，不是生产C工具或默认核心构建依赖。当前本机全量及真实模型验收进度见[STATUS](docs/STATUS.md)，不由上述用法示例推导已完成覆盖。
 
-变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 在Linux工具/provider开启配置可注册十七组（0032统一执行结果另见STATUS）：`note_blocks_mutation`、`mcp_mutation`、`semantic_mutation`、`note_relations_mutation`、`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `note_blocks_mutation_gate`、`mcp_mutation_gate`、`semantic_mutation_gate`、`note_relations_mutation_gate`、`note_metadata_mutation_gate`、`search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
+变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 在Linux工具/provider开启配置可注册十七组（0032统一执行结果另见 [STATUS-history](docs/STATUS-history.md)）：`note_blocks_mutation`、`mcp_mutation`、`semantic_mutation`、`note_relations_mutation`、`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `note_blocks_mutation_gate`、`mcp_mutation_gate`、`semantic_mutation_gate`、`note_relations_mutation_gate`、`note_metadata_mutation_gate`、`search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
 
 开启变异配置后还会注册 `guest_console_mutation_gate`：它检查共享的真实Bash判定函数，并运行实际编译控制，不属于上述十个puregate，也不替代十七组实际变异。
 

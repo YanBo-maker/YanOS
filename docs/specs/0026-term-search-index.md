@@ -176,8 +176,8 @@ FTS5 trigram 的全文查询不能匹配少于三个 Unicode 字符的子串。�
 
 ### 批准补充验证：不可缓存源的显式重建
 
-真实驱动全局身份耗尽后，对健康 MOUNTED 源执行 rebuild：精确 OK、磁盘读写增量0、状态 UNCACHEABLE、terms/postings为0，且不发布 READY/LIMIT。项目所有者于2026-10-07明确批准“返回 OK rebuild，index status 显示 UNCACHEABLE（推荐）”；该永久测试已实际构建执行通过；批准时待执行的历史与现测详见STATUS。
+真实驱动全局身份耗尽后，对健康 MOUNTED 源执行 rebuild：精确 OK、磁盘读写增量0、状态 UNCACHEABLE、terms/postings为0，且不发布 READY/LIMIT。项目所有者于2026-10-07明确批准“返回 OK rebuild，index status 显示 UNCACHEABLE（推荐）”；该永久测试已实际构建执行通过；批准时待执行的历史与现测详见 [STATUS-history](../STATUS-history.md)。
 
 ### 本机 VERIFY 记录（2026-10-07）
 
-Linux注册默认67/开启实际变异79，Windows41；Release67/67（37.91 s）、ASan/UBSan67/67（75.33 s）、MSVC41/41（20.19 s），统一十二组实际变异12/12（203.40 s），均0失败、0SKIP。scan/index/index-repeat独立oracle各320例；真实Guest8健康、17故障、RV32 facade61唯一检查码通过。新term20缺陷及指定suite/owner/具体断言与三类实际负控已验证。布局、输入门禁、首次harness失败和覆盖限制见 [STATUS](../STATUS.md)。独立实现审核已完成；功能提交77f03fd的PR #22三项CI已通过，具体配置和运行见 [STATUS](../STATUS.md)。项目所有者已明确批准PR #22合入main（c84b2e7），具体交付记录见STATUS；本机、CI与合入批准分别记录，学习理解仍由所有者判断。
+Linux注册默认67/开启实际变异79，Windows41；Release67/67（37.91 s）、ASan/UBSan67/67（75.33 s）、MSVC41/41（20.19 s），统一十二组实际变异12/12（203.40 s），均0失败、0SKIP。scan/index/index-repeat独立oracle各320例；真实Guest8健康、17故障、RV32 facade61唯一检查码通过。新term20缺陷及指定suite/owner/具体断言与三类实际负控已验证。布局、输入门禁、首次harness失败和覆盖限制见 [STATUS](../STATUS.md)。独立实现审核已完成；功能提交77f03fd的PR #22三项CI已通过，具体配置和运行见 [STATUS](../STATUS.md)。项目所有者已明确批准PR #22合入main（c84b2e7），具体交付记录见 [STATUS-history](../STATUS-history.md)；本机、CI与合入批准分别记录，学习理解仍由所有者判断。

@@ -170,7 +170,7 @@ panic 的后果：先用控制台尽力打印一行诊断（`CONNECTED = 0` 时�
   1. 把 predicate 检查挪到临界区之外；
   2. ISR 里改调调度器（在中断上下文切换任务）；
   3. ISR 把 `complete` 放到 service / ack 之前；
-  4. `switch_to` 之后不恢复中断状态——具体是**无条件清 0**，把保存的中断状态丢掉。"无条件置 1"不在清单里：它与"恢复保存值"在实现上等价、不可杀（证明见 [STATUS](../STATUS.md)），构造能区分二者的测试必须先违反本规格的前置条件。
+  4. `switch_to` 之后不恢复中断状态——具体是**无条件清 0**，把保存的中断状态丢掉。"无条件置 1"不在清单里：它与"恢复保存值"在实现上等价、不可杀（证明见 [STATUS-history](../STATUS-history.md)），构造能区分二者的测试必须先违反本规格的前置条件。
   5. waiter 登记在 `state = BLOCKED` 之后（登记与阻塞之间留出窗口）；
   6. 唤醒时不清空 waiter 槽（第二次 `wait` 因此看到陈旧 waiter）。
 - 命令：Debug ASan/UBSan 与 Release 下的 `cmake --build` 与 `ctest --output-on-failure`。

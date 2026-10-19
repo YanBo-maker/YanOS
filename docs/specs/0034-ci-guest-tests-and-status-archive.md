@@ -133,3 +133,7 @@ AGENTS.md 中「只有总审核可改文档」「dsh 独立对齐审核」「监
 2. **两个 Linux 任务都跑 Guest，还是只在 Release 跑？** 默认两个都跑：ASan 能抓 Host 侧执行器问题，代价是 CI 时长大约翻倍。
 3. **CONTRIBUTING.md 第 70–98 行的各阶段验证计数**要不要一并原样搬到 `STATUS-history.md`？默认不搬，只停止新增；搬的话原样追加到归档末尾，AC 为：CONTRIBUTING 删除的行按顺序逐字出现在归档的追加段里。
 4. **STATUS 上限 16 KiB 可以吗？** 当前约 157KB。
+
+## VERIFY执行记录（2026-10-19）
+
+合入后 main 的 [Actions 39339094819](https://github.com/YanBo-maker/YanOS/actions/runs/39339094819) 三项成功：Linux Debug+ASan 与 Linux Release 各 108 项、0 失败，`^guest_` 各 31；Windows Debug 70 项、0 失败。安装包为 `gcc-11-riscv64-linux-gnu 11.4.0-1ubuntu1~22.04cross1`。该次运行的配置日志写明差分测试未注册（参考模型路径为空）。`YAN_ENABLE_MUTATION_TESTS` 与 `YAN_BUILD_SEMANTIC` 不在这套 CI 里。PR #43（提交 e483bf9）的运行 [39337080480](https://github.com/YanBo-maker/YanOS/actions/runs/39337080480) 同为 Linux 各 108/108、0 失败、Skipped 0、`^guest_` 31，ctest 用时 Debug/ASan 291.98 s、Release 168.20 s；Windows 70/70。这些计数只写在本节，并在 PR 描述里摘要。
