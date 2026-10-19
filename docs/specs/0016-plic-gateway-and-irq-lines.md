@@ -182,7 +182,7 @@ void yan_plic_set_level(YanPlic *plic, uint32_t source, bool asserted);
 | # | 项 | 内容 |
 | --- | --- | --- |
 | D1 | 调用点迁移 | `tests/test_plic.c`（约 20 处）与 `tests/test_interrupt.c`（4 处）的 `yan_plic_raise` 迁移到 `yan_plic_set_level` |
-| D2 | 文档 | `docs/STATUS.md` 的 PLIC 简化段更新；`tests/act4/rvmodel_macros.h:81` 的注释同步；`docs/specs/0015` 的源号约定改为引用本规格 |
+| D2 | 文档 | `docs/STATUS-history.md` 的 PLIC 简化段更新；`tests/act4/rvmodel_macros.h:81` 的注释同步；`docs/specs/0015` 的源号约定改为引用本规格 |
 | D3 | 全量回归 | Debug ASan/UBSan 与 Release 下全量 CTest 通过 |
 
 ### E. 变异检查

@@ -111,6 +111,6 @@ u32文件size/offset/line_length运算使用有界减法或宽算后检查，避
 
 ## VERIFY执行记录（2026-10-07）
 
-本机默认Release55/55（32.50 s）、ASan/UBSan55/55（51.39 s）、Windows32/32（4.25 s），十一组actual11/11（142.77 s），均0失败、0SKIP。核心92、shell122、真实Guest健康9与故障13、RV32实际tohost与标记探针、BUILD_TESTING=OFF生产ELF健康9项通过。新Search17个actual缺陷命中指定owner和断言，三个真实归因控制及pure控制符合预期；完整日志、失败历史与验证边界见[STATUS知识检索验收](../STATUS.md)。上述记录不改变锁定行为、批准时间或稳定借用前提，也不表示维护者合入批准。
+本机默认Release55/55（32.50 s）、ASan/UBSan55/55（51.39 s）、Windows32/32（4.25 s），十一组actual11/11（142.77 s），均0失败、0SKIP。核心92、shell122、真实Guest健康9与故障13、RV32实际tohost与标记探针、BUILD_TESTING=OFF生产ELF健康9项通过。新Search17个actual缺陷命中指定owner和断言，三个真实归因控制及pure控制符合预期；完整日志、失败历史与验证边界见[STATUS知识检索验收](../STATUS-history.md)。上述记录不改变锁定行为、批准时间或稳定借用前提，也不表示维护者合入批准。
 
 2026-10-07，项目所有者另行批准PR #20合入，merge为 `9b8a01f`，main树与已验交付一致；修后CI运行37559213922三项成功。上段保留执行记录与批准的区别，此次合入批准不改变2026-10-06初始SPEC批准时间、正文行为或历史测量。

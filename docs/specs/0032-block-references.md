@@ -124,7 +124,7 @@ summary与类型明确的结果holder仅完整OK后一次发布；所有失败�
 
 完整Guest/默认回归前的集成阶段（2026-10-18，历史）：ASan三native3/3（0.11 s，25/17/9用例），Windows三native+puregate4/4（5.10 s），新增块实际26/26（25.901 s，0存活/0harness）及旧Guest gate3/3（13.610 s）通过；不是新Guest/全回归/统一17实际组通过。OFF五生产目标构建成功。Host/RV32 block26440/26424B，规格五context合计1645568/1645488B；RV32格式/service/shell/app单帧64/192/256/240B，ISRframe80B，不作完整栈峰值证明。旧阶段待验语句由此具名更新，最终独立因额度中断仍待，日志及边界见[STATUS](../STATUS.md)。
 
-统一实际终局前的集成实证（2026-10-18）：31输入SHA一致；完整默认Release114/114（111.66 s）、ASan/UBSan114/114（172.64 s）、Windows70/70（67.44 s）零失败零SKIP。新健康6组（5.220 s）、故障43项（4基线/38注入/1启动失败，18.465 s）、RV32 API35个唯一检查码+marker/实tohost1通过，新Guest gate4项（15.535 s）分列。原driver上界22误判BLOCK_INIT23为harness已同步修正，unknown24仍harness，不算产品错误或检出；IO seam仅私有副本。新26actual及资源/OFF已验范围保持，统一17实际组未终局，原独立第3轮中断、第4冻结审核未做，不出当前完整独立PASS或CAN COMMIT。源码与日志、使用边界见[STATUS](../STATUS.md)“0032 当前集成默认回归与Guest范围”。
+统一实际终局前的集成实证（2026-10-18）：31输入SHA一致；完整默认Release114/114（111.66 s）、ASan/UBSan114/114（172.64 s）、Windows70/70（67.44 s）零失败零SKIP。新健康6组（5.220 s）、故障43项（4基线/38注入/1启动失败，18.465 s）、RV32 API35个唯一检查码+marker/实tohost1通过，新Guest gate4项（15.535 s）分列。原driver上界22误判BLOCK_INIT23为harness已同步修正，unknown24仍harness，不算产品错误或检出；IO seam仅私有副本。新26actual及资源/OFF已验范围保持，统一17实际组未终局，原独立第3轮中断、第4冻结审核未做，不出当前完整独立PASS或CAN COMMIT。源码与日志、使用边界见[STATUS-history](../STATUS-history.md)“0032 当前集成默认回归与Guest范围”。
 
 第3轮恢复前的统一实际终局记录（2026-10-18，历史时点）：17/17（322.77 s）零失败/零SKIP；完整明细已另存，新块26项指定suite/owner/assertion及实际负控通过，组CTest14.94 s与先前专项25.901 s分列。31冻结输入SHA后验保持。本文已执行验证的当前pending由此更新，旧具名阶段待验语句保持历史；剩余独立集成/冻结审因额度中断未完成，exact九审、提交/PR/CI/维护者合入仍待，无CAN COMMIT。
 
