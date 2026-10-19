@@ -50,6 +50,7 @@ class Wire:
                 raise RuntimeError(('server exited before frame', self.p.poll(), self.p.stderr.read()))
             self.buffer += data
         line, self.buffer = self.buffer.split(b'\n', 1)
+        self.last_length = len(line)
         assert len(line) <= 1024 * 1024, 'output_bound'
         obj = json.loads(line, object_pairs_hook=unique_object,
                          parse_constant=lambda x: (_ for _ in ()).throw(AssertionError(x)))
@@ -224,7 +225,8 @@ def main():
                  ('blocks.txt', b'@block first\r\nhello\r\n@block empty\n@block last\nend\n'),
                  ('refs.txt', b'@block src\n[[blocks.txt#first]] [[gone#x]]\n'),
                  ('long.txt', b'@block long\n' + b'x' * 70000),
-                 ('utf8.txt', b'@block u\n\xe4\xb8\xad\xf0\x9f\x98\x80\r\nend\n')]
+                 ('utf8.txt', b'@block u\n\xe4\xb8\xad\xf0\x9f\x98\x80\r\nend\n'),
+                 ('escape.txt', b'@block esc\n' + (b'"\\\t' * 21846)[:65536])]
         rebuild(files)
         before = snapshot()
         wire = Wire(args, dict(env, YAN_MCP_FD_CHECK='1'))
@@ -258,6 +260,14 @@ def main():
             value = tool_value(wire.get())
             assert value['text'] == '中😀\r\nend\n', 'block_read_utf8_crlf'
             assert value['page']['first_line'] == 2 and value['page']['last_line'] == 3, 'block_read_utf8_lines'
+
+            wire.send('tools/call', params={'name': 'yanos_block_read',
+                                            'arguments': {'name': 'escape.txt', 'block_id': 'esc'}})
+            value = tool_value(wire.get())
+            assert value['text'] == (b'"\\\t' * 21846)[:65536].decode(), 'block_read_escaped_text'
+            assert value['complete'] is True and value['next_offset'] is None, 'block_read_escaped_complete'
+            assert wire.last_length <= 1024 * 1024, 'spec6_escaped_64k_within_1mib'
+            print('PASS spec6 escaped 64KiB block_read response bytes=' + str(wire.last_length))
 
             for tool, arguments in (
                     ('yanos_block_list', {'name': 'blocks.txt', '_meta': {}}),
