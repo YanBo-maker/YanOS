@@ -142,7 +142,7 @@ list错误/STOPPED不公开成功summary；show错误不公开半份info。metad
 
 ## IMPLE
 
-纯格式`note_metadata_format`与服务`note_metadata`已实现。格式层通过caller workspace解析头并生成canonical头；服务通过公开YanFS接口完成prefix观察、全库list预检、无变化零写及实际变化单次replace。filtered term、shell绑定与meta命令、生产Guest接入和门禁均已实现；独立实现审查完成，维护者实现交付与合入审查仍待。旧0026的67/79/41及所有通过记录仅属交付历史，不作为本能力证据。
+纯格式`note_metadata_format`与服务`note_metadata`已实现。格式层通过caller workspace解析头并生成canonical头；服务通过公开YanFS接口完成prefix观察、全库list预检、无变化零写及实际变化单次replace。filtered term、shell绑定与meta命令、生产Guest接入和门禁均已实现；独立实现审查完成；该实施记录形成时，维护者实现交付与合入审查仍待。其后项目所有者已批准PR #24合入main（7451c85），见本规格的批准记录。旧0026的67/79/41及所有通过记录仅属交付历史，不作为本能力证据。
 
 ## VERIFY
 

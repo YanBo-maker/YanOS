@@ -49,3 +49,9 @@
 *~
 .DS_Store
 Thumbs.db
+
+# Agent working state (not project artifacts)
+conversation-logs/
+recon/
+workspace/
+__pycache__/

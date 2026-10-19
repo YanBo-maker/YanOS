@@ -58,4 +58,23 @@ typedef struct {
 YanSemanticResult yan_semantic_corpus_scan(YanSemanticCorpus *,
                                            const YanSemanticSource *);
 
+/* 0033 pure source identity. Enumerates the same logical view and rejects the
+ * same cursor/slot/name/duplicate violations as corpus_scan, sorts by ASCII
+ * name, then hashes for each file: slot u32LE, name length u32LE, name bytes,
+ * file size u32LE, and every raw file byte. It performs no metadata parse, no
+ * text validation and no segmentation, so it is not subject to the
+ * 8192-segment cap and a bad unrelated header cannot fail it. It still
+ * enforces the logical view itself: files in slots 0..62 (at most 63 files), a
+ * valid NUL-terminated note name, strictly increasing cursors and no duplicate
+ * slot/name, so a 64th file is CORRUPT. Binary files contribute their bytes
+ * unchanged.
+ * source must provide next/read and a context span; out belongs to the caller
+ * and must be a 32-byte span disjoint from the source struct and its context.
+ * Invalid or failing sources return their real first error. out is published
+ * only after every read and the SHA-256 final succeed; every failure leaves
+ * all 32 bytes byte-identical. This function allocates nothing and borrows no
+ * store, index, model or runner. */
+YanSemanticResult yan_semantic_source_digest(const YanSemanticSource *,
+                                             uint8_t out[32]);
+
 #endif

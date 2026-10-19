@@ -121,6 +121,8 @@ panic 的后果：先用控制台尽力打印一行诊断（`CONNECTED = 0` 时�
 
 运行时需要 PLIC 的 `claim` / `complete` / `enable` / `threshold` / `priority` 访问器，而当前 `os/platform.h` **只有 UART 与源号常量**。这些访问器要按 0017 的分区补进平台视图并纳入防漂移比对，是本规格落地的前置改动。
 
+实现状态说明：上段保留起草时的前置条件。当前 `os/platform.h` 已提供上述PLIC访问器，`tests/test_boot.c` 已纳入对应防漂移比对。
+
 ### 已知债务：树里会有两份陷阱入口
 
 本规格新增 `os/trap_entry.S`，而 M1 已经有 `tests/guest/mtrap_entry.S`（[0013](0013-guest-trap-environment.md) 的最小陷阱环境：入口 + Direct 向量 + 固定 20 字帧 + 统一调度）。M2a 之后，树里**同时存在两份陷阱入口**。这不是冲突，但按 0017 的分区原则，陷阱入口只应该有一份，因此记为债务：

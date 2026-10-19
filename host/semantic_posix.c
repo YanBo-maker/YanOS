@@ -84,6 +84,62 @@ static YanSemanticResult hash_fd(int fd, uint8_t *out)
     }
     return yan_semantic_sha256_final(&hash, out);
 }
+/* Lossless mount mapping for the typed image-only open. The legacy semantic
+ * mapping is applied separately, so an unsupported on-disk version is visible
+ * here instead of being flattened into CORRUPT. */
+static YanImageOpenResult map_fs_image(YanFsResult result)
+{
+    switch (result) {
+    case YAN_FS_OK: return YAN_IMAGE_OPEN_OK;
+    case YAN_FS_INVALID: return YAN_IMAGE_OPEN_INVALID;
+    case YAN_FS_IO: return YAN_IMAGE_OPEN_IO;
+    case YAN_FS_CORRUPT: return YAN_IMAGE_OPEN_CORRUPT;
+    case YAN_FS_UNSUPPORTED: return YAN_IMAGE_OPEN_UNSUPPORTED;
+    case YAN_FS_NOT_MOUNTED: return YAN_IMAGE_OPEN_NOT_MOUNTED;
+    case YAN_FS_FAULTED: return YAN_IMAGE_OPEN_FAULTED;
+    case YAN_FS_BUSY: return YAN_IMAGE_OPEN_BUSY;
+    case YAN_FS_PROTOCOL: return YAN_IMAGE_OPEN_PROTOCOL;
+    /* Iteration and write-side results cannot describe a mount. */
+    case YAN_FS_END: case YAN_FS_EXISTS: case YAN_FS_DIRECTORY_FULL:
+    case YAN_FS_NOSPACE: case YAN_FS_NOT_FOUND: return YAN_IMAGE_OPEN_PROTOCOL;
+    }
+    return YAN_IMAGE_OPEN_PROTOCOL;
+}
+static YanSemanticResult legacy_image_open(YanImageOpenResult result)
+{
+    switch (result) {
+    case YAN_IMAGE_OPEN_OK: return YAN_SEMANTIC_OK;
+    /* A mount/init INVALID was historically an IO failure; only bad caller
+     * arguments were INVALID. The wrappers check arguments before this map. */
+    case YAN_IMAGE_OPEN_INVALID: return YAN_SEMANTIC_IO;
+    case YAN_IMAGE_OPEN_IO: return YAN_SEMANTIC_IO;
+    case YAN_IMAGE_OPEN_CORRUPT: return YAN_SEMANTIC_CORRUPT;
+    case YAN_IMAGE_OPEN_UNSUPPORTED: return YAN_SEMANTIC_CORRUPT;
+    case YAN_IMAGE_OPEN_NOT_MOUNTED: case YAN_IMAGE_OPEN_FAULTED:
+    case YAN_IMAGE_OPEN_BUSY: case YAN_IMAGE_OPEN_PROTOCOL:
+        return YAN_SEMANTIC_IO;
+    }
+    return YAN_SEMANTIC_IO;
+}
+/* Shared tail of both open variants: the descriptor is already open and the
+ * caller owns it through cleanup on every return. Only image geometry, size
+ * and the read-only YanFS mount live here, so the four-path open keeps its
+ * alias/model/runner work and image-only callers stop before it. */
+static YanImageOpenResult mount_opened_image(YanSemanticPosix *p, bool record_input)
+{
+    struct stat target;
+    if (fstat(p->image_fd, &target) != 0) return YAN_IMAGE_OPEN_IO;
+    if (!S_ISREG(target.st_mode) || target.st_size < 4096 || target.st_size % 4096 ||
+        (uint64_t)target.st_size / 4096 > UINT32_MAX) return YAN_IMAGE_OPEN_CORRUPT;
+    p->image_size = (uint64_t)target.st_size;
+    if (record_input) {
+        p->input_dev[0] = target.st_dev; p->input_ino[0] = target.st_ino;
+    }
+    YanFsBlockIo io = {p, capacity, read_block, refuse_write};
+    YanImageOpenResult r = map_fs_image(yan_fs_init(&p->fs, io));
+    if (r == YAN_IMAGE_OPEN_OK) r = map_fs_image(yan_fs_mount(&p->fs));
+    return r;
+}
 YanSemanticResult yan_semantic_posix_open(YanSemanticPosix *p, const char *image,
     const char *index, const char *model, const char *runner, YanSemanticIdentity *identity)
 {
@@ -105,14 +161,9 @@ YanSemanticResult yan_semantic_posix_open(YanSemanticPosix *p, const char *image
     if (stat(index, &target) == 0 && aliases_input(p, &target)) return YAN_SEMANTIC_INVALID;
     p->image_fd = open(image, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
     if (p->image_fd < 0) return YAN_SEMANTIC_IO;
-    if (fstat(p->image_fd, &target) != 0) return YAN_SEMANTIC_IO;
-    if (!S_ISREG(target.st_mode) || target.st_size < 4096 || target.st_size % 4096 ||
-        (uint64_t)target.st_size / 4096 > UINT32_MAX) return YAN_SEMANTIC_CORRUPT;
-    p->image_size = (uint64_t)target.st_size;
-    YanFsBlockIo io = {p, capacity, read_block, refuse_write};
-    YanSemanticResult r = map_fs(yan_fs_init(&p->fs, io));
-    if (r == YAN_SEMANTIC_OK) r = map_fs(yan_fs_mount(&p->fs));
-    if (r != YAN_SEMANTIC_OK) return r;
+    YanImageOpenResult opened = mount_opened_image(p, false);
+    if (opened != YAN_IMAGE_OPEN_OK) return legacy_image_open(opened);
+    YanSemanticResult r = YAN_SEMANTIC_OK;
     for (unsigned i = 1; i < 3; ++i) {
         int fd = open(paths[i], O_RDONLY | O_CLOEXEC | O_NONBLOCK);
         if (fd < 0) return YAN_SEMANTIC_DEPENDENCY;
@@ -124,6 +175,20 @@ YanSemanticResult yan_semantic_posix_open(YanSemanticPosix *p, const char *image
         if (r != YAN_SEMANTIC_OK) return r;
     }
     return YAN_SEMANTIC_OK;
+}
+YanImageOpenResult yan_semantic_posix_open_image_ex(YanSemanticPosix *p,
+                                                    const char *image)
+{
+    if (!p || !image || !*image) return YAN_IMAGE_OPEN_INVALID;
+    memset(p, 0, sizeof *p); p->image_fd = p->index_fd = -1;
+    p->image_fd = open(image, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    if (p->image_fd < 0) return YAN_IMAGE_OPEN_IO;
+    return mount_opened_image(p, true);
+}
+YanSemanticResult yan_semantic_posix_open_image(YanSemanticPosix *p, const char *image)
+{
+    if (!p || !image || !*image) return YAN_SEMANTIC_INVALID;
+    return legacy_image_open(yan_semantic_posix_open_image_ex(p, image));
 }
 YanSemanticResult yan_semantic_posix_close_source(void *opaque)
 {
@@ -210,9 +275,13 @@ static YanSemanticResult publish_index(void *opaque)
     free(p->temporary_path); p->temporary_path = NULL;
     return YAN_SEMANTIC_OK;
 }
-void yan_semantic_posix_bind(YanSemanticPosix *p, YanSemanticSource *source, YanSemanticStore *store)
+void yan_semantic_posix_bind_source(YanSemanticPosix *p, YanSemanticSource *source)
 {
     *source = (YanSemanticSource){p, sizeof *p, next_file, read_file};
+}
+void yan_semantic_posix_bind(YanSemanticPosix *p, YanSemanticSource *source, YanSemanticStore *store)
+{
+    yan_semantic_posix_bind_source(p, source);
     *store = (YanSemanticStore){p, sizeof *p, open_index, read_index, close_index,
         begin_index, write_index, finish_index, publish_index, discard_index};
 }

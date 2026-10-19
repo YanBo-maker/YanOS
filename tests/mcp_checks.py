@@ -6,10 +6,12 @@ import os
 from pathlib import Path
 import select
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from semantic_fixture import image, note
 from semantic_json_checks import unique_object, logical_hash
 
@@ -48,6 +50,7 @@ class Wire:
                 raise RuntimeError(('server exited before frame', self.p.poll(), self.p.stderr.read()))
             self.buffer += data
         line, self.buffer = self.buffer.split(b'\n', 1)
+        self.last_length = len(line)
         assert len(line) <= 1024 * 1024, 'output_bound'
         obj = json.loads(line, object_pairs_hook=unique_object,
                          parse_constant=lambda x: (_ for _ in ()).throw(AssertionError(x)))
@@ -164,7 +167,7 @@ def main():
             assert r['ttlMs'] == 0 and r['cacheScope'] == 'private', 'discovery_cache_fields'
             wire.send('tools/list')
             tools = wire.get()['result']['tools']
-            assert [t['name'] for t in tools] == ['yanos_search', 'yanos_index_status'], 'only_read_tools'
+            assert [t['name'] for t in tools] == ['yanos_search', 'yanos_index_status', 'yanos_block_list', 'yanos_block_read', 'yanos_block_refs', 'yanos_block_backlinks'], 'six_read_tools'
             for t in tools:
                 assert 'outputSchema' in t and t['inputSchema']['additionalProperties'] is False, 'schemas'
                 assert t['annotations'] == dict(readOnlyHint=True, destructiveHint=False,
@@ -218,11 +221,117 @@ def main():
             wire.close()
 
         files = [('z.txt', note('中', ('原文😀\t"\\\r\n'*90))), None,
-                 ('a.txt', b'cpu interrupt\r\nsecond\tline'), ('binary', b'\0\xff')]
+                 ('a.txt', b'cpu interrupt\r\nsecond\tline'), ('binary', b'\0\xff'),
+                 ('blocks.txt', b'@block first\r\nhello\r\n@block empty\n@block last\nend\n'),
+                 ('refs.txt', b'@block src\n[[blocks.txt#first]] [[gone#x]]\n'),
+                 ('long.txt', b'@block long\n' + b'x' * 70000),
+                 ('utf8.txt', b'@block u\n\xe4\xb8\xad\xf0\x9f\x98\x80\r\nend\n'),
+                 ('escape.txt', b'@block esc\n' + (b'"\\\t' * 21846)[:65536])]
         rebuild(files)
         before = snapshot()
         wire = Wire(args, dict(env, YAN_MCP_FD_CHECK='1'))
         try:
+            digest = logical_hash(files)
+            wire.send('tools/call', params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks.txt'}})
+            value = tool_value(wire.get())
+            assert value['schema_version'] == 1 and value['operation'] == 'block_list', 'block_list_shape'
+            assert value['source_sha256'] == digest and value['name'] == 'blocks.txt', 'block_list_identity'
+            assert value['total'] == 3 and value['shown'] == 3, 'block_list_counts'
+            assert [b['id'] for b in value['blocks']] == ['first', 'empty', 'last'], 'block_list_order'
+            assert value['blocks'][1]['first_line'] == 0 and value['blocks'][1]['last_line'] == 0, 'block_empty_lines'
+            assert value['blocks'][0]['start'] < value['blocks'][0]['end'], 'block_list_range'
+
+            wire.send('tools/call', params={'name': 'yanos_block_read',
+                                            'arguments': {'name': 'blocks.txt', 'block_id': 'first'}})
+            value = tool_value(wire.get())
+            assert value['operation'] == 'block_read' and value['text'] == 'hello\r\n', 'block_read_text'
+            assert value['complete'] is True and value['next_offset'] is None, 'block_read_complete'
+            assert value['block'] == {'start': value['page']['start'], 'end': value['page']['end'],
+                                      'first_line': value['page']['first_line'],
+                                      'last_line': value['page']['last_line']}, 'block_read_full_range'
+
+            wire.send('tools/call', params={'name': 'yanos_block_read',
+                                            'arguments': {'name': 'blocks.txt', 'block_id': 'empty'}})
+            value = tool_value(wire.get())
+            assert value['text'] == '' and value['complete'] is True and value['next_offset'] is None, 'block_read_empty'
+
+            wire.send('tools/call', params={'name': 'yanos_block_read',
+                                            'arguments': {'name': 'utf8.txt', 'block_id': 'u'}})
+            value = tool_value(wire.get())
+            assert value['text'] == '中😀\r\nend\n', 'block_read_utf8_crlf'
+            assert value['page']['first_line'] == 2 and value['page']['last_line'] == 3, 'block_read_utf8_lines'
+
+            wire.send('tools/call', params={'name': 'yanos_block_read',
+                                            'arguments': {'name': 'escape.txt', 'block_id': 'esc'}})
+            value = tool_value(wire.get())
+            assert value['text'] == (b'"\\\t' * 21846)[:65536].decode(), 'block_read_escaped_text'
+            assert value['complete'] is True and value['next_offset'] is None, 'block_read_escaped_complete'
+            assert wire.last_length <= 1024 * 1024, 'spec6_escaped_64k_within_1mib'
+            print('PASS spec6 escaped 64KiB block_read response bytes=' + str(wire.last_length))
+
+            for tool, arguments in (
+                    ('yanos_block_list', {'name': 'blocks.txt', '_meta': {}}),
+                    ('yanos_block_read', {'name': 'blocks.txt', 'block_id': 'first', '_meta': {}}),
+                    ('yanos_block_refs', {'name': 'refs.txt', '_meta': {}}),
+                    ('yanos_block_backlinks', {'name': 'blocks.txt', 'block_id': 'first', '_meta': {}})):
+                wire.send('tools/call', params={'name': tool, 'arguments': arguments})
+                tool_value(wire.get(), code='INVALID')
+
+            wire.send('tools/call', params={'name': 'yanos_block_refs', 'arguments': {'name': 'refs.txt'}})
+            value = tool_value(wire.get())
+            assert value['total'] == 2 and value['shown'] == 2, 'block_refs_counts'
+            assert value['refs'][0]['target'] == {'name': 'blocks.txt', 'id': 'first'}, 'block_refs_target'
+            assert value['refs'][0]['state'] == 'OK' and value['refs'][1]['state'] == 'DANGLING_FILE', 'block_refs_states'
+
+            wire.send('tools/call', params={'name': 'yanos_block_backlinks',
+                                            'arguments': {'name': 'blocks.txt', 'block_id': 'first'}})
+            value = tool_value(wire.get())
+            assert value['total'] == 1 and value['shown'] == 1 and value['skipped'] == 1, 'block_backlinks_counts'
+            assert value['backlinks'][0]['source'] == 'refs.txt', 'block_backlinks_source'
+            assert value['target_state'] == 'OK', 'block_backlinks_target'
+
+            wire.send('tools/call', params={'name': 'yanos_block_list',
+                                            'arguments': {'name': 'blocks.txt', 'expected_source': digest}})
+            assert tool_value(wire.get())['source_sha256'] == digest, 'block_expected_success'
+            wire.send('tools/call', params={'name': 'yanos_block_list',
+                                            'arguments': {'name': 'blocks.txt', 'expected_source': '0' * 64}})
+            tool_value(wire.get(), code='STALE')
+
+            offset = 0
+            joined = ''
+            while True:
+                arguments = {'name': 'long.txt', 'block_id': 'long', 'offset': offset}
+                if offset > 0:
+                    arguments['expected_source'] = digest
+                wire.send('tools/call', params={'name': 'yanos_block_read', 'arguments': arguments})
+                value = tool_value(wire.get())
+                joined += value['text']
+                if value['complete']:
+                    assert value['next_offset'] is None, 'block_pages_terminal'
+                    break
+                assert value['next_offset'] > offset, 'block_pages_advance'
+                offset = value['next_offset']
+            assert joined == 'x' * 70000, 'block_pages_join'
+
+            wire.send('tools/call', params={'name': 'yanos_block_read',
+                                            'arguments': {'name': 'blocks.txt', 'block_id': 'missing'}})
+            tool_value(wire.get(), code='NOT_FOUND')
+            wire.send('tools/call', params={'name': 'yanos_block_list', 'arguments': {'name': 'missing'}})
+            tool_value(wire.get(), code='NOT_FOUND')
+            wire.send('tools/call', params={'name': 'yanos_block_read',
+                                            'arguments': {'name': 'blocks.txt', 'block_id': 'first', 'offset': 1}})
+            tool_value(wire.get(), code='INVALID')
+            wire.send('tools/call', params={'name': 'yanos_block_read',
+                                            'arguments': {'name': 'blocks.txt', 'block_id': 'first', 'offset': 4294967296}})
+            tool_value(wire.get(), code='INVALID')
+            wire.send('tools/call', params={'name': 'yanos_block_list',
+                                            'arguments': {'name': 'blocks.txt', 'expected_source': 'A' * 64}})
+            tool_value(wire.get(), code='INVALID')
+            wire.send('tools/call', params={'name': 'yanos_block_list',
+                                            'arguments': {'name': 'blocks.txt', 'extra': 1}})
+            tool_value(wire.get(), code='INVALID')
+            cases += 1
+
             wire.send('tools/call', params={'name': 'yanos_search', 'arguments': {'query': 'cpu'}})
             value = tool_value(wire.get())
             p = subprocess.run([str(semantic), 'search', *options, '--query', 'cpu', '--format', 'json'],
@@ -269,6 +378,57 @@ def main():
             empty=tool_value(wire.get())
             assert empty['shown']==0 and empty['results']==[] and empty['segments']==0, 'genuine_empty_success'
             rebuild([('a.txt',b'changed')])
+            cases += 1
+        finally:
+            wire.close()
+
+        # Block tools need only the image: all other startup dependencies may be absent.
+        nodep_disk = root/'nodep-disk'
+        nodep_disk.write_bytes(image([('blocks.txt', b'@block first\r\nhello\r\n@block empty\n@block last\nend\n')]))
+        block_args = [str(server), '--disk-image', str(nodep_disk), '--index', str(root/'missing-index'),
+                      '--model', str(root/'missing-model'), '--runner', str(root/'missing-runner'),
+                      '--startup-timeout', '3', '--request-timeout', '3']
+        wire = Wire(block_args, env)
+        try:
+            wire.send('tools/call', params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks.txt'}})
+            assert tool_value(wire.get())['total'] == 3, 'block_without_dependencies'
+            wire.send('tools/call', params={'name': 'yanos_search', 'arguments': {'query': 'cpu'}})
+            tool_value(wire.get(), code='DEPENDENCY')
+            cases += 1
+        finally:
+            wire.close()
+
+        bad_disk = root/'bad-disk'
+        bad_disk.write_bytes(image([('bad', b'@yan-note 9\n@end\n'),
+                                    ('binary', b'@block a\n\0')]))
+        bad_args = [str(server), '--disk-image', str(bad_disk), '--index', str(root/'missing-index'),
+                    '--model', str(root/'missing-model'), '--runner', str(root/'missing-runner'),
+                    '--startup-timeout', '3', '--request-timeout', '3']
+        wire = Wire(bad_args, env)
+        try:
+            wire.send('tools/call', params={'name': 'yanos_block_list', 'arguments': {'name': 'bad'}})
+            tool_value(wire.get(), code='METADATA')
+            wire.send('tools/call', params={'name': 'yanos_block_list', 'arguments': {'name': 'binary'}})
+            tool_value(wire.get(), code='INVALID_TEXT')
+            wire.send('tools/call', params={'name': 'yanos_block_list', 'arguments': {'name': 'missing'}})
+            tool_value(wire.get(), code='NOT_FOUND')
+            cases += 1
+        finally:
+            wire.close()
+
+        unsupported = bytearray(image([('note', b'@block a\nx')]))
+        struct.pack_into('<I', unsupported, 8, 2)
+        struct.pack_into('<I', unsupported, 60, zlib.crc32(unsupported[:4096]))
+        unsupported_disk = root/'unsupported.img'
+        unsupported_disk.write_bytes(unsupported)
+        unsupported_args = [str(server), '--disk-image', str(unsupported_disk),
+                            '--index', str(root/'missing-index'), '--model', str(root/'missing-model'),
+                            '--runner', str(root/'missing-runner'), '--startup-timeout', '3',
+                            '--request-timeout', '3']
+        wire = Wire(unsupported_args, env)
+        try:
+            wire.send('tools/call', params={'name': 'yanos_block_list', 'arguments': {'name': 'note'}})
+            tool_value(wire.get(), code='UNSUPPORTED')
             cases += 1
         finally:
             wire.close()

@@ -74,7 +74,7 @@ bool yan_transport_pending(const YanTransport *transport); /* Host→Guest 线 *
 - **I4**：`mip.MEIP` 只由 PLIC 产生。设备与 Bus 都不得直接置位它。
 - **I5**：`set_level` 对同一源的重复驱动是幂等的，因此每步驱动与事件驱动等价。
 
-### 完整时序（确认待审的核心行为）
+### 完整时序（已锁定的核心行为）
 
 以 UART 接收为例，`RX_IRQ_ENABLE=1`、PLIC 中 source 2 已 enable 且 `priority > threshold`：
 

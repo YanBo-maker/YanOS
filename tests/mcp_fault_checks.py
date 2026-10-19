@@ -1,4 +1,5 @@
 """Actual assertion owners for fault seams and lifecycle defects, with strict footer."""
+import json
 import os
 import signal
 import select
@@ -103,6 +104,234 @@ class Lifecycle(unittest.TestCase):
         r = self.search({'YAN_MCP_TEST_WORKER_ALLOC_FAILURE': '1'}, probe=True)
         self.assertTrue(r['result']['isError'], 'mcp_memory_failure_no_success')
         self.assertNotIn('structuredContent', r['result'], 'mcp_memory_failure_no_context')
+
+    def block_wire(self, env, files=None):
+        self.disk.write_bytes(image(files or [('blocks', b'@block a\nhello\n')]))
+        self.observer = self.root/'block-observer.log'
+        self.wire = Wire([str(PROBE), *self.options],
+                         dict(self.env, YAN_MCP_TEST_BLOCK_OBSERVER=str(self.observer), **env))
+
+    def observer_lines(self):
+        if not self.observer.exists():
+            return []
+        return [line.split() for line in self.observer.read_text().splitlines() if line.strip()]
+
+    def first_observer_fork(self):
+        deadline = time.monotonic()+8
+        while True:
+            for line in self.observer_lines():
+                if len(line) == 2 and line[0] == 'fork':
+                    return int(line[1])
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(.01)
+
+    def reply_code(self, reply):
+        return json.loads(reply['result']['content'][0]['text'])
+
+    def test_block_without_dependencies(self):
+        self.disk.write_bytes(image([('blocks', b'@block a\nhello\n')]))
+        self.wire = Wire([str(PROBE), '--disk-image', str(self.disk),
+                          '--index', str(self.root/'absent-index'),
+                          '--model', str(self.root/'absent-model'),
+                          '--runner', str(self.root/'absent-runner'),
+                          '--startup-timeout', '3', '--request-timeout', '3'], self.env)
+        self.wire.send('tools/call', ident=7,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        r = self.wire.get()
+        self.assertFalse(r['result']['isError'], 'block_no_dependencies_success')
+        self.assertEqual(1, r['result']['structuredContent']['total'],
+                         'block_without_dependencies')
+
+    def test_block_invalid_has_no_child(self):
+        # The observer is the dispatcher/source-I/O owner: the parent records a
+        # fork, and the worker records direct source opens/preads before exit.
+        # The semantic runner pidfile used before this correction was unrelated.
+        self.block_wire({})
+        for ident, tool, arguments in (
+                (7, 'yanos_block_list', {'name': 'a/b'}),
+                (8, 'yanos_block_read', {'name': 'blocks', 'block_id': 'a/b'}),
+                (9, 'yanos_block_read',
+                 {'name': 'blocks', 'block_id': 'a', 'offset': 1})):
+            self.wire.send('tools/call', ident=ident,
+                           params={'name': tool, 'arguments': arguments})
+            r = self.wire.get()
+            self.assertTrue(r['result']['isError'], 'block_invalid_is_error')
+            self.assertEqual({'code': 'INVALID'}, self.reply_code(r),
+                             'block_invalid_code')
+            self.assertNotIn('structuredContent', r['result'],
+                             'block_invalid_no_context')
+        self.assertFalse(self.observer.exists(), 'block_invalid_no_worker_fork')
+        self.assertEqual([], self.observer_lines(),
+                         'block_invalid_no_dispatch_or_source_io')
+
+    def test_block_valid_dispatch_and_source_io_observed(self):
+        # Positive control for the observer: a valid block call must fork one
+        # worker and that worker must open/read the image before its reply.
+        self.block_wire({})
+        self.wire.send('tools/call', ident=7,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        r = self.wire.get()
+        self.assertFalse(r['result']['isError'], 'block_valid_dispatch_success')
+        self.assertEqual(1, r['result']['structuredContent']['total'],
+                         'block_valid_dispatch_total')
+        lines = self.observer_lines()
+        forks = [line for line in lines if line and line[0] == 'fork']
+        children = [line for line in lines if line and line[0] == 'child']
+        self.assertEqual(1, len(forks), 'block_valid_fork_observed')
+        self.assertEqual(1, len(children), 'block_valid_worker_exit_observed')
+        self.assertEqual([], [line for line in lines
+                              if line and line[0] in ('parent-open', 'parent-pread')],
+                         'block_worker_owns_source_io')
+        fields = dict(item.split('=', 1) for item in children[0][2:])
+        self.assertGreaterEqual(int(fields['source_opens']), 1,
+                                'block_valid_source_open_observed')
+        self.assertGreaterEqual(int(fields['preads']), 1,
+                                'block_valid_source_read_observed')
+        self.assertGreaterEqual(int(fields['block_inits']), 1,
+                                'block_valid_dispatch_observed')
+
+    def test_block_busy_cancel_and_reuse(self):
+        # The test-only hold keeps the real worker (owned PID from the observer
+        # fork record) alive after the block-query allocation. The slot must
+        # stay BUSY until that worker and its process group are reaped.
+        self.block_wire({'YAN_MCP_TEST_BLOCK_HOLD': str(self.root/'block-hold')})
+        hold = self.root/'block-hold'
+        self.wire.send('tools/call', ident=7,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        pid = self.first_observer_fork()
+        self.assertIsNotNone(pid, 'block_worker_fork_observed')
+        self.wire.send('tools/call', ident=8,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        r = self.wire.get()
+        self.assertEqual(8, r['id'], 'block_busy_second_id')
+        self.assertEqual({'code': 'BUSY'}, self.reply_code(r), 'block_busy_boundary')
+        self.wire.send('notifications/cancelled', ident=None, modern=False,
+                       params={'requestId': 7})
+        time.sleep(.1)
+        self.wire.send('tools/call', ident=9,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        r = self.wire.get(timeout=2)
+        self.assertEqual(9, r['id'], 'block_busy_before_reap_id')
+        self.assertEqual({'code': 'BUSY'}, self.reply_code(r), 'block_busy_before_reap')
+        self.assertFalse(gone(pid), 'block_worker_held_until_released')
+        hold.write_text('go')
+        deadline = time.monotonic()+10
+        while not gone(pid):
+            if time.monotonic() >= deadline:
+                raise RuntimeError('harness timeout waiting for cancelled block worker reap')
+            time.sleep(.01)
+        deadline = time.monotonic()+10
+        while True:
+            try:
+                os.killpg(pid, 0)
+            except ProcessLookupError:
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError('harness timeout waiting for block worker group reap')
+            time.sleep(.01)
+        self.wire.send('tools/call', ident=10,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        r = self.wire.get()
+        self.assertEqual(10, r['id'], 'block_cancel_suppressed_no_stale_reply')
+        self.assertFalse(r['result']['isError'], 'block_cancel_reuse_after_reap')
+        self.assertEqual(1, r['result']['structuredContent']['total'],
+                         'block_cancel_reuse_after_reap')
+        try:
+            extra = self.wire.get(timeout=.2)
+        except RuntimeError:
+            extra = None
+        self.assertIsNone(extra, 'block_cancel_no_stale_reply')
+
+    def test_block_cleanup_failure(self):
+        self.block_wire({'YAN_MCP_TEST_CLEANUP_FAILURE': '1'})
+        self.wire.send('tools/call', ident=7,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        r = self.wire.get()
+        self.assertTrue(r['result']['isError'], 'block_cleanup_is_error')
+        self.assertEqual(json.loads(r['result']['content'][0]['text']), {'code': 'IO'},
+                         'block_cleanup_is_error')
+        self.assertNotIn('structuredContent', r['result'], 'block_cleanup_no_context')
+
+    def test_block_close_precedence_keeps_service_error(self):
+        # Cleanup/close fails in every worker; an existing service error keeps
+        # its own token while plain success is the only case promoted to IO.
+        self.block_wire({'YAN_MCP_TEST_CLEANUP_FAILURE': '1'},
+                        files=[('blocks', b'@block a\nhello\n'),
+                               ('bad', b'@yan-note 9\n@end\n'),
+                               ('binary', b'@block a\n\0')])
+        for ident, (name, code) in enumerate(
+                (('missing', 'NOT_FOUND'), ('bad', 'METADATA'),
+                 ('binary', 'INVALID_TEXT')), start=7):
+            self.wire.send('tools/call', ident=ident,
+                           params={'name': 'yanos_block_list', 'arguments': {'name': name}})
+            r = self.wire.get()
+            self.assertTrue(r['result']['isError'], 'block_close_keeps_service_error')
+            self.assertEqual({'code': code}, self.reply_code(r),
+                             'block_close_keeps_' + code.lower())
+            self.assertNotIn('structuredContent', r['result'],
+                             'block_close_keeps_no_context_' + code.lower())
+        self.wire.send('tools/call', ident=10,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        r = self.wire.get()
+        self.assertTrue(r['result']['isError'], 'block_close_success_becomes_io')
+        self.assertEqual({'code': 'IO'}, self.reply_code(r), 'block_close_success_becomes_io')
+        self.assertNotIn('structuredContent', r['result'], 'block_close_success_no_context')
+
+    def test_block_worker_memory_failure(self):
+        self.block_wire({'YAN_MCP_TEST_WORKER_ALLOC_FAILURE': '1'})
+        self.wire.send('tools/call', ident=7,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        r = self.wire.get()
+        self.assertTrue(r['result']['isError'], 'block_memory_is_error')
+        self.assertEqual({'code': 'IO'}, self.reply_code(r), 'block_memory_is_io')
+        self.assertNotIn('structuredContent', r['result'], 'block_memory_no_context')
+
+    def test_block_bad_domain_rejected(self):
+        self.block_wire({'YAN_MCP_TEST_WORKER_FRAME': 'bad-domain'})
+        self.wire.send('tools/call', ident=7,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        r = self.wire.get()
+        self.assertTrue(r['result']['isError'], 'block_bad_domain_is_error')
+        self.assertEqual({'code': 'IO'}, self.reply_code(r), 'block_bad_domain_is_io')
+        self.assertNotIn('structuredContent', r['result'], 'block_bad_domain_no_context')
+
+    def test_block_result_out_of_range_rejected(self):
+        self.block_wire({'YAN_MCP_TEST_WORKER_FRAME': 'bad-result'})
+        self.wire.send('tools/call', ident=7,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        r = self.wire.get()
+        self.assertTrue(r['result']['isError'], 'block_bad_result_is_error')
+        self.assertEqual({'code': 'IO'}, self.reply_code(r), 'block_bad_result_is_io')
+        self.assertNotIn('structuredContent', r['result'], 'block_bad_result_no_context')
+
+    def test_block_truncated_header_rejected(self):
+        self.block_wire({'YAN_MCP_TEST_WORKER_FRAME': 'truncated-header'})
+        self.wire.send('tools/call', ident=7,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        r = self.wire.get()
+        self.assertTrue(r['result']['isError'], 'block_truncated_header_is_error')
+        self.assertEqual({'code': 'IO'}, self.reply_code(r), 'block_truncated_header_is_io')
+        self.assertNotIn('structuredContent', r['result'],
+                         'block_truncated_header_no_context')
+
+    def test_block_truncated_body_rejected(self):
+        self.block_wire({'YAN_MCP_TEST_WORKER_FRAME': 'truncated-body'})
+        self.wire.send('tools/call', ident=7,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        r = self.wire.get()
+        self.assertTrue(r['result']['isError'], 'block_truncated_body_is_error')
+        self.assertEqual({'code': 'IO'}, self.reply_code(r), 'block_truncated_body_is_io')
+        self.assertNotIn('structuredContent', r['result'], 'block_truncated_body_no_context')
+
+    def test_block_extra_bytes_rejected(self):
+        self.block_wire({'YAN_MCP_TEST_WORKER_FRAME': 'extra-bytes'})
+        self.wire.send('tools/call', ident=7,
+                       params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
+        r = self.wire.get()
+        self.assertTrue(r['result']['isError'], 'block_extra_bytes_is_error')
+        self.assertEqual({'code': 'IO'}, self.reply_code(r), 'block_extra_bytes_is_io')
+        self.assertNotIn('structuredContent', r['result'], 'block_extra_bytes_no_context')
 
     def test_worker_pipe_close_failure(self):
         r = self.search({'YAN_MCP_TEST_WRITER_CLOSE_FAILURE': '1'}, probe=True)

@@ -45,6 +45,7 @@ console_c=""
 drive="auto"
 strict=0
 mutation=0
+no_effect=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -57,6 +58,7 @@ while [ $# -gt 0 ]; do
         --drive) drive="$2"; shift 2 ;;
         --strict) strict=1; shift ;;
         --mutation) mutation=1; shift ;;
+        --no-effect) no_effect=1; shift ;;
         *) echo "run_console.sh: unknown argument '$1'" >&2; exit 2 ;;
     esac
 done
@@ -82,10 +84,6 @@ os_dir="$source/os"
 # under test, so a missing one is a hard failure. Deleting an implementation
 # must never be a way to a green suite: CTest records 77 as a skip, and a skip
 # is not a pass.
-if [ ! -x "$gcc" ] && ! command -v "$gcc" > /dev/null 2>&1; then
-    echo "SKIP: no cross toolchain at '$gcc'"
-    exit 77
-fi
 missing=0
 for required in "$console_c" "$os_dir/console.h" "$os_dir/platform.h" \
                 "$guest_dir/console_check.c" "$guest_dir/mtrap_entry.S" \
@@ -104,6 +102,14 @@ if [ -n "$run" ] && [ ! -x "$run" ]; then
     exit 1
 fi
 [ "$missing" -eq 0 ] || exit 1
+
+# The cross toolchain is the only external dependency. Check it only after all
+# local sources have been proven present, so a missing implementation can never
+# be hidden by a SKIP.
+if [ ! -x "$gcc" ] && ! command -v "$gcc" > /dev/null 2>&1; then
+    echo "SKIP: no cross toolchain at '$gcc'"
+    exit 77
+fi
 
 # A cross toolchain locates `as` and `ld` through its own directory.
 gcc_dir="$(cd "$(dirname "$gcc")" && pwd)"
@@ -162,8 +168,8 @@ expected_case=("no terminal: the device must deliver nothing" \
 
 scenario_extra_options() {
     case "$1" in
-        headless) printf '%s' "--no-terminal" ;;
-        refused) printf '%s' "--refuse-tx-after 2" ;;
+        headless) printf '%s' "--no-terminal --uart-read-limit 37" ;;
+        refused) printf '%s' "--refuse-tx-after 2 --txdata-limit 2" ;;
         disconnect) printf '%s' "--disconnect-when-drained --disconnect-after-drain 2000" ;;
         echo-refused) printf '%s' "--refuse-tx-after 0" ;;
         echo-refused-backspace) printf '%s' "--refuse-tx-after 2" ;;
@@ -213,13 +219,15 @@ write_drive_source() {
 #include "yan/cpu.h"
 #include "yan/image.h"
 #include "yan/interrupt.h"
+#include "yan/uart.h"
 
 enum {
     EXIT_PASS = 0,
     EXIT_USAGE = 2,
     EXIT_NO_TERMINATION = 4,
     EXIT_HOST_ERROR = 5,
-    EXIT_GUEST_FAILURE = 6
+    EXIT_GUEST_FAILURE = 6,
+    EXIT_CONTRACT = 7
 };
 
 #define FEED_CAPACITY 256
@@ -229,6 +237,44 @@ typedef struct {
     long refuse_after; /* negative: the backend never refuses */
     FILE *capture;
 } Backend;
+
+static uint64_t uart_read_limit = UINT64_MAX;
+static uint64_t txdata_limit = UINT64_MAX;
+static uint64_t uart_status_reads;
+static uint64_t txdata_writes;
+
+static void contract_failure(const char *name)
+{
+    fprintf(stderr, "CONTRACT %s\n", name);
+    exit(EXIT_CONTRACT);
+}
+
+YanBusResult __real_yan_bus_read(const YanBus *, uint32_t, size_t, uint32_t *);
+YanBusResult __real_yan_bus_write(YanBus *, uint32_t, size_t, uint32_t);
+
+YanBusResult __wrap_yan_bus_read(const YanBus *bus, uint32_t address,
+                                 size_t width, uint32_t *value)
+{
+    if (address == YAN_UART_BASE + YAN_UART_STATUS) {
+        ++uart_status_reads;
+        if (uart_read_limit != UINT64_MAX && uart_status_reads > uart_read_limit) {
+            contract_failure("uart-read-limit");
+        }
+    }
+    return __real_yan_bus_read(bus, address, width, value);
+}
+
+YanBusResult __wrap_yan_bus_write(YanBus *bus, uint32_t address,
+                                  size_t width, uint32_t value)
+{
+    if (address == YAN_UART_BASE + YAN_UART_TXDATA) {
+        ++txdata_writes;
+        if (txdata_limit != UINT64_MAX && txdata_writes > txdata_limit) {
+            contract_failure("txdata-write-limit");
+        }
+    }
+    return __real_yan_bus_write(bus, address, width, value);
+}
 
 static bool backend_tx_ready(void *context)
 {
@@ -305,6 +351,10 @@ int main(int argc, char **argv)
             ram_size = value;
         } else if (strcmp(argv[i], "--max-steps") == 0 && i + 1 < argc) {
             if (!number(argv[++i], &max_steps)) return EXIT_USAGE;
+        } else if (strcmp(argv[i], "--uart-read-limit") == 0 && i + 1 < argc) {
+            if (!number(argv[++i], &uart_read_limit)) return EXIT_USAGE;
+        } else if (strcmp(argv[i], "--txdata-limit") == 0 && i + 1 < argc) {
+            if (!number(argv[++i], &txdata_limit)) return EXIT_USAGE;
         } else if (strcmp(argv[i], "--refuse-tx-after") == 0 && i + 1 < argc) {
             if (!number(argv[++i], &value)) return EXIT_USAGE;
             refuse_after = (long)value;
@@ -470,6 +520,7 @@ build_scripted_drive() {
     write_drive_source
     "$cc" -O1 -std=c17 -I "$source/include" -I "$source/tools" \
         -o "$work/console_drive" "$work/console_drive.c" \
+        -Wl,--wrap=yan_bus_read -Wl,--wrap=yan_bus_write \
         "$source/tools/host_file.c" "$source"/src/*.c > "$work/drive-build.log" 2>&1
 }
 
@@ -485,25 +536,103 @@ hex_to_bin() { # $1 = hex string, $2 = output file
 reported_code() { # $1 = log file; prints the failure code the runner named
     sed -n 's/.*reported failure code \([0-9][0-9]*\) .*/\1/p' "$1" | head -n 1
 }
+reported_contract() { # $1 = log file; prints the exact CONTRACT name
+    sed -n 's/^CONTRACT \([a-z0-9-]*\)$/\1/p' "$1" | head -n 1
+}
 
-# $1 = scenario index, $2 = capture file. True when what the driver delivered is
-# exactly the expected stream, or - for the one scenario whose cut point the
-# driver does not control - a prefix of it.
-capture_matches() {
+# $1 = scenario index, $2 = capture file. Echoes ok, mismatch or error.
+# Unlike a boolean, an unreadable capture or stat failure is an error, never a
+# contract mismatch.
+capture_state() {
     local index="$1" capture="$2"
     local expected="$work/capture/expected-${names[index]}.bin"
-    hex_to_bin "${captures[index]}" "$expected"
+    if ! hex_to_bin "${captures[index]}" "$expected" 2>/dev/null; then
+        printf 'error\n'
+        return
+    fi
+    if [ ! -r "$capture" ] || [ ! -r "$expected" ]; then
+        printf 'error\n'
+        return
+    fi
     if cmp -s "$expected" "$capture"; then
-        return 0
+        printf 'ok\n'
+        return
     fi
     if [ "${capture_rules[index]}" = "prefix" ]; then
         local size
-        size="$(stat -c %s "$capture")"
-        head -c "$size" "$expected" | cmp -s - "$capture"
-        return $?
+        if ! size="$(stat -c %s "$capture" 2>/dev/null)"; then
+            printf 'error\n'
+            return
+        fi
+        if head -c "$size" "$expected" | cmp -s - "$capture"; then
+            printf 'ok\n'
+        else
+            printf 'mismatch\n'
+        fi
+        return
     fi
-    return 1
+    printf 'mismatch\n'
 }
+
+capture_matches() {
+    [ "$(capture_state "$1" "$2")" = ok ]
+}
+
+# BEGIN CONSOLE_MUTATION_VERDICT
+# Pure argv-only classifier. It performs no I/O and reads no shell globals.
+# argv: status code contract sanitizer designated expected_kind expected_value
+#       capture_state(ok|mismatch|error)
+console_mutation_verdict() {
+    local status="$1" code="$2" contract="$3" sanitizer="$4"
+    local designated="$5" kind="$6" expected="$7" capture="$8"
+    if [ "$sanitizer" = "1" ]; then
+        printf 'harness\n'; return
+    fi
+    if [ "$status" -eq 4 ] || [ "$status" -eq 5 ] ||
+       [ "$status" -ge 128 ] ||
+       { [ "$status" -ne 0 ] && [ "$status" -ne 6 ] && [ "$status" -ne 7 ]; }; then
+        printf 'harness\n'; return
+    fi
+    if [ "$status" -eq 6 ]; then
+        case "$code" in
+            ''|*[!0-9]*) printf 'harness\n'; return ;;
+        esac
+        if [ "$code" -ge $((0xbad0)) ]; then
+            printf 'harness\n'; return
+        fi
+        if [ "$designated" != "1" ]; then
+            printf 'ignore\n'; return
+        fi
+        if [ "$kind" = "code" ] && [ "$code" = "$expected" ]; then
+            printf 'detect\n'; return
+        fi
+        printf 'harness\n'; return
+    fi
+    if [ "$status" -eq 7 ]; then
+        if [ "$designated" != "1" ]; then
+            printf 'ignore\n'; return
+        fi
+        if [ "$kind" = "contract" ] && [ "$contract" = "$expected" ]; then
+            printf 'detect\n'; return
+        fi
+        printf 'harness\n'; return
+    fi
+    # status 0
+    if [ "$designated" != "1" ]; then
+        printf 'ignore\n'; return
+    fi
+    case "$capture" in
+        ok) printf 'survivor\n' ;;
+        mismatch)
+            if [ "$kind" = "capture" ]; then
+                printf 'detect\n'
+            else
+                printf 'harness\n'
+            fi ;;
+        *) printf 'harness\n' ;;
+    esac
+}
+# END CONSOLE_MUTATION_VERDICT
 
 # The Guest's own panic handler ends the run with 0xbad0 | cause
 # (tests/guest/mtrap.h), which is not one of the console check numbers.
@@ -676,11 +805,12 @@ else
 fi
 
 # ---- mutation check ---------------------------------------------------------
+if [ "$no_effect" -eq 1 ] && [ "$mutation" -ne 1 ]; then
+    echo "run_console.sh: --no-effect requires --mutation" >&2
+    exit 2
+fi
 if [ "$mutation" -eq 1 ]; then
     if [ "$scripted" -eq 0 ]; then
-        # Same reason as above: without the scripted drive the planted defects
-        # cannot be judged at all, and "the check could not run" must not be
-        # reported in a way CTest turns into a pass or a quiet skip.
         echo "FAIL mutation check: the scripted drive is unavailable, so no defect can be judged"
         exit 1
     fi
@@ -693,23 +823,21 @@ if [ "$mutation" -eq 1 ]; then
                   echo-not-written echo-refusal-ignored)
     survivors=0
     detected=0
+    harness_errors=0
     for mutant in "${mutant_names[@]}"; do
         copy="$work/mutants/$mutant.c"
         rm -f "$copy"
         cp -a "$console_c" "$copy"
         before="$(md5sum < "$copy")"
+        if [ "$no_effect" -eq 1 ]; then
+            printf '\n/* no-effect control: textual only */\n' >> "$copy"
+        else
         case "$mutant" in
             headless-polls)
                 sed -i 's#^        if (!yan_os_uart_connected()) {#        if (0) {#' "$copy" ;;
             putc-writes-without-ready-check)
-                # Writes TXDATA without consulting TX_READY at all: the device
-                # refuses the byte, so nothing is delivered, but the driver says
-                # it succeeded.
                 sed -i 's#    if (yan_os_uart_put((uint8_t)c) != 0) {#    YAN_OS_MMIO_WRITE32(YAN_OS_UART_BASE + YAN_OS_UART_TXDATA, (uint32_t)(uint8_t)c);\n    if (0) {#' "$copy" ;;
             putc-ignores-refusal-result)
-                # Consults the device but drops its answer, which is the softer
-                # version of the same defect: the byte is refused, the caller is
-                # told it was written.
                 sed -i 's#    if (yan_os_uart_put((uint8_t)c) != 0) {#    (void)yan_os_uart_put((uint8_t)c);\n    if (0) {#' "$copy" ;;
             puts-ignores-refusal)
                 sed -i 's#^        if (result != YAN_OS_OK) {#        if (0) {#' "$copy" ;;
@@ -722,37 +850,58 @@ if [ "$mutation" -eq 1 ]; then
             capacity-zero-not-rejected)
                 sed -i 's#    if (buffer == NULL || capacity == 0 || length == NULL) {#    if (buffer == NULL) {#' "$copy" ;;
             echo-not-written)
-                # The echo call is dropped entirely: the bytes never reach the
-                # terminal, so the capture assertions bite, and a refusal cannot
-                # be noticed because nothing is written at all. One sed per echo
-                # call site, because the character, the backspace and the line
-                # ending are separate code.
                 sed -i 's#        if (yan_os_console_putc((char)byte) != YAN_OS_OK) {#        if (0) {#' "$copy"
                 sed -i 's#                if (yan_os_console_puts("\\b \\b") != YAN_OS_OK) {#                if (0) {#' "$copy"
                 sed -i 's#            if (yan_os_console_puts("\\r\\n") != YAN_OS_OK) {#            if (0) {#' "$copy" ;;
             echo-refusal-ignored)
-                # The echo is still written, its result is dropped: the terminal
-                # never showed the character, the erase or the line ending, yet
-                # getline completes the line. This isolates the refused-echo
-                # branch itself, so only the scenarios that refuse an echo can
-                # catch it.
                 sed -i 's#        if (yan_os_console_putc((char)byte) != YAN_OS_OK) {#        (void)yan_os_console_putc((char)byte);\n        if (0) {#' "$copy"
                 sed -i 's#                if (yan_os_console_puts("\\b \\b") != YAN_OS_OK) {#                (void)yan_os_console_puts("\\b \\b");\n                if (0) {#' "$copy"
                 sed -i 's#            if (yan_os_console_puts("\\r\\n") != YAN_OS_OK) {#            (void)yan_os_console_puts("\\r\\n");\n            if (0) {#' "$copy" ;;
         esac
+        fi
         after="$(md5sum < "$copy")"
         if [ "$before" = "$after" ]; then
-            echo "FAIL mutation $mutant was not applied (pattern mismatch)"
-            survivors=$((survivors + 1))
+            echo "HARNESS ERROR mutation $mutant: anchor mismatch (defect not applied)"
+            harness_errors=$((harness_errors + 1))
             continue
         fi
-        caught_by=""
+
+        # Designated scenario and exact answer for this mutant.
+        case "$mutant" in
+            headless-polls) d_index=0; d_kind=contract; d_value="uart-read-limit" ;;
+            putc-writes-without-ready-check) d_index=2; d_kind=contract; d_value="txdata-write-limit" ;;
+            putc-ignores-refusal-result) d_index=2; d_kind=code; d_value=32 ;;
+            puts-ignores-refusal) d_index=2; d_kind=code; d_value=33 ;;
+            backspace-without-empty-check) d_index=3; d_kind=code; d_value=42 ;;
+            boundary-writes-past-capacity) d_index=4; d_kind=code; d_value=52 ;;
+            crlf-not-swallowed) d_index=5; d_kind=code; d_value=65 ;;
+            capacity-zero-not-rejected) d_index=0; d_kind=code; d_value=4 ;;
+            echo-not-written) d_index=3; d_kind=capture; d_value="" ;;
+            echo-refusal-ignored) d_index=8; d_kind=code; d_value=91 ;;
+        esac
+
+        # R2: build every scenario image; any build failure is a fatal harness error.
         build_failures=0
+        mutant_harness=0
         for index in "${!names[@]}"; do
             elf="$work/images/mutant-$mutant-${names[index]}.elf"
             if ! build_image "${macros[index]}" "$copy" "$elf" \
                     > "$work/images/mutant-$mutant-${names[index]}.log" 2>&1; then
                 build_failures=$((build_failures + 1))
+                echo "HARNESS ERROR mutation $mutant: ${names[index]} image build failed"
+                tail -n 3 "$work/images/mutant-$mutant-${names[index]}.log" | sed 's/^/    /'
+            fi
+        done
+        if [ "$build_failures" -ne 0 ]; then
+            mutant_harness=1
+        fi
+
+        native_detected=0
+        # All 11 images were built above. Run only the designated scenario; its
+        # exact contract/assertion is the verdict.
+        for index in "$d_index"; do
+            elf="$work/images/mutant-$mutant-${names[index]}.elf"
+            if [ ! -e "$elf" ]; then
                 continue
             fi
             capture="$work/capture/mutant-$mutant-${names[index]}.bin"
@@ -764,40 +913,50 @@ if [ "$mutation" -eq 1 ]; then
                 > "$log" 2>&1
             status=$?
             code="$(reported_code "$log")"
-            if [ "$status" -ne 0 ]; then
-                if is_trap_code "$code"; then
-                    caught_by="$caught_by ${names[index]}(trap $code)"
-                elif [ "$status" -eq 4 ]; then
-                    caught_by="$caught_by ${names[index]}(no termination)"
-                else
-                    caught_by="$caught_by ${names[index]}(exit $status, check ${code:-?})"
-                fi
-                continue
+            contract="$(reported_contract "$log")"
+
+            sanitizer=0
+            if grep -Eqi 'AddressSanitizer|runtime error:' "$log"; then
+                sanitizer=1
             fi
-            expected="$work/capture/expected-${names[index]}.bin"
-            hex_to_bin "${captures[index]}" "$expected"
-            if ! capture_matches "$index" "$capture"; then
-                caught_by="$caught_by ${names[index]}(capture)"
-            fi
+            capture_fact="$(capture_state "$index" "$capture")"
+            verdict="$(console_mutation_verdict "$status" "${code:-}" \
+                "${contract:-}" "$sanitizer" 1 "$d_kind" "$d_value" "$capture_fact")"
+            case "$verdict" in
+                detect) native_detected=1 ;;
+                survivor) ;;
+                ignore) ;;
+                harness)
+                    echo "HARNESS ERROR mutation $mutant: ${names[index]} status $status code ${code:-?} contract ${contract:-?} capture $capture_fact"
+                    mutant_harness=1 ;;
+                *) echo "HARNESS ERROR mutation $mutant: bad verdict '$verdict'"
+                   mutant_harness=1 ;;
+            esac
         done
-        [ "$build_failures" -eq 0 ] || echo "    note: $build_failures scenario image(s) did not build for this mutant"
-        if [ -n "$caught_by" ]; then
-            echo "PASS mutation $mutant detected by:$caught_by"
+        if [ "$mutant_harness" -ne 0 ]; then
+            harness_errors=$((harness_errors + 1))
+            echo "HARNESS ERROR mutation $mutant: fatal; detection is not a PASS"
+            continue
+        fi
+        if [ "$native_detected" -eq 1 ]; then
+            echo "PASS mutation $mutant detected by designated ${names[$d_index]} (${d_kind} ${d_value})"
             detected=$((detected + 1))
         else
-            echo "FAIL mutation $mutant survived every scenario"
+            echo "FAIL mutation $mutant survived (designated ${names[$d_index]} did not detect)"
             survivors=$((survivors + 1))
         fi
     done
     console_after="$(md5sum < "$console_c")"
     if [ "$console_before" != "$console_after" ]; then
-        echo "FAIL the mutation check modified $console_c"
-        failed=1
+        echo "HARNESS ERROR the mutation check modified $console_c"
+        harness_errors=$((harness_errors + 1))
     else
         echo "mutation: every defect was planted in a copy; $console_c is unchanged (md5 $console_after)"
     fi
-    echo "mutation: $detected detected, $survivors survived"
+    echo "mutation: $detected detected, $survivors survived, $harness_errors harness errors"
     [ "$survivors" -eq 0 ] || failed=1
+    [ "$harness_errors" -eq 0 ] || failed=1
+    [ "$detected" -eq 10 ] || failed=1
 fi
 
 # ---- verdict ----------------------------------------------------------------

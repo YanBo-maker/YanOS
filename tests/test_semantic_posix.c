@@ -140,6 +140,168 @@ static void test_one_block_empty_filesystem_is_legal(void)
     TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
     assert_file(image, disk, 4096);
 }
+static YanSemanticCorpus image_corpus;
+static void test_image_only_open_without_dependencies(void)
+{
+    TEST_ASSERT_EQUAL_INT(0, unlink(model));
+    TEST_ASSERT_EQUAL_INT(0, unlink(runner));
+    TEST_ASSERT_EQUAL_INT(-1, access(index_path, F_OK));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_open_image(&adapter, image));
+    TEST_ASSERT_EQUAL_INT(-1, adapter.index_fd);
+    TEST_ASSERT_NULL(adapter.index_path);
+    TEST_ASSERT_NULL(adapter.temporary);
+    TEST_ASSERT_FALSE(adapter.owns_temporary);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)sizeof disk, adapter.image_size);
+    TEST_ASSERT_EQUAL_INT(O_RDONLY, fcntl(adapter.image_fd, F_GETFL) & O_ACCMODE);
+    yan_semantic_posix_bind_source(&adapter, &source);
+    uint32_t cursor = 0; YanSemanticFile file; uint8_t bytes[6];
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, source.next(source.context, &cursor, &file));
+    TEST_ASSERT_EQUAL_STRING("note", file.name);
+    TEST_ASSERT_EQUAL_UINT32(0, file.slot);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, source.read(source.context, file.name, 0, bytes, 6));
+    TEST_ASSERT_EQUAL_MEMORY("notes\n", bytes, 6);
+    TEST_ASSERT_EQUAL(YAN_FS_IO_ERROR,
+        adapter.fs.io.write_block(adapter.fs.io.context, 0, disk));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL_INT(-1, adapter.image_fd);
+    assert_file(image, disk, sizeof disk);
+    /* The same absent dependencies still make the four-path open DEPENDENCY. */
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_DEPENDENCY, open_adapter());
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+}
+static void test_image_open_validation_and_geometry(void)
+{
+    char missing[256], not_a_file[256];
+    snprintf(missing, sizeof missing, "%s/missing.img", directory);
+    snprintf(not_a_file, sizeof not_a_file, "%s/not-a-file", directory);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_posix_open_image(NULL, image));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_posix_open_image(&adapter, NULL));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_posix_open_image(&adapter, ""));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_IO, yan_semantic_posix_open_image(&adapter, missing));
+    TEST_ASSERT_EQUAL_INT(-1, adapter.image_fd);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+
+    write_file(image, disk, 100);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_CORRUPT, yan_semantic_posix_open_image(&adapter, image));
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(0, adapter.image_fd);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL_INT(-1, adapter.image_fd);
+
+    write_file(image, disk, 4097);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_CORRUPT, yan_semantic_posix_open_image(&adapter, image));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL_INT(-1, adapter.image_fd);
+
+    TEST_ASSERT_EQUAL_INT(0, mkdir(not_a_file, 0700));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_CORRUPT, yan_semantic_posix_open_image(&adapter, not_a_file));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL_INT(0, rmdir(not_a_file));
+}
+static void test_image_digest_matches_corpus_scan(void)
+{
+    static const uint8_t binary[] = {0x00, 0xff, 0x80, 0x0a};
+    TEST_ASSERT_EQUAL(YAN_FS_OK, yan_fs_create(&writer, "bin", binary, sizeof binary));
+    write_file(image, disk, sizeof disk);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_open_image(&adapter, image));
+    yan_semantic_posix_bind_source(&adapter, &source);
+    uint8_t digest[32];
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, digest));
+    memset(&image_corpus, 0, sizeof image_corpus);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_corpus_scan(&image_corpus, &source));
+    TEST_ASSERT_EQUAL_UINT32(1, image_corpus.skipped);
+    TEST_ASSERT_EQUAL_MEMORY(image_corpus.source_hash, digest, 32);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    assert_file(image, disk, sizeof disk);
+}
+static void test_image_digest_ignores_bad_header(void)
+{
+    uint8_t before[32], after[32];
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_open_image(&adapter, image));
+    yan_semantic_posix_bind_source(&adapter, &source);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, before));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+
+    TEST_ASSERT_EQUAL(YAN_FS_OK, yan_fs_create(&writer, "bad",
+        (const uint8_t *)"@yan-note 9\n", 12));
+    write_file(image, disk, sizeof disk);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_open_image(&adapter, image));
+    yan_semantic_posix_bind_source(&adapter, &source);
+    memset(&image_corpus, 0, sizeof image_corpus);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_METADATA,
+                      yan_semantic_corpus_scan(&image_corpus, &source));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, after));
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(before, after, 32));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+}
+static void test_cleanup_close_error_and_idempotence(void)
+{
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_open_image(&adapter, image));
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(0, adapter.image_fd);
+    /* Artificial fault: close the owned descriptor behind the adapter so its
+     * own close(2) returns EBADF. The test is single-threaded and opens no
+     * descriptor in between, so the number cannot be reused. */
+    TEST_ASSERT_EQUAL_INT(0, close(adapter.image_fd));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_IO, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL_INT(-1, adapter.image_fd);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_open_image(&adapter, image));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL_INT(-1, adapter.image_fd);
+}
+static void test_typed_open_reports_unsupported_and_legacy_mapping(void)
+{
+    uint8_t saved[4096];
+    memcpy(saved, disk, sizeof saved);
+    disk[8] = 2; disk[9] = disk[10] = disk[11] = 0;
+    uint32_t crc = yan_fs_metadata_crc(disk);
+    disk[60] = (uint8_t)crc; disk[61] = (uint8_t)(crc >> 8);
+    disk[62] = (uint8_t)(crc >> 16); disk[63] = (uint8_t)(crc >> 24);
+    write_file(image, disk, sizeof disk);
+    memset(&adapter, 0, sizeof adapter); adapter.image_fd = adapter.index_fd = -1;
+    TEST_ASSERT_EQUAL_INT(YAN_IMAGE_OPEN_UNSUPPORTED,
+        yan_semantic_posix_open_image_ex(&adapter, image));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_CORRUPT,
+        yan_semantic_posix_open_image(&adapter, image));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    memcpy(disk, saved, sizeof saved);
+
+    write_file(image, disk, 100);
+    TEST_ASSERT_EQUAL_INT(YAN_IMAGE_OPEN_CORRUPT,
+        yan_semantic_posix_open_image_ex(&adapter, image));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_CORRUPT,
+        yan_semantic_posix_open_image(&adapter, image));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+
+    write_file(image, disk, 4097);
+    TEST_ASSERT_EQUAL_INT(YAN_IMAGE_OPEN_CORRUPT,
+        yan_semantic_posix_open_image_ex(&adapter, image));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+
+    char missing[256], not_a_file[256];
+    snprintf(missing, sizeof missing, "%s/missing.img", directory);
+    snprintf(not_a_file, sizeof not_a_file, "%s/not-a-file", directory);
+    TEST_ASSERT_EQUAL_INT(YAN_IMAGE_OPEN_IO,
+        yan_semantic_posix_open_image_ex(&adapter, missing));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_IO,
+        yan_semantic_posix_open_image(&adapter, missing));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL_INT(0, mkdir(not_a_file, 0700));
+    TEST_ASSERT_EQUAL_INT(YAN_IMAGE_OPEN_CORRUPT,
+        yan_semantic_posix_open_image_ex(&adapter, not_a_file));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+    TEST_ASSERT_EQUAL_INT(0, rmdir(not_a_file));
+
+    TEST_ASSERT_EQUAL_INT(YAN_IMAGE_OPEN_INVALID,
+        yan_semantic_posix_open_image_ex(&adapter, ""));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID,
+        yan_semantic_posix_open_image(&adapter, ""));
+}
 int main(void)
 {
     UNITY_BEGIN();
@@ -148,5 +310,11 @@ int main(void)
     RUN_TEST(test_discard_and_rename_failure_preserve_old);
     RUN_TEST(test_missing_dependency_before_index_observation);
     RUN_TEST(test_one_block_empty_filesystem_is_legal);
+    RUN_TEST(test_image_only_open_without_dependencies);
+    RUN_TEST(test_image_open_validation_and_geometry);
+    RUN_TEST(test_image_digest_matches_corpus_scan);
+    RUN_TEST(test_image_digest_ignores_bad_header);
+    RUN_TEST(test_cleanup_close_error_and_idempotence);
+    RUN_TEST(test_typed_open_reports_unsupported_and_legacy_mapping);
     return UNITY_END();
 }

@@ -4,6 +4,8 @@
 
 ## INTENTION
 
+后续扩展：[0033](0033-block-mcp-navigation.md)已获准增加四个只读块工具及其错误token，当前处于实施阶段。本文件的两工具集合保留为0031阶段契约；原两工具行为保持。
+
 现有Agent或harness发现YanOS工具，传入“设备如何叫醒处理器”，取得0030的完整原文、物理出处和同次身份，再由调用方生成回答。YanOS提供可信地定位到文件字节的检索结果，不生成答案、不验证答案是否真实。
 
 新增价值是可发现的工具schema、标准调用与错误、取消和进程生命周期。实现复用[0030](0030-retrieval-context-json.md)证据C API，不另造检索或解析人读MATCH行。生产入口为可选Host C17 Linux/WSL stdio MCP server；不修改Guest、YanFS磁盘格式、索引版本、模型输入或默认CLI行为。不下载新生成模型、不调用云API、不写笔记、不提供rebuild、任意路径或命令执行工具。
