@@ -192,7 +192,7 @@ YanSemanticResult yan_semantic_source_digest(const YanSemanticSource *source,
                                              uint8_t out[32])
 {
     if (out == NULL || !span(out, YAN_SEMANTIC_SHA256_DIGEST_SIZE) ||
-        !span(source, sizeof *source) || source == NULL ||
+        !span(source, sizeof *source) ||
         overlaps(out, YAN_SEMANTIC_SHA256_DIGEST_SIZE, source, sizeof *source))
         return YAN_SEMANTIC_INVALID;
     if (!source_ready(source) ||
