@@ -74,7 +74,9 @@ static bool enqueue(Server *s,const YanMcpRequest *request,const char *payload,s
     if (status!=YAN_MCP_REPLY_OK) {
         free(data); data=NULL; length=0;
         const char *fallback=status==YAN_MCP_REPLY_LIMIT ? "LIMIT" : "IO";
-        data=yan_mcp_reply(request,NULL,0,fallback,&length,NULL);
+        if (request->kind==YAN_MCP_BLOCK_LIST || request->kind==YAN_MCP_BLOCK_READ ||
+            request->kind==YAN_MCP_BLOCK_REFS || request->kind==YAN_MCP_BLOCK_BACKLINKS)
+            data=yan_mcp_reply(request,NULL,0,fallback,&length,NULL);
     }
     if (!data || length>YAN_MCP_QUEUE_MAX-s->queued) { free(data); return false; }
     Frame *frame=calloc(1,sizeof *frame);
