@@ -27,9 +27,52 @@ jobs:
             sanitizers: "OFF"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install RISC-V toolchain
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-riscv64-linux-gnu
+          riscv64-linux-gnu-gcc --version
+          dpkg-query -W gcc-11-riscv64-linux-gnu
       - name: Configure
+        if: runner.os != 'Linux'
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DYAN_ENABLE_SANITIZERS=${{ matrix.sanitizers }}
+      - name: Configure (Linux, Guest)
+        if: runner.os == 'Linux'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DYAN_ENABLE_SANITIZERS=${{ matrix.sanitizers }} -DYAN_BUILD_TOOLS=ON -DYAN_RISCV_PREFIX=riscv64-linux-gnu-
+      - name: Check Guest toolchain and registration
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          gcc_path=$(sed -n 's/^YAN_RISCV_GCC:FILEPATH=//p' build/CMakeCache.txt)
+          if [ -z "$gcc_path" ] || [ ! -x "$gcc_path" ]; then
+            echo "::error::工具链未找到：YAN_RISCV_GCC='${gcc_path}'"
+            exit 1
+          fi
+          grep -E '^(YAN_RISCV_GCC:FILEPATH|YAN_BUILD_TOOLS:BOOL)=' build/CMakeCache.txt
+          guest_count=$(ctest --test-dir build -N -R '^guest_' | sed -n 's/^Total Tests: //p')
+          if [ -z "$guest_count" ] || [ "$guest_count" -eq 0 ]; then
+            echo "::error::Guest 测试未注册：ctest -N -R '^guest_' 为 0"
+            exit 1
+          fi
+          echo "Guest 测试注册数：$guest_count"
       - name: Build
         run: cmake --build build --config ${{ matrix.config }} --parallel
       - name: Test
+        if: runner.os != 'Linux'
         run: ctest --test-dir build --build-config ${{ matrix.config }} --output-on-failure
+      - name: Test (Linux, no skips)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -o pipefail
+          ctest --test-dir build -N | sed -n 's/^  Test *#[0-9]*: //p' | sort
+          ctest --test-dir build --build-config ${{ matrix.config }} --output-on-failure 2>&1 | tee ctest.log
+          if [ ! -f ctest.log ]; then
+            echo "::error::ctest 日志不存在"
+            exit 1
+          fi
+          if grep -E '\(Skipped\)' ctest.log; then
+            echo "::error::存在被跳过的测试（见上方列表）"
+            exit 1
+          fi
