@@ -59,17 +59,75 @@ class Gate(unittest.TestCase):
     def test_required_inputs_hard_fail_before_external_skip(self):
         script=Path(__file__).with_name('run_mcp_mutation.py')
         with tempfile.TemporaryDirectory() as raw:
-            root=Path(raw); build=root/'build'
+            root=Path(raw); build=root/'build'; curl=root/'libcurl.a'
+            curl.write_text('placeholder')
             for name in REQUIRED:
                 p=root/name; p.parent.mkdir(parents=True,exist_ok=True); p.write_text('placeholder')
             for name in BUILD_REQUIRED:
                 p=build/name; p.parent.mkdir(parents=True,exist_ok=True); p.write_text('placeholder')
+            (build/'CMakeFiles/yan_mcp.dir/link.txt').write_text(
+                'cc CMakeFiles/yan_mcp.dir/tools/yan_mcp.c.o '
+                'CMakeFiles/yan_mcp.dir/tools/mcp_worker.c.o -o yan_mcp '
+                'libyan_mcp_protocol.a libyan_semantic_text.a')
+            (build/'CMakeFiles/mcp_fault_probe.dir/link.txt').write_text(
+                'cc CMakeFiles/mcp_fault_probe.dir/tools/yan_mcp.c.o '
+                'CMakeFiles/mcp_fault_probe.dir/tools/mcp_worker.c.o '
+                'CMakeFiles/mcp_fault_probe.dir/tests/mcp_fault_hooks.c.o '
+                '-o mcp_fault_probe libyan_mcp_protocol.a libyan_semantic_text.a')
             def invoke():
                 return subprocess.run([sys.executable,'-B',str(script),'--repo',str(root),'--build',str(build),
                     '--unity',str(root/'absent-unity'),'--yyjson-include',str(root/'absent-json'),
-                    '--yyjson-lib',str(root/'absent-json.a'),'--cc','absent-yan-compiler','--work',str(root/'work')],
+                    '--yyjson-lib',str(root/'absent-json.a'),'--curl-lib',str(curl),
+                    '--cc','absent-yan-compiler','--work',str(root/'work')],
                     capture_output=True,timeout=20)
+            # All repository/build inputs exist; only external tools are absent.
             self.assertEqual(77,invoke().returncode)
+            # Chief fixed-eight omission probe: each is hard failure 1.
+            for kind, name in (
+                    ('repo', 'os/memory.h'),
+                    ('build', 'CMakeFiles/yan_mcp.dir/tools/yan_mcp.c.o'),
+                    ('build', 'CMakeFiles/yan_mcp.dir/tools/mcp_worker.c.o'),
+                    ('build', 'CMakeFiles/mcp_fault_probe.dir/tools/yan_mcp.c.o'),
+                    ('build', 'CMakeFiles/mcp_fault_probe.dir/tools/mcp_worker.c.o'),
+                    ('build', 'CMakeFiles/mcp_fault_probe.dir/tests/mcp_fault_hooks.c.o'),
+                    ('build', 'libyan_mcp_protocol.a'),
+                    ('build', 'libyan_semantic_text.a')):
+                path=(root if kind=='repo' else build)/name
+                saved=path.read_text(); path.unlink()
+                self.assertEqual(1,invoke().returncode,name)
+                path.write_text(saved)
+            # Missing repository block header also hard-fails before external skip.
+            header=root/'os/note_blocks.h'; saved=header.read_text(); header.unlink()
+            self.assertEqual(1,invoke().returncode)
+            header.write_text(saved)
+            # Missing relink archive hard-fails before external 77.
+            archive=build/'libyan_block_query.a'; saved=archive.read_text(); archive.unlink()
+            self.assertEqual(1,invoke().returncode)
+            archive.write_text(saved)
+            # Missing actual link inputs named by the reviewer.
+            for name in ('CMakeFiles/mcp_fault_probe.dir/tests/mcp_fault_hooks.c.o',
+                         'libyan_mcp_protocol.a', 'libyan_semantic_text.a'):
+                path=build/name; saved=path.read_text(); path.unlink()
+                self.assertEqual(1,invoke().returncode, name)
+                path.write_text(saved)
+            # A token present only in link.txt proves parsing, not just a hand list.
+            dynamic=build/'CMakeFiles/yan_mcp.dir/tests/dynamic-only.o'
+            dynamic.parent.mkdir(parents=True,exist_ok=True)
+            dynamic.write_text('placeholder')
+            link=build/'CMakeFiles/yan_mcp.dir/link.txt'
+            saved_link=link.read_text()
+            link.write_text(saved_link+' CMakeFiles/yan_mcp.dir/tests/dynamic-only.o')
+            dynamic.unlink()
+            self.assertEqual(1,invoke().returncode)
+            dynamic.write_text('placeholder')
+            link.write_text(saved_link)
+            # Missing new direct-compile test source is a repository hard fail.
+            test=root/'tests/test_mcp_block_worker.c'; saved=test.read_text(); test.unlink()
+            self.assertEqual(1,invoke().returncode)
+            test.write_text(saved)
+            # A missing declared curl archive is external-only 77 after all inputs pass.
+            curl.unlink(); self.assertEqual(77,invoke().returncode)
+            curl.write_text('placeholder')
             (root/'tools/yan_mcp.c').unlink()
             self.assertEqual(1,invoke().returncode)
             (root/'tools/yan_mcp.c').write_text('placeholder')

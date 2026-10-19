@@ -1,5 +1,6 @@
 #include "semantic_corpus.h"
 #include "unity.h"
+#include <stdio.h>
 #include <string.h>
 
 typedef struct {
@@ -8,9 +9,12 @@ typedef struct {
     uint8_t repeated;
 } Entry;
 typedef struct {
-    Entry entries[63];
+    Entry entries[64];
     uint32_t count, reads, nexts;
-    bool read_fail;
+    bool read_fail, cursor_stall, flip;
+    uint32_t fail_read_at;
+    uint32_t flip_offset;
+    uint8_t flip_byte;
 } Fixture;
 static Fixture fixture;
 static YanSemanticCorpus corpus;
@@ -23,6 +27,7 @@ static YanSemanticResult next_file(void *opaque, uint32_t *cursor,
     ++f->nexts;
     if (*cursor >= f->count) return YAN_SEMANTIC_MISSING;
     *out = f->entries[*cursor].file;
+    if (f->cursor_stall) return YAN_SEMANTIC_OK;
     ++*cursor;
     return YAN_SEMANTIC_OK;
 }
@@ -31,7 +36,11 @@ static YanSemanticResult read_file(void *opaque, const char *name,
 {
     Fixture *f = opaque;
     ++f->reads;
-    if (f->read_fail) return YAN_SEMANTIC_IO;
+    /* fail_read_at is 1-based; 0 disables it. At or after that read the
+     * adapter fails, so a later file can fail after an earlier file already
+     * updated the hash and text state. */
+    if (f->read_fail || (f->fail_read_at && f->reads >= f->fail_read_at))
+        return YAN_SEMANTIC_IO;
     for (uint32_t i = 0; i < f->count; ++i) {
         Entry *e = &f->entries[i];
         if (strcmp(name, e->file.name) != 0) continue;
@@ -39,6 +48,10 @@ static YanSemanticResult read_file(void *opaque, const char *name,
             return YAN_SEMANTIC_IO;
         if (e->bytes) memcpy(out, e->bytes + offset, length);
         else memset(out, e->repeated, length);
+        /* Deliberately alter one byte so a content change can be tested on
+         * large repeated fixtures without allocating the whole file. */
+        if (f->flip && f->flip_offset >= offset && f->flip_offset - offset < length)
+            out[f->flip_offset - offset] = f->flip_byte;
         return YAN_SEMANTIC_OK;
     }
     return YAN_SEMANTIC_IO;
@@ -51,6 +64,37 @@ static void add(const char *name, uint32_t slot, const char *bytes)
     e->file.size = (uint32_t)strlen(bytes);
     e->bytes = (const uint8_t *)bytes;
 }
+static void reset_fixture(void)
+{
+    memset(&fixture, 0, sizeof fixture);
+}
+static void decode_hex(uint8_t out[32], const char *hex)
+{
+    for (unsigned i = 0; i < 32; ++i) {
+        unsigned hi = (unsigned)(hex[2 * i] - '0');
+        if (hi > 9) hi = hi - ('a' - '0') + 10;
+        unsigned lo = (unsigned)(hex[2 * i + 1] - '0');
+        if (lo > 9) lo = lo - ('a' - '0') + 10;
+        out[i] = (uint8_t)((hi << 4) | lo);
+    }
+}
+static void assert_digest(const char *hex)
+{
+    uint8_t expected[32], actual[32];
+    decode_hex(expected, hex);
+    memset(actual, 0x5a, sizeof actual);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, actual));
+    TEST_ASSERT_EQUAL_MEMORY(expected, actual, sizeof actual);
+}
+static void expect_digest_failure(YanSemanticResult expected)
+{
+    uint8_t out[32];
+    memset(out, 0xa5, sizeof out);
+    TEST_ASSERT_EQUAL(expected, yan_semantic_source_digest(&source, out));
+    for (unsigned i = 0; i < sizeof out; ++i)
+        TEST_ASSERT_EQUAL_UINT8(0xa5, out[i]);
+}
+
 void setUp(void)
 {
     memset(&fixture, 0, sizeof fixture);
@@ -180,6 +224,149 @@ static void test_exact_limit_with_repeated_dual_crlf_adjustment(void)
     ++fixture.entries[0].file.size;
     TEST_ASSERT_EQUAL(YAN_SEMANTIC_LIMIT, yan_semantic_corpus_scan(&corpus, &source));
 }
+static void test_digest_known_vectors(void)
+{
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_corpus_scan(&corpus, &source));
+    TEST_ASSERT_EQUAL_MEMORY("\xe3\xb0\xc4\x42\x98\xfc\x1c\x14\x9a\xfb\xf4\xc8"
+        "\x99\x6f\xb9\x24\x27\xae\x41\xe4\x64\x9b\x93\x4c\xa4\x95\x99\x1b"
+        "\x78\x52\xb8\x55", corpus.source_hash, 32);
+    assert_digest("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+
+    add("note", 0, "notes\n");
+    assert_digest("c7021e371caa3073458d8292325a3c8a1fe9404f755bcd814062afab23eaad4c");
+    uint8_t expected[32];
+    decode_hex(expected, "c7021e371caa3073458d8292325a3c8a1fe9404f755bcd814062afab23eaad4c");
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_corpus_scan(&corpus, &source));
+    TEST_ASSERT_EQUAL_MEMORY(expected, corpus.source_hash, 32);
+
+    reset_fixture();
+    add("z.txt", 4, "z\n"); add("a.txt", 1, "alpha\n");
+    assert_digest("adcd84eb3cad758087027299b16913087a570a9baffa66400398bee1b12b2a32");
+
+    reset_fixture();
+    static const uint8_t binary[] = {0x00, 0xff, 0x80, 0x0a};
+    add("bin", 0, ""); fixture.entries[0].bytes = binary; fixture.entries[0].file.size = 4;
+    add("txt", 1, "hello");
+    assert_digest("bb75bfe9ade4b13bf692f419f965563e45b1972359c992f6d1742c981e702228");
+}
+static void test_digest_matches_scan_and_tracks_source(void)
+{
+    static const uint8_t binary[] = {0x00, 0xff, 0x80, 0x0a};
+    uint8_t first[32];
+    add("note", 0, "notes\n");
+    add("bin", 1, ""); fixture.entries[1].bytes = binary; fixture.entries[1].file.size = 4;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_corpus_scan(&corpus, &source));
+    TEST_ASSERT_EQUAL_UINT32(1, corpus.skipped);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, first));
+    TEST_ASSERT_EQUAL_MEMORY(corpus.source_hash, first, 32);
+
+    /* Slot, name and binary content changes must move both identities. */
+    fixture.entries[1].file.slot = 2;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_corpus_scan(&corpus, &source));
+    uint8_t next[32];
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, next));
+    TEST_ASSERT_EQUAL_MEMORY(corpus.source_hash, next, 32);
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(first, next, 32));
+    memcpy(first, next, 32);
+
+    memcpy(fixture.entries[1].file.name, "bix", 4);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_corpus_scan(&corpus, &source));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, next));
+    TEST_ASSERT_EQUAL_MEMORY(corpus.source_hash, next, 32);
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(first, next, 32));
+
+    memcpy(first, next, 32);
+    static const uint8_t changed[] = {0x00, 0xfe, 0x80, 0x0a};
+    fixture.entries[1].bytes = changed;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_corpus_scan(&corpus, &source));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, next));
+    TEST_ASSERT_EQUAL_MEMORY(corpus.source_hash, next, 32);
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(first, next, 32));
+}
+static void test_digest_ignores_bad_header_and_segment_limit(void)
+{
+    add("bad", 0, "@yan-note 9\n");
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_METADATA, yan_semantic_corpus_scan(&corpus, &source));
+    assert_digest("533f835e2a3bef5ab934ebd57f66b8f9cb19c025c5e8ce76a04c3c8316345ca3");
+
+    reset_fixture();
+    add("large", 0, ""); fixture.entries[0].bytes = NULL;
+    fixture.entries[0].repeated = 'x';
+    fixture.entries[0].file.size = 512 + 8191 * 448 + 1;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_LIMIT, yan_semantic_corpus_scan(&corpus, &source));
+    uint8_t before[32], after[32];
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, before));
+    fixture.flip = true; fixture.flip_offset = 12345; fixture.flip_byte = 'y';
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_LIMIT, yan_semantic_corpus_scan(&corpus, &source));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, after));
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(before, after, 32));
+}
+static void test_digest_validation_and_unpublished_output(void)
+{
+    uint8_t out[32];
+
+    add("a", 0, "a"); add("b", 0, "b");
+    expect_digest_failure(YAN_SEMANTIC_CORRUPT);
+
+    reset_fixture(); add("a/b", 0, "a");
+    expect_digest_failure(YAN_SEMANTIC_CORRUPT);
+
+    reset_fixture(); add("a", 0, "a"); add("a", 1, "b");
+    expect_digest_failure(YAN_SEMANTIC_CORRUPT);
+
+    reset_fixture(); add("a", 63, "a");
+    expect_digest_failure(YAN_SEMANTIC_CORRUPT);
+
+    reset_fixture();
+    /* 63 legal files in slots 0..62 must be accepted; the next entry with an
+     * in-range slot then hits the explicit file-count cap, not the slot check. */
+    for (uint32_t i = 0; i < 63; ++i) {
+        char name[8];
+        snprintf(name, sizeof name, "f%02u", (unsigned)i);
+        add(name, i, "x");
+    }
+    memset(out, 0x5a, sizeof out);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, out));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_corpus_scan(&corpus, &source));
+    TEST_ASSERT_EQUAL_UINT32(63, corpus.file_count);
+    add("dup0", 0, "x");
+    expect_digest_failure(YAN_SEMANTIC_CORRUPT);
+
+    reset_fixture(); add("a", 0, "a"); fixture.cursor_stall = true;
+    expect_digest_failure(YAN_SEMANTIC_CORRUPT);
+
+    reset_fixture(); add("a", 0, "a"); fixture.read_fail = true;
+    expect_digest_failure(YAN_SEMANTIC_IO);
+
+    /* One 4096-byte file succeeds, then the second file's read fails. The
+     * partially updated SHA state must not publish any output byte. */
+    reset_fixture();
+    add("a", 0, ""); fixture.entries[0].bytes = NULL;
+    fixture.entries[0].repeated = 'a'; fixture.entries[0].file.size = 4096;
+    add("b", 1, "b");
+    fixture.fail_read_at = 2;
+    expect_digest_failure(YAN_SEMANTIC_IO);
+    TEST_ASSERT_EQUAL_UINT32(2, fixture.reads);
+
+    reset_fixture();
+    memset(out, 0xa5, sizeof out);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_source_digest(&source, NULL));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_source_digest(NULL, out));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID,
+                      yan_semantic_source_digest(&source, (uint8_t *)&source));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID,
+                      yan_semantic_source_digest(&source, (uint8_t *)&fixture));
+    for (unsigned i = 0; i < sizeof out; ++i)
+        TEST_ASSERT_EQUAL_UINT8(0xa5, out[i]);
+
+    YanSemanticSource broken = source;
+    broken.next = NULL;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_source_digest(&broken, out));
+    broken = source; broken.read = NULL;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_source_digest(&broken, out));
+    broken = source; broken.context_size = SIZE_MAX;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_source_digest(&broken, out));
+}
 int main(void)
 {
     UNITY_BEGIN();
@@ -192,5 +379,9 @@ int main(void)
     RUN_TEST(test_read_error_and_duplicate_slot);
     RUN_TEST(test_valid_header_with_large_streaming_body);
     RUN_TEST(test_exact_limit_with_repeated_dual_crlf_adjustment);
+    RUN_TEST(test_digest_known_vectors);
+    RUN_TEST(test_digest_matches_scan_and_tracks_source);
+    RUN_TEST(test_digest_ignores_bad_header_and_segment_limit);
+    RUN_TEST(test_digest_validation_and_unpublished_output);
     return UNITY_END();
 }

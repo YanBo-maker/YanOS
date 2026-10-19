@@ -24,6 +24,9 @@ endif()
 
 option(YAN_BUILD_TOOLS "Build Guest validation tools" OFF)
 option(YAN_BUILD_SEMANTIC "Build optional Linux Host semantic-search tool" OFF)
+set(YAN_MCP_SDK_PYTHON "" CACHE FILEPATH
+    "Optional Python interpreter with official mcp==2.3.0 for mcp_sdk")
+
 
 # External validation layers. They stay optional: a missing dependency is
 # reported as a skipped test, never as a pass.
@@ -153,6 +156,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_library(yan_semantic_posix STATIC host/semantic_posix.c)
     target_link_libraries(yan_semantic_posix PUBLIC yan_semantic_core yan_fs)
     target_compile_options(yan_semantic_posix PRIVATE ${YAN_WARNINGS})
+    # 0033 Task B Host query/paging; Linux-only because Task A's image adapter
+    # is POSIX-only. This is the library seam for the later MCP worker, not a
+    # block-only production executable.
+    add_library(yan_block_query STATIC host/block_query.c)
+    target_link_libraries(yan_block_query PUBLIC yan_semantic_posix yan_blocks)
+    target_compile_options(yan_block_query PRIVATE ${YAN_WARNINGS})
 endif()
 
 if(YAN_BUILD_TOOLS)
@@ -247,11 +256,12 @@ if(YAN_BUILD_SEMANTIC)
     target_compile_options(yan_semantic PRIVATE ${YAN_WARNINGS})
     add_library(yan_mcp_protocol STATIC tools/mcp_protocol.c)
     target_include_directories(yan_mcp_protocol PUBLIC tools)
-    target_link_libraries(yan_mcp_protocol PUBLIC yan_semantic_text yyjson::yyjson)
+    target_link_libraries(yan_mcp_protocol PUBLIC yan_semantic_text yan_blocks_format
+                          yan_note_format yyjson::yyjson)
     target_compile_options(yan_mcp_protocol PRIVATE ${YAN_WARNINGS})
     add_executable(yan_mcp tools/yan_mcp.c tools/mcp_worker.c)
-    target_link_libraries(yan_mcp PRIVATE yan_mcp_protocol yan_semantic_posix yan_semantic_llama
-                          yan_semantic_json yyjson::yyjson)
+    target_link_libraries(yan_mcp PRIVATE yan_mcp_protocol yan_semantic_posix yan_block_query
+                          yan_semantic_llama yan_semantic_json yyjson::yyjson)
     target_compile_options(yan_mcp PRIVATE ${YAN_WARNINGS})
 endif()
 
@@ -298,10 +308,29 @@ if(BUILD_TESTING)
                  "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_semantic_mutation_gate.py")
         set_tests_properties(semantic_mutation_gate PROPERTIES TIMEOUT 120)
         if(YAN_BUILD_SEMANTIC)
-            add_executable(test_mcp_protocol tests/test_mcp_protocol.c)
-            target_link_libraries(test_mcp_protocol PRIVATE yan_mcp_protocol unity::framework)
+            add_executable(test_mcp_protocol tests/test_mcp_protocol.c tools/mcp_worker.c)
+            target_link_libraries(test_mcp_protocol PRIVATE yan_mcp_protocol yan_block_query
+                                  yan_semantic_llama yan_semantic_json yyjson::yyjson
+                                  unity::framework)
             target_compile_options(test_mcp_protocol PRIVATE ${YAN_WARNINGS})
+            add_executable(test_mcp_block_worker tests/test_mcp_block_worker.c tools/mcp_worker.c)
+            target_link_libraries(test_mcp_block_worker PRIVATE yan_mcp_protocol yan_block_query
+                                  yan_semantic_llama yan_semantic_json yyjson::yyjson
+                                  unity::framework)
+            target_compile_options(test_mcp_block_worker PRIVATE ${YAN_WARNINGS})
+            add_test(NAME mcp_block_worker COMMAND test_mcp_block_worker)
+            set_tests_properties(mcp_block_worker PROPERTIES TIMEOUT 30)
             add_test(NAME mcp_protocol COMMAND test_mcp_protocol)
+            if(YAN_MCP_SDK_PYTHON)
+                set(_mcp_sdk_python "${YAN_MCP_SDK_PYTHON}")
+            else()
+                set(_mcp_sdk_python "${Python3_EXECUTABLE}")
+            endif()
+            add_test(NAME mcp_sdk COMMAND "${_mcp_sdk_python}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_sdk_check.py"
+                $<TARGET_FILE:yan_mcp> $<TARGET_FILE:yan_semantic>
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_fake_runner.py")
+            set_tests_properties(mcp_sdk PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
             add_test(NAME mcp_stdio COMMAND "${Python3_EXECUTABLE}" -B
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_checks.py"
                 $<TARGET_FILE:yan_mcp> $<TARGET_FILE:yan_semantic>
@@ -310,8 +339,9 @@ if(BUILD_TESTING)
             add_executable(mcp_fault_probe tools/yan_mcp.c tools/mcp_worker.c tests/mcp_fault_hooks.c)
             target_compile_definitions(mcp_fault_probe PRIVATE _exit=yan_mcp_test_exit
                 clock_gettime=yan_mcp_test_clock_gettime)
-            target_link_libraries(mcp_fault_probe PRIVATE yan_mcp_protocol yan_semantic_posix yan_semantic_llama
-                                  yan_semantic_json yyjson::yyjson)
+            target_link_libraries(mcp_fault_probe PRIVATE yan_mcp_protocol yan_semantic_posix
+                                  yan_block_query yan_semantic_llama yan_semantic_json
+                                  yyjson::yyjson)
             target_link_options(mcp_fault_probe PRIVATE -Wl,--wrap=yan_semantic_posix_cleanup
                                 -Wl,--wrap=yan_semantic_llama_stop -Wl,--wrap=calloc
                                 -Wl,--wrap=write -Wl,--wrap=read -Wl,--wrap=close -Wl,--wrap=fopen -Wl,--wrap=poll)
@@ -331,6 +361,7 @@ if(BUILD_TESTING)
                     --unity "${unity_SOURCE_DIR}" --cc "${CMAKE_C_COMPILER}"
                     --yyjson-include "$<JOIN:$<TARGET_PROPERTY:yyjson::yyjson,INTERFACE_INCLUDE_DIRECTORIES>,|>"
                     --yyjson-lib "$<TARGET_FILE:yyjson::yyjson>"
+                    --curl-lib "$<TARGET_FILE:CURL::libcurl>"
                     --work "${CMAKE_BINARY_DIR}/mcp-mutation")
                 set_tests_properties(mcp_mutation PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
             endif()
@@ -372,6 +403,23 @@ if(BUILD_TESTING)
         target_compile_options(test_semantic_posix PRIVATE ${YAN_WARNINGS})
         add_test(NAME semantic_posix COMMAND test_semantic_posix)
         set_tests_properties(semantic_posix PROPERTIES TIMEOUT 30)
+
+        # 0033 Task B: focused native query/paging suite and independent oracle.
+        add_executable(test_block_query tests/test_block_query.c)
+        target_link_libraries(test_block_query PRIVATE yan_block_query unity::framework)
+        target_compile_options(test_block_query PRIVATE ${YAN_WARNINGS})
+        add_test(NAME block_query COMMAND test_block_query)
+        set_tests_properties(block_query PROPERTIES TIMEOUT 60)
+
+        add_executable(block_query_probe tests/block_query_probe.c)
+        target_link_libraries(block_query_probe PRIVATE yan_block_query)
+        target_compile_options(block_query_probe PRIVATE ${YAN_WARNINGS})
+        if(Python3_Interpreter_FOUND)
+            add_test(NAME block_query_oracle COMMAND "${Python3_EXECUTABLE}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/block_page_oracle.py"
+                $<TARGET_FILE:block_query_probe>)
+            set_tests_properties(block_query_oracle PROPERTIES TIMEOUT 180)
+        endif()
     endif()
 
     foreach(_semantic_suite sha256 text)
@@ -739,6 +787,18 @@ if(BUILD_TESTING)
                             --mkfs "$<TARGET_FILE:yan_mkfs>"
                             --guest "${YAN_TERMINAL_ELF}")
                 set_tests_properties(guest_note_blocks PROPERTIES TIMEOUT 600)
+                if(TARGET yan_mcp)
+                    add_test(NAME guest_note_blocks_host
+                        COMMAND "${Python3_EXECUTABLE}" -B
+                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_note_blocks_host.py"
+                                --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                                --work "${CMAKE_BINARY_DIR}/guest-note-blocks-host"
+                                --run "$<TARGET_FILE:yan_run>"
+                                --mkfs "$<TARGET_FILE:yan_mkfs>"
+                                --guest "${YAN_TERMINAL_ELF}"
+                                --server "$<TARGET_FILE:yan_mcp>")
+                    set_tests_properties(guest_note_blocks_host PROPERTIES TIMEOUT 600)
+                endif()
             endif()
             if(TARGET yanfs_terminal)
                 set(_yan_search_fault_args)
@@ -1277,6 +1337,12 @@ if(BUILD_TESTING)
                     --mutation --drive scripted)
         set_tests_properties(guest_console_mutation PROPERTIES SKIP_RETURN_CODE 77
                                                               TIMEOUT 600)
+        add_test(NAME guest_console_mutation_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/console_mutation_gate.py"
+                    --gcc "${YAN_RISCV_GCC}")
+        set_tests_properties(guest_console_mutation_gate PROPERTIES
+                             SKIP_RETURN_CODE 77 TIMEOUT 1800)
 
         # Planted-defect run for the devices and the PLIC gateway.
         add_test(NAME device_mutation

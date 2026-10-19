@@ -69,7 +69,13 @@ static bool close_fd(int *fd)
 { int owned=*fd; *fd=-1; return owned<0 || close(owned)==0; }
 static bool enqueue(Server *s,const YanMcpRequest *request,const char *payload,size_t n,const char *token,bool task)
 {
-    size_t length=0; char *data=yan_mcp_reply(request,payload,n,token,&length,NULL);
+    size_t length=0; char *data=NULL;
+    YanMcpReplyStatus status=yan_mcp_reply_ex(request,payload,n,token,&data,&length,NULL);
+    if (status!=YAN_MCP_REPLY_OK) {
+        free(data); data=NULL; length=0;
+        const char *fallback=status==YAN_MCP_REPLY_LIMIT ? "LIMIT" : "IO";
+        data=yan_mcp_reply(request,NULL,0,fallback,&length,NULL);
+    }
     if (!data || length>YAN_MCP_QUEUE_MAX-s->queued) { free(data); return false; }
     Frame *frame=calloc(1,sizeof *frame);
     int64_t now=now_ms();
@@ -139,9 +145,13 @@ static void child(const YanMcpOptions *o,const YanMcpRequest *request,int result
     if (!close_fd(&gate_fd)) _exit(5);
     if (n!=1 || go!='G' || worker_cancelled) _exit(5);
     char *payload=NULL; size_t length=0;
-    YanSemanticResult result=yan_mcp_execute(o,request,&worker_cancelled,&payload,&length);
-    if (length>YAN_MCP_OUTPUT_MAX) { free(payload); payload=NULL; length=0; result=YAN_SEMANTIC_IO; }
-    YanMcpWorkerHeader header={(uint32_t)result,(uint32_t)length};
+    YanMcpWorkerResult result=yan_mcp_execute(o,request,&worker_cancelled,&payload,&length);
+    if (length>YAN_MCP_OUTPUT_MAX) {
+        free(payload); payload=NULL; length=0;
+        result.result=result.domain==YAN_MCP_DOMAIN_BLOCK ?
+            (uint32_t)YAN_BLOCK_QUERY_LIMIT : (uint32_t)YAN_SEMANTIC_IO;
+    }
+    YanMcpWorkerHeader header={(uint32_t)result.domain,result.result,(uint32_t)length};
     bool sent=write_all(result_fd,&header,sizeof header) && (!length || write_all(result_fd,payload,length));
     free(payload); bool closed=close_fd(&result_fd); _exit(sent && closed?0:5);
 }
@@ -251,10 +261,8 @@ static bool finish_task(Server *s)
     bool valid=!t->failed && !t->orphan && WIFEXITED(t->status) && WEXITSTATUS(t->status)==0 &&
         t->received>=sizeof header;
     if (valid) memcpy(&header,t->data,sizeof header);
-    valid=valid && header.result<=YAN_SEMANTIC_NOT_FOUND && header.length<=YAN_MCP_OUTPUT_MAX &&
-        t->received==sizeof header+header.length && (header.result==YAN_SEMANTIC_OK ? header.length>0 : header.length==0);
-    const char *token=!valid ? "IO" : header.result==YAN_SEMANTIC_OK ? NULL :
-        header.result==YAN_SEMANTIC_STOPPED ? "OUTPUT" : yan_semantic_result_name((YanSemanticResult)header.result);
+    valid=valid && yan_mcp_worker_frame_valid(&header,t->received);
+    const char *token=!valid ? "IO" : yan_mcp_worker_token(&header);
     bool queued=enqueue(s,&t->request,token?NULL:t->data+sizeof header,token?0:header.length,token,true);
     free(t->data); t->data=NULL;
     if (!queued) return false;
@@ -280,7 +288,9 @@ static bool handle(Server *s,const char *line,size_t length)
         }
         return true;
     }
-    if (request.kind==YAN_MCP_SEARCH || request.kind==YAN_MCP_STATUS) {
+    if (request.kind==YAN_MCP_SEARCH || request.kind==YAN_MCP_STATUS ||
+        request.kind==YAN_MCP_BLOCK_LIST || request.kind==YAN_MCP_BLOCK_READ ||
+        request.kind==YAN_MCP_BLOCK_REFS || request.kind==YAN_MCP_BLOCK_BACKLINKS) {
         if (s->task.active) return enqueue(s,&request,NULL,0,"BUSY",false);
         if (!start_task(s,&request)) return enqueue(s,&request,NULL,0,"IO",false);
         return true;
