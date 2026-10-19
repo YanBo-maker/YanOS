@@ -80,6 +80,8 @@ Bus 在 RAM 译码之前按地址区间把 32 位访问分派给 CLINT 与 PLIC�
 - `bus.clint == NULL` 或 `bus.plic == NULL` 时该区间不被设备占用，访问按原有 RAM 路径返回错误，因此未连接设备的 Bus（如差分执行器与 `yan_run` 使用的 Bus）上 CLINT / PLIC 地址仍是 `YAN_UNMAPPED`。
 - RAM 读写、`YAN_INVALID_WIDTH`、`YAN_INVALID_STATE` 等既有错误语义不变。
 
+后续实现说明：上述未连接设备的Bus语义保留；`yan_run` 的例子仅描述0012阶段。当前 `tools/yan_run.c` 使用 `yan_machine_init_with`，每次运行均映射CLINT、PLIC、UART和传输通道；差分执行器仍不连接这些设备。
+
 `YanMachine` 持有 `YanClint` 与 `YanPlic`。`yan_machine_init` 复位设备并建立 `bus.clint` / `bus.plic` 指向；整机复位 `yan_machine_reset` 同时复位 CPU 与设备；`yan_machine_destroy` 断开指针并清零设备。`check_machine` 校验连接关系，未连接设备的 Machine 返回 `YAN_INVALID_STATE`。
 
 ### 明确不在范围内

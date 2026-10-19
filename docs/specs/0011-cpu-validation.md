@@ -8,7 +8,7 @@
 
 ## SPEC
 
-验证分成四层。前两层随仓库自带，后两层是可选外部验证层。
+验证分成以下五层，外部依赖见各层说明。
 
 1. **模块测试**：Unity / CTest，覆盖 RAM、Bus、Machine、CPU、取指、整数、控制转移、访存、CSR、异常、M 扩展、架构快照、机器模式中断、CLINT / PLIC 设备，以及 Guest 平台视图与陷阱 ABI 的跨层一致性，另有镜像加载与差分比较两个模块。
 2. **逐指令差分测试**：`yan_difftest` 加载同一份 Guest 镜像，让 YanCPU 与外部参考模型从同一内存镜像、同一复位状态出发，YanCPU 每提交一条指令就与参考模型比较一次 PC 与 32 个通用寄存器；首次不一致时输出出错指令地址、机器码、首个不同寄存器与两侧完整寄存器表。运行结束时再比较整段 RAM。
@@ -108,6 +108,8 @@ ctest --test-dir build --output-on-failure
 
 模块测试开启 AddressSanitizer 与 UndefinedBehaviorSanitizer 后同样通过；`uart`、`transport`、`plic` 三组的当前结论与变异检查见 [STATUS](../STATUS.md) 的验证一节。
 
-尚未完成：ACT4 官方框架（`testplans` / UDB / RVMODEL 生成）未接入；CSR、特权、异常与中断语义没有外部参考模型覆盖；CLINT / PLIC 的与平台相关行为（gateway 电平锁存、多 context、多 hart）不在验证范围内；Guest 陷阱环境的证据来自本仓库自检，不是与外部模型的一致性证据，且外部中断（MEIP）无法从 Guest 侧驱动，只由机器层测试覆盖。
+尚未完成：ACT4 官方框架（`testplans` / UDB / RVMODEL 生成）未接入；CSR、特权、异常与中断语义没有外部参考模型覆盖；CLINT / PLIC 的平台相关行为（gateway 电平锁存、多 context、多 hart）不在上述外部参考模型验证范围内；本地gateway电平验证见[0016](0016-plic-gateway-and-irq-lines.md)与 `tests/test_plic.c`；Guest 陷阱环境的证据来自本仓库自检，不是与外部模型的一致性证据，且外部中断（MEIP）无法从 Guest 侧驱动，只由机器层测试覆盖。
+
+后续验证说明：上句MEIP限制仅描述0011/0013阶段的 `trap_env` 验证程序。后续Guest集成已通过UART/传输通道与PLIC驱动MEIP，例如 `tests/guest/m2a_combined.c`；运行时在 `os/task.c` 中完成claim与分派。这些仍是本地集成证据，未增加外部参考模型覆盖。
 
 参考：[一生一芯 DiffTest 介绍](https://oscpu.github.io/ysyx/events/2021-07-17_Difftest/difftest%E6%A1%86%E6%9E%B6%E4%BB%8B%E7%BB%8D.pdf)、[riscv-tests](https://github.com/riscv-software-src/riscv-tests)、[RISC-V Architectural Test](https://github.com/riscv/riscv-arch-test)、[Sail RISC-V model](https://github.com/riscv/sail-riscv)。
