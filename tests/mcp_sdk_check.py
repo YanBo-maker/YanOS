@@ -475,6 +475,8 @@ async def run(server, options, source_hash, root, files):
         async with Client(target, mode=mode, read_timeout_seconds=15) as client:
             expected = '2025-11-25' if mode == 'legacy' else '2026-07-28'
             assert client.protocol_version == expected, ('actual_protocol_version', mode, client.protocol_version)
+            listing = await client.list_tools()
+            assert [t.name for t in listing.tools] == TOOLS, 'sdk_discovery'
             status = (await client.call_tool('yanos_index_status')).model_dump(by_alias=True, exclude_none=True)
             assert status['isError'] is False and status['structuredContent']['state'] == 'READY', 'sdk_status'
             result = (await client.call_tool('yanos_search', {'query': '设备如何叫醒处理器'})).model_dump(by_alias=True, exclude_none=True)
