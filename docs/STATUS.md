@@ -52,7 +52,7 @@
 - 第三方证据来自官方 riscv-tests 与 Sail 签名，范围是用户态 RV32IM。Guest trap 自检覆盖 MSIP 与 MTIP；MEIP 由 Host 侧测试驱动。
 - `tests/official/run_act4.sh` 在 Sail 与 DUT 都没有签名时把用例记为 skipped；结束条件仍是 differed 为 0 且 matched 大于 0。跳过数大于 0 本身不使脚本失败。
 - CI 不打开 `YAN_ENABLE_MUTATION_TESTS`。默认套件里的 `*_mutation_gate` 纯门禁仍会注册。`guest_console_mutation_gate` 只在变异配置打开时注册（`CMakeLists.txt` 中该门禁与 `YAN_ENABLE_MUTATION_TESTS` 同支）。
-- CI 不打开 `YAN_BUILD_SEMANTIC`，因此 `yan_mcp`、`mcp_*`、`semantic_*` 不注册。`guest_note_blocks_host` 还要求已有 `yan_mcp` 目标（`CMakeLists.txt` 中 `if(TARGET yan_mcp)`），本次 CI 名单里没有它。
+- CI 不打开 `YAN_BUILD_SEMANTIC`。因此 `yan_mcp`、`mcp_*`，以及写在该开关内的 `semantic_cli`、`semantic_json`、`semantic_json_memory`、`semantic_provider` 不注册。`guest_note_blocks_host` 还要求已有 `yan_mcp` 目标（`CMakeLists.txt` 中 `if(TARGET yan_mcp)`），本次 CI 名单里没有它。不依赖该开关的 Host 侧测试仍会注册。Actions 39339094819 的 Linux 名单含 `semantic`、`semantic_corpus`、`semantic_text`、`semantic_text_oracle`、`semantic_rank_oracle`、`semantic_sha256`、`semantic_mutation_gate`、`semantic_posix`；Windows 名单相同，但没有只在 Linux 注册的 `semantic_posix`。
 - 没有 S/U 模式、`medeleg` / `mideleg`、虚拟内存分页和抢占式调度。YanFS 初版仍是单根目录、最多 63 个文件、连续 extent；元数据写失败可能拒挂，不保证断电一致性。
 
 ## 待定设计
