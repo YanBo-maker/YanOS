@@ -169,6 +169,12 @@ def test_r4(server, root, probe_path):
             "name": "a.txt", "text": "stale\n", "expected_source": expected})
         expect(None, error, "STALE")
         assert digest(source) == before, "STALE keeps image"
+        for dry in (False, True):  # ruling: STALE before EXISTS
+            args = {"name": "a.txt", "text": "dup\n", "expected_source": expected}
+            if dry: args["dry_run"] = True
+            _, error = wire.call("yanos_note_create", args)
+            expect(None, error, "STALE")
+        assert digest(source) == before, "STALE-before-EXISTS keeps image"
         CASES += 1
     finally:
         wire.close()
