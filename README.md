@@ -71,7 +71,7 @@ build/yanfs/yan_run --image guest.elf --disk-image new.img
 
 `--files` 写了两次，或后面没有取值时，程序把用法打到 stderr，以退出码 2 结束，此时还没有创建镜像。取值含有非数字字符、是空串、小于 63、大于 4095，或者落在 63 到 4095 之间但不是某个 `64·D − 1` 时，stderr 为 `yan_mkfs: invalid --files '<原文>'`，同样以退出码 2 结束，并且不创建镜像。N 合法而 `--blocks` 放不下这块目录时，stderr 为 `yan_mkfs: --blocks <块数> cannot hold a <D>-block directory`，退出码也是 2，镜像仍不创建。成功时 stdout 为 `yan_mkfs: wrote <路径> (<块数> blocks, <文件数> files)`。
 
-省略 `--files` 或写成 `--files 63` 得到的 v1 镜像，终端 Guest、MCP 写工具和语义工具都能挂载；已经存在的 v1 镜像不用重新格式化。`--files` 大于 63 得到的 v2 镜像，目前只有 YanFS 库的 `yan_fs_init_directory` 能挂载。终端 Guest（`apps/yanfs_terminal/main.c`）、MCP 写工具（`host/note_write.c`）和语义工具（`host/semantic_posix.c`）仍调用 `yan_fs_init`，目录缓冲固定为 1 块；镜像的 D 与这块缓冲不一致时，挂载返回 INVALID。这三处挂载 v2 要等 0036-R3。
+省略 `--files` 或写成 `--files 63` 得到的 v1 镜像，终端 Guest、MCP 写工具和语义工具都能挂载；已经存在的 v1 镜像不用重新格式化。`--files` 大于 63 得到的 v2 镜像，目前只有 YanFS 库的 `yan_fs_init_directory` 能挂载。终端 Guest（`apps/yanfs_terminal/main.c`）、`note_write` 和语义工具（`host/semantic_posix.c`）仍调用 `yan_fs_init`，目录缓冲固定为 1 块；镜像的 D 与这块缓冲不一致时，挂载返回 INVALID。这三处要等 0036-R3 才能挂载 v2。MCP 写工具经 `note_write` 写入，并经 `semantic_posix` 打开镜像，同样要等到那时。
 
 目录容量 1023（D=16）时，`--blocks` 至少为 17：
 
