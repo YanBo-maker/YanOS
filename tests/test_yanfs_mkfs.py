@@ -197,11 +197,11 @@ def v1_baseline_case(mkfs, work):
 
 
 def v2_header_case(mkfs, work):
-    """0036-R1-AC2: --files 1023 with 64 blocks means D=16, N=1023, version 2.
-    The default stays 63 until 0036-R3 (spec 实施澄清, #62); the R3 PR drops
-    --files here and checks the 1023 default."""
+    """0036-R1-AC2: the default is 1023 files. With 64 blocks that means D=16,
+    N=1023, version 2; the R3 PR removed the temporary explicit --files 1023
+    that PR1 needed before the default changed (spec 实施澄清, #62)."""
     path = os.path.join(work, "v2-64.img")
-    proc = run([mkfs, "--image", path, "--blocks", "64", "--files", "1023"])
+    proc = run([mkfs, "--image", path, "--blocks", "64"])
     check(proc.returncode == 0,
           "R1-AC2 v2 image exits 0, got %d" % proc.returncode)
     data = read_file(path)
@@ -226,6 +226,7 @@ def v2_header_case(mkfs, work):
           "R1-AC2 CRC covers all 16 directory blocks with field 60..63 zero")
     check(all(byte == 0 for byte in data[BLOCK:16 * BLOCK]),
           "R1-AC2 directory blocks 1..15 are zero")
+    print("0036-R1-AC2 default files=1023 version=2 directory_blocks=16")
 
 
 def files_rejection_case(mkfs, work):

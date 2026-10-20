@@ -36,7 +36,7 @@ static void usage(FILE *out)
     fputs("usage: yan_mkfs --image FILE --blocks N [--files N]\n", out);
     fputs("  --image FILE   new image path (must not already exist)\n", out);
     fputs("  --blocks N     capacity in 4096-byte blocks, 1..4294967295\n", out);
-    fputs("  --files N      directory capacity, 63..4095 (default 63 until 0036-R3)\n", out);
+    fputs("  --files N      directory capacity, 63..4095 (default 1023)\n", out);
 }
 
 /* Decimal only: no sign, no whitespace, no base prefix, no fraction. The
@@ -156,7 +156,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "yan_mkfs: invalid --blocks '%s'\n", blocks_text);
         return 2;
     }
-    uint32_t files = 63u;
+    uint32_t files = 1023u;
     if (files_text != NULL && !parse_files(files_text, &files)) {
         fprintf(stderr, "yan_mkfs: invalid --files '%s'\n", files_text);
         return 2;
