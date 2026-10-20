@@ -150,7 +150,7 @@ search（线性与索引）、带标签的 search、`links`、`backlinks`、`rel
 改动（设计沿用 0040 原方案，0040 对应条目已标「移至 0036」）：
 1. Guest 块传输（ring 拷贝）和 `memcpy`/`memmove` 按 32 位字拷贝，非对齐头尾逐字节。
 2. 挂载校验：非空 slot 下标按名字排序后比相邻（重名），`start≠0` 的 extent 按 start 排序后比相邻（重叠），仍只返回 CORRUPT（0040 原 R1）。
-3. `find_entry` 改为在 `name_order[N]`（uint16，arena）上二分；挂载成功和 `commit_entry` 发布时整体重建（0040 原 R4）。
+3. `find_entry` 改为在 `name_order[N]`（uint16，arena）上二分；挂载成功和 `commit_entry` 发布时整体重建（0040 原 R4）。`name_order` 是文件系统内部工作区：文件 API 在原有状态优先级之后检查参数，与该表重叠的输入或输出范围返回 INVALID，不产生 I/O，索引保持不变；read 的有效字节数和 list 输出沿原错误规则处理。此补充由项目所有者于 2026-10-21 批准，未改变普通文件操作、命令或磁盘格式。
 4. 公共下标堆排序 `yan_sort_index`（迭代 sift-down），供第 2、3 项使用，并替换 metadata、relations、blocks 三处插入排序（0040 原 R3）。
 5. block backlinks 若在 1–4 之后仍超标：同一次查询内对 `target()` 的重复读做去重（按目标 slot 记一位，arena N 位），不建持久链接索引。
 - 0036-R8-AC1：Given N=63、1023、2047 的同一组镜像（含 related 同分只能靠名字区分的行、重名/重叠/首尾相接的挂载夹具），When 分别用基线（本 PR 前的 main，PR 中写 SHA）和新实现执行 mount、create、`ls`、`meta list`、`backlinks`、`related`、`block backlinks`、`search`，以及 MCP `yanos_block_backlinks`，Then 终端输出、返回码、MCP JSON 和镜像 SHA-256 逐字节相同。
@@ -158,6 +158,8 @@ search（线性与索引）、带标签的 search、`links`、`backlinks`、`rel
 - 0036-R8-AC3：Given 0..2047 个随机名字及已排序、逆序输入，Then `yan_sort_index` 与插入排序参考实现逐项相同；源码中不再有 `while (j > 0` 形式的插入排序。
 - 0036-R8-AC4：R5-AC1 在 N=1023、2047 全部通过（PR 中记录改前、改后步数）；`validate_directory` 栈帧在 N=63 与 4095 时相同。
 - 落位：PR2b 之后新开 **PR3（R8）**，原 R4+R6、R7 顺延为 PR4、PR5。非测试代码约 200 行【估算】（字拷贝约 40、sort 约 45、挂载约 50、name_order 约 45、三处排序调用约 20；第 5 项若需要再加约 20），测试约 350 行。
+
+R8 实施记录：块扫描和线性词项扫描对不超过既有 4 KiB 缓冲区的文件复用同次读取，先完成整文件文本资格检查，再解析或排名；更大的文件沿用流式读取。没有新增持久缓存、磁盘索引或接口。`block backlinks` 的目标检查原本只执行一次，因此未增加第 5 项的去重位表。R3-AC1 的原分配序列在 R8 后追加四项 `2N` 字节表（名称下标及三项排序下标），仍逐项按 align16 计算；原 PR2b 用量保留在后面的历史实施澄清中，当前数值见 VERIFY。
 
 #### 数据结构结论
 1. 光加内存索引不够：开销主要在 I/O，每个文件读头约 2×10⁵ 步，backlinks 在 N=1023 时就要 ~2×10⁸ 步；`find_entry` 线性查找 ×N 只有 ~5×10⁶ 步【估算】。改成按字拷贝后，每文件约 1–2×10⁴ 步，N=2047 约 2–4×10⁷ 步，所以 `name_order` 加字拷贝就能达标【估算，以 R8-AC4 实测为准】。backlink/link 索引要么在挂载时把 N 个文件头全读一遍（成本转嫁给 mount），要么写到盘上，所以不建。
@@ -233,3 +235,37 @@ search（线性与索引）、带标签的 search、`links`、`backlinks`、`rel
 - 第 4 项只分配 terminal 实际用到的那一份，内存表跟着改。
 - 下面几处按实现方的做法确认：R3-AC3 用临时链接脚本；启动时在 mount 之前多读一次块 0，7 个故障注入脚本的索引后移一位；删掉 yan_fs_init，统一改用 yan_fs_init_directory；服务允许在 mount 之前 init，但查询要求已挂载；README 示例改用 `--blocks 64`。
 - （答 PR2a）PR2a 加一个临时守卫：terminal 挂载后，如果 N>63 就拒绝并给出明确的 reason code，避免服务里 63 项的固定数组越界。PR2b 删掉这个守卫和这个 reason code。PR2a 非测试代码约 341 行，yan_fs_init 的删除放到 PR2b。第 4 项在 PR2a 里不分配，到 PR2b 只分配 index_eligible 那一份。
+
+## VERIFY 执行记录
+
+### R8 本机复核（2026-10-21）
+
+本轮基线为 main `4c5e0ab`；工作分支以 `2df5793` 为基点，保留所有者交来的 R8 修改。实现、默认回归、sanitizer、Windows、性能及实际变异验证已完成；独立文档对齐和总审核已完成。远端 CI 与合入审查另记，不能由本机结果推定。
+
+- Linux Release 默认 CTest：138/138，183.10 s；Debug ASan/UBSan：138/138，321.52 s；Windows MSVC Debug：76/76，156.94 s。均零失败、零跳过。Windows 不运行 Linux/Guest 工具用例。测试包括新增 `sort_index`、`ring_copy`、`os_memory_helpers`、`yanfs_name_order` 和 `yanfs_r8_performance`；Guest 性能验收已注册到 Linux 默认套件。
+- 开启实际变异后注册 156 组，选 `_mutation$` 的最终冻结树验证为 17/17，375.86 s，零失败、零跳过；基线、指定 owner/断言与负控均通过。设备变异只排除不链接模拟设备的原生 `yanfs_name_order`，默认回归仍完整运行该测试；当前设备工作副本与冻结树的 FS 源码、接口、v2 测试和排除脚本哈希逐项相同。旧版门禁失败和被中止的重复设备测试保留为诊断，未记作通过。
+- R8-AC1：N=63、1023、2047 的 21 组终端输出及退出码与基线逐字节相同，完整镜像字节保持。满目录夹具的 extent 首尾相接；重名和重叠分别重算 CRC 后拒挂，新旧输出及镜像保持一致。related 同方向、同标签候选按名字区分。MCP 线级 JSON 三档相同：v1 成功，v2 保持 R6 尚未实现时的 CORRUPT；后两档不是 v2 检索成功证据。
+- R8-AC2：N=2047、固定种子 `0x0036AC2D00C0FFEE`，真实 create/remove/rename/copy 共 10,000 次；每步校验名字表的覆盖、唯一性、严格递增及查找，最后穷举所有存活名字。一次 v2 第二元数据写失败后，已发布缓存与名字下标仍一致，故障镜像由另一个实例拒挂。Release、sanitizer、MSVC 均通过。
+- R8-AC3：0..2047 的随机、顺序、逆序索引与独立参考排序相同；附加 4095 档。环形拷贝独立字节 oracle 覆盖 47,104 组回绕、对齐和守卫边界；真实 Guest 内存函数覆盖分离对象及重叠，sanitizer 启用无关指针比较检查。
+- R8-AC4：下表计步从 UART 消费命令末尾 LF 到下一个完整提示符，mount 计到首提示符；create 先删除 slot N/2，再创建同名、同长度内容，实际进行 extent 分配。每项小于等于 50,000,000 步，最大实测任务栈 2096 B。RV32 `-fstack-usage -fno-inline` 下 `allocate_extent` 和 `validate_directory` 都是 48 B 静态帧，N 是运行时输入，帧不随 63/4095 增长。
+
+| 操作 | N=1023 基线 | N=1023 R8 | N=2047 基线 | N=2047 R8 |
+| --- | ---: | ---: | ---: | ---: |
+| mount | 74,537,061 | 7,808,922 | 277,828,697 | 16,281,233 |
+| create | 8,922,603 | 11,340,016 | 27,845,583 | 33,383,215 |
+| ls | 1,193,070 | 1,133,770 | 2,386,030 | 2,267,338 |
+| meta list | 190,642,704 | 15,238,156 | 668,637,945 | 30,893,798 |
+| backlinks | 191,214,632 | 16,199,295 | 669,778,193 | 32,921,047 |
+| related | 190,257,591 | 15,235,575 | 667,812,512 | 30,942,816 |
+| block backlinks | 422,550,806 | 23,413,305 | 1,419,603,455 | 47,124,417 |
+| search | 224,350,203 | 22,138,134 | 735,070,203 | 44,384,164 |
+
+R3-AC1（含 R8 的四张下标表）arena 实测/独立求和：N=63 为 15,518 B，1023 为 250,718 B，2047 为 501,598 B，4095 为 1,003,358 B；32 MiB 总预算及三处 context 静态断言仍通过。create 的额外开销来自提交后整体重建名字表，属于 R8 已批准的取舍。
+
+性能默认测试另外执行 `meta list tag:t`：N=1023 为 15,268,110 步，N=2047 为 30,954,947 步，均排除那篇没有标签的夹具。包含名称索引别名保护的修补后，16 条命令均成功，镜像字节不变。工作区回归测试还确认 read 输出/字节数、stat、list 输出/游标、source 输出及 create 内容不得覆盖索引，拒绝时零 I/O。
+
+复现：配置启用 `YAN_BUILD_TOOLS`、`YAN_BUILD_SEMANTIC` 及 RISC-V 工具链，分别运行 Release / sanitizer 默认 CTest；Windows Debug 运行默认 CTest。`ctest --test-dir BUILD -R 'yanfs_name_order|yanfs_r8_performance|stack_usage|arena_accounting' --output-on-failure` 可重跑核心验收。实际变异另启 `YAN_ENABLE_MUTATION_TESTS` 并选 `_mutation$`，纯门禁不计作实际缺陷检测。
+
+证据根目录 `E:/YanOS/build/20261020-development-audit/`：`closure-release-ctest.log`、`closure-asan-ctest.log`、`closure-windows-ctest.log`、`release/yanfs-r8-performance/measurements.json`、`terminal-parity.json`、`mount-parity.json`、`mcp-parity.json`。基线 Guest、命令、状态与捕获见相邻 `20261020-performance-audit/`。`r8-snapshot-inputs.json` 的对照对象是所有者原目录 `E:/YanOS-36/`：该目录的 26 个输入均未改动，另有原始副本保存在 `input-copy/`。当前隔离分支在这份输入之上修复了其中的文件；它们不应与输入快照保持相同哈希。
+
+独立只读 dsh 首轮审核已完成，指出冻结证据过期、完成口径、输入路径歧义和工作区保护的规格缺口；已重新冻结并复验，原目录路径已明确，工作区补充已获所有者批准。证据另见 `code-freeze.json`、`original-input-verification.json`、`frozen-device-snapshot.json`、`frozen-actual-mutations.log`。同一只读dsh会话两轮对齐已完成；提交前九项总审核已核对。远端CI与项目所有者合入审查未发生，尚未合入main。
