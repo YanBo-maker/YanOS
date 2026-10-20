@@ -162,6 +162,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_library(yan_block_query STATIC host/block_query.c)
     target_link_libraries(yan_block_query PUBLIC yan_semantic_posix yan_blocks)
     target_compile_options(yan_block_query PRIVATE ${YAN_WARNINGS})
+    # 0035 PR-A Host write adapter: the side lock, the R7 preflight and the
+    # atomic copy/rename path. The text qualification is the 0032 validator.
+    add_library(yan_note_write STATIC host/note_write.c)
+    target_include_directories(yan_note_write PUBLIC host)
+    target_link_libraries(yan_note_write PUBLIC yan_fs yan_note_format yan_blocks_format)
+    target_compile_options(yan_note_write PRIVATE ${YAN_WARNINGS})
 endif()
 
 if(YAN_BUILD_TOOLS)
@@ -174,6 +180,9 @@ if(YAN_BUILD_TOOLS)
                             tools/host_block.c tools/host_disk.c)
     target_link_libraries(yan_run PRIVATE yan_machine)
     target_compile_options(yan_run PRIVATE ${YAN_WARNINGS})
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_libraries(yan_run PRIVATE yan_note_write)
+    endif()
 
     add_executable(yan_gen tools/yan_gen.c)
     target_compile_options(yan_gen PRIVATE ${YAN_WARNINGS})
@@ -404,6 +413,35 @@ if(BUILD_TESTING)
         add_test(NAME semantic_posix COMMAND test_semantic_posix)
         set_tests_properties(semantic_posix PROPERTIES TIMEOUT 30)
 
+        # 0035 PR-A: side lock, R7 preflight, atomic write and fault injection.
+        add_executable(test_note_write tests/test_note_write.c)
+        target_link_libraries(test_note_write PRIVATE yan_note_write
+                              yan_semantic_posix unity::framework)
+        target_compile_options(test_note_write PRIVATE ${YAN_WARNINGS})
+        add_test(NAME note_write COMMAND test_note_write)
+        set_tests_properties(note_write PROPERTIES TIMEOUT 120 LABELS
+            "0035-R5-AC1;0035-R5-AC4;0035-R5-AC5;0035-R6-AC1;0035-R6-AC2;0035-R7-AC1")
+
+        add_executable(test_note_write_faults tests/test_note_write_faults.c)
+        target_link_libraries(test_note_write_faults PRIVATE yan_note_write
+                              unity::framework)
+        target_compile_options(test_note_write_faults PRIVATE ${YAN_WARNINGS})
+        target_link_options(test_note_write_faults PRIVATE -Wl,--wrap=write
+                            -Wl,--wrap=pwrite -Wl,--wrap=fsync -Wl,--wrap=rename)
+        add_test(NAME note_write_faults COMMAND test_note_write_faults)
+        set_tests_properties(note_write_faults PROPERTIES TIMEOUT 120 LABELS
+            "0035-R6-AC1;0035-R6-AC3")
+
+        if(Python3_Interpreter_FOUND AND TARGET yan_run AND TARGET yan_mkfs
+           AND TARGET yanfs_terminal)
+            add_test(NAME yan_run_lock COMMAND "${Python3_EXECUTABLE}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/note_write_lock_checks.py"
+                $<TARGET_FILE:yan_run> $<TARGET_FILE:yan_mkfs>
+                "${YAN_TERMINAL_ELF}")
+            set_tests_properties(yan_run_lock PROPERTIES TIMEOUT 60
+                SKIP_RETURN_CODE 77 LABELS "0035-R5-AC3")
+        endif()
+
         # 0033 Task B: focused native query/paging suite and independent oracle.
         add_executable(test_block_query tests/test_block_query.c)
         target_link_libraries(test_block_query PRIVATE yan_block_query unity::framework)
@@ -619,7 +657,8 @@ if(BUILD_TESTING)
         add_executable(yan_run_disk_close_fault tools/yan_run.c tools/host_file.c
                        tools/host_terminal.c tools/host_block.c tools/host_disk.c
                        tests/host_disk_close_fault.c)
-        target_link_libraries(yan_run_disk_close_fault PRIVATE yan_machine)
+        target_link_libraries(yan_run_disk_close_fault PRIVATE yan_machine
+                              yan_note_write)
         target_compile_options(yan_run_disk_close_fault PRIVATE ${YAN_WARNINGS})
         target_link_options(yan_run_disk_close_fault PRIVATE -Wl,--wrap=fclose)
 

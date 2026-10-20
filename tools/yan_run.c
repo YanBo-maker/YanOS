@@ -8,6 +8,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
+#include <sys/file.h>
+#include <unistd.h>
+
+#include "note_write.h"
+#endif
 
 #include "host_block.h"
 #include "host_disk.h"
@@ -237,6 +243,21 @@ int main(int argc, char **argv)
     int disk_attached = 0;
     int result = EXIT_HOST_ERROR;
     int stopped = 0;
+#ifdef __linux__
+    int lock_fd = -1;
+    /* The side lock is taken before the image is opened and is held until the
+     * process exits: another writer must not replace the inode under us. */
+    if (options.disk_image != NULL) {
+        YanFsResult locked = yan_image_lock(options.disk_image, LOCK_EX, &lock_fd);
+        if (locked != YAN_FS_OK) {
+            fprintf(stderr, locked == YAN_FS_BUSY
+                    ? "yan_run: disk image '%s' is locked by another writer\n"
+                    : "yan_run: cannot lock disk image '%s'\n",
+                    options.disk_image);
+            return EXIT_HOST_ERROR;
+        }
+    }
+#endif
 
     /* The CLINT, PLIC, UART and transport windows are mapped for every run, and
      * mtime advances one tick per executed instruction. The differential tester
@@ -415,6 +436,9 @@ done:
         fprintf(stderr, "yan_run: disk close failed\n");
         result = EXIT_HOST_ERROR;
     }
+#ifdef __linux__
+    if (lock_fd >= 0) (void)close(lock_fd);
+#endif
     yan_machine_destroy(&machine);
     return result;
 }
