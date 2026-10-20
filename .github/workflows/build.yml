@@ -37,9 +37,32 @@ jobs:
       - name: Configure
         if: runner.os != 'Linux'
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DYAN_ENABLE_SANITIZERS=${{ matrix.sanitizers }}
+      - name: Install semantic/MCP deps (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          deps="$RUNNER_TEMP/yan-deps"
+          mkdir -p "$deps/src" && cd "$deps/src"
+          yy=6447536015f3d600f3d65323b10976103b337ca7
+          curl -fsSL -o curl.tar.xz https://curl.se/download/curl-8.23.0.tar.xz
+          curl -fsSL -o yyjson.tar.gz "https://codeload.github.com/ibireme/yyjson/tar.gz/$yy"
+          printf '%s  %s\n' 8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5 curl.tar.xz \
+            13d53411c9d818836a2dc0b3f4be40c34ee4e0fcd21ff903e0aebbfd52e9e08d yyjson.tar.gz | sha256sum -c
+          tar xf curl.tar.xz && tar xf yyjson.tar.gz
+          cmake -S curl-8.23.0 -B curl-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$deps" \
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_CURL_EXE=OFF -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF \
+            -DBUILD_LIBCURL_DOCS=OFF -DBUILD_MISC_DOCS=OFF -DCURL_ENABLE_SSL=OFF -DCURL_USE_LIBPSL=OFF \
+            -DCURL_USE_LIBSSH2=OFF -DCURL_ZLIB=OFF -DCURL_BROTLI=OFF -DCURL_ZSTD=OFF -DUSE_NGHTTP2=OFF \
+            -DUSE_LIBIDN2=OFF -DCURL_DISABLE_LDAP=ON
+          cmake --build curl-build --parallel && cmake --install curl-build
+          cmake -S "yyjson-$yy" -B yyjson-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$deps"
+          cmake --build yyjson-build --parallel && cmake --install yyjson-build
+          python3 -m venv "$deps/mcp-venv" && "$deps/mcp-venv/bin/pip" install -q mcp==2.3.0
+          echo "YAN_DEPS=$deps" >> "$GITHUB_ENV"
       - name: Configure (Linux, Guest)
         if: runner.os == 'Linux'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DYAN_ENABLE_SANITIZERS=${{ matrix.sanitizers }} -DYAN_BUILD_TOOLS=ON -DYAN_RISCV_PREFIX=riscv64-linux-gnu-
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DYAN_ENABLE_SANITIZERS=${{ matrix.sanitizers }} -DYAN_BUILD_TOOLS=ON -DYAN_RISCV_PREFIX=riscv64-linux-gnu- -DYAN_BUILD_SEMANTIC=ON -DCMAKE_PREFIX_PATH="$YAN_DEPS" -DYAN_MCP_SDK_PYTHON="$YAN_DEPS/mcp-venv/bin/python"
       - name: Check Guest toolchain and registration
         if: runner.os == 'Linux'
         shell: bash
@@ -56,6 +79,11 @@ jobs:
             exit 1
           fi
           echo "Guest 测试注册数：$guest_count"
+          mcp_count=$(ctest --test-dir build -N -R '^(mcp_note|mcp_note_tool|mcp_stdio|mcp_sdk)$' | sed -n 's/^Total Tests: //p')
+          if [ "$mcp_count" != 4 ]; then
+            echo "::error::MCP write tests not registered: $mcp_count/4 (#42)"
+            exit 1
+          fi
       - name: Build
         run: cmake --build build --config ${{ matrix.config }} --parallel
       - name: Test
@@ -68,6 +96,7 @@ jobs:
           set -o pipefail
           ctest --test-dir build -N | sed -n 's/^  Test *#[0-9]*: //p' | sort
           ctest --test-dir build --build-config ${{ matrix.config }} --output-on-failure 2>&1 | tee ctest.log
+          ctest --test-dir build --build-config ${{ matrix.config }} -V -R '^(mcp_note|mcp_note_tool|mcp_sdk|mcp_stdio)$' 2>&1 | grep -E ': (PASS|.*:PASS$|[0-9]+ Tests 0 Failures)|tests passed'
           if [ ! -f ctest.log ]; then
             echo "::error::ctest 日志不存在"
             exit 1
