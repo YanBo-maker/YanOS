@@ -28,6 +28,10 @@ typedef struct {
     uint8_t expected_source[32];
     bool has_expected_source, has_offset;
     uint32_t offset;
+    /* 0035 note arguments and the MCP-layer committed flag. */
+    bool dry_run, committed;
+    uint8_t text[YAN_MCP_INPUT_MAX];
+    uint32_t text_length;
 } YanMcpRequest;
 bool yan_mcp_id_equal(const YanMcpId *, const YanMcpId *);
 void yan_mcp_parse(const char *, size_t, YanMcpSession *, const YanMcpId *,

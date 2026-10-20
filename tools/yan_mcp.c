@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "mcp_note.h"
 #include "mcp_worker.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -295,8 +296,21 @@ static bool handle(Server *s,const char *line,size_t length)
         }
         return true;
     }
-    if (request.kind==YAN_MCP_NOTE_CREATE || request.kind==YAN_MCP_NOTE_REPLACE)
-        return enqueue(s,&request,NULL,0,"IO",false);
+    if (request.kind==YAN_MCP_NOTE_CREATE || request.kind==YAN_MCP_NOTE_REPLACE) {
+        if (s->task.active) return enqueue(s,&request,NULL,0,"BUSY",false);
+        YanMcpNoteRequest note={.replace=request.kind==YAN_MCP_NOTE_REPLACE,
+            .dry_run=request.dry_run,.has_expected=request.has_expected_source,
+            .name=request.name,.text=request.text,.length=request.text_length};
+        memcpy(note.expected,request.expected_source,sizeof note.expected);
+        char *payload=NULL; size_t payload_length=0; bool committed=false;
+        YanMcpNoteResult result=yan_mcp_note_execute(s->options.image,&note,&payload,
+            &payload_length,&committed);
+        const char *token=result==YAN_MCP_NOTE_OK?NULL:yan_mcp_note_result_name(result);
+        request.committed=committed;
+        bool queued=enqueue(s,&request,token?NULL:payload,token?0:payload_length,token,false);
+        free(payload);
+        return queued;
+    }
     if (request.kind==YAN_MCP_SEARCH || request.kind==YAN_MCP_STATUS ||
         request.kind==YAN_MCP_BLOCK_LIST || request.kind==YAN_MCP_BLOCK_READ ||
         request.kind==YAN_MCP_BLOCK_REFS || request.kind==YAN_MCP_BLOCK_BACKLINKS) {

@@ -265,6 +265,8 @@ if(YAN_BUILD_SEMANTIC)
     target_compile_options(yan_semantic PRIVATE ${YAN_WARNINGS})
     add_library(yan_mcp_note STATIC tools/mcp_note.c)
     target_include_directories(yan_mcp_note PUBLIC tools)
+    target_link_libraries(yan_mcp_note PUBLIC yan_note_write yan_semantic_posix
+                          PRIVATE yyjson::yyjson)
     target_compile_options(yan_mcp_note PRIVATE ${YAN_WARNINGS})
     add_library(yan_mcp_protocol STATIC tools/mcp_protocol.c)
     target_include_directories(yan_mcp_protocol PUBLIC tools)
@@ -332,6 +334,14 @@ if(BUILD_TESTING)
             target_compile_options(test_mcp_block_worker PRIVATE ${YAN_WARNINGS})
             add_test(NAME mcp_block_worker COMMAND test_mcp_block_worker)
             set_tests_properties(mcp_block_worker PROPERTIES TIMEOUT 30)
+            add_executable(test_mcp_note tests/test_mcp_note.c)
+            target_link_libraries(test_mcp_note PRIVATE yan_mcp_protocol
+                                  yan_note_write yan_semantic_posix yyjson::yyjson
+                                  unity::framework)
+            target_compile_options(test_mcp_note PRIVATE ${YAN_WARNINGS})
+            add_test(NAME mcp_note_tool COMMAND test_mcp_note)
+            set_tests_properties(mcp_note_tool PROPERTIES TIMEOUT 30 LABELS
+                "0035-R4-AC4;0035-R6-AC3;0035-R7-AC1;0035-R10-AC5")
             add_test(NAME mcp_protocol COMMAND test_mcp_protocol)
             if(YAN_MCP_SDK_PYTHON)
                 set(_mcp_sdk_python "${YAN_MCP_SDK_PYTHON}")
@@ -459,6 +469,24 @@ if(BUILD_TESTING)
         add_executable(block_query_probe tests/block_query_probe.c)
         target_link_libraries(block_query_probe PRIVATE yan_block_query)
         target_compile_options(block_query_probe PRIVATE ${YAN_WARNINGS})
+        add_executable(note_read_probe tests/note_read_probe.c)
+        target_link_libraries(note_read_probe PRIVATE yan_semantic_posix)
+        target_compile_options(note_read_probe PRIVATE ${YAN_WARNINGS})
+        add_library(mcp_note_fsync_fault SHARED tests/mcp_note_fsync_fault.c)
+        target_link_libraries(mcp_note_fsync_fault PRIVATE ${CMAKE_DL_LIBS})
+        target_compile_options(mcp_note_fsync_fault PRIVATE ${YAN_WARNINGS})
+        if(Python3_Interpreter_FOUND AND TARGET yan_mcp AND TARGET yan_run
+           AND TARGET yanfs_terminal AND TARGET note_read_probe
+           AND TARGET mcp_note_fsync_fault)
+            add_test(NAME mcp_note COMMAND "${Python3_EXECUTABLE}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_note_checks.py"
+                $<TARGET_FILE:yan_mcp> $<TARGET_FILE:yan_run>
+                "${YAN_TERMINAL_ELF}" $<TARGET_FILE:note_read_probe>
+                $<TARGET_FILE:mcp_note_fsync_fault>)
+            set_tests_properties(mcp_note PROPERTIES TIMEOUT 240
+                SKIP_RETURN_CODE 77 LABELS
+                "0035-R3-AC1;0035-R3-AC2;0035-R3-AC3;0035-R3-AC4;0035-R4-AC1;0035-R4-AC2;0035-R4-AC3;0035-R4-AC4;0035-R5-AC1;0035-R5-AC2;0035-R5-AC5;0035-R6-AC2;0035-R6-AC3;0035-R10-AC1;0035-R10-AC2;0035-R10-AC3;0035-R10-AC4;0035-R11-AC1;0035-R11-AC2;0035-R11-AC3;0035-R11-AC4")
+        endif()
         if(Python3_Interpreter_FOUND)
             add_test(NAME block_query_oracle COMMAND "${Python3_EXECUTABLE}" -B
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/block_page_oracle.py"

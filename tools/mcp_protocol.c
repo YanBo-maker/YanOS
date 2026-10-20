@@ -230,6 +230,28 @@ static bool block_arguments(YanMcpRequest *r,yyjson_val *args,bool need_id,
     if (r->has_offset && r->offset>0 && !r->has_expected_source) return false;
     return true;
 }
+static bool note_arguments(YanMcpRequest *r,yyjson_val *args)
+{
+    if (!yyjson_is_obj(args) ||
+        !fields4(args,"name","text","expected_source","dry_run")) return false;
+    if (!business_string(yyjson_obj_get(args,"name"),r->name,true)) return false;
+    yyjson_val *text=yyjson_obj_get(args,"text");
+    if (!yyjson_is_str(text)) return false;
+    size_t length=yyjson_get_len(text);
+    if (length>sizeof r->text) return false;
+    memcpy(r->text,yyjson_get_str(text),length); r->text_length=(uint32_t)length;
+    yyjson_val *dry=yyjson_obj_get(args,"dry_run");
+    if (dry) {
+        if (!yyjson_is_bool(dry)) return false;
+        r->dry_run=yyjson_get_bool(dry);
+    }
+    yyjson_val *expected=yyjson_obj_get(args,"expected_source");
+    if (expected) {
+        if (!expected_value(expected,r->expected_source)) return false;
+        r->has_expected_source=true;
+    }
+    return r->dry_run || r->has_expected_source;
+}
 void yan_mcp_parse(const char *text,size_t length,YanMcpSession *session,
     const YanMcpId *active,YanMcpRequest *r,const yyjson_alc *allocator)
 {
@@ -313,6 +335,7 @@ void yan_mcp_parse(const char *text,size_t length,YanMcpSession *session,
             if (!args || !block_arguments(r,args,false,false)) goto done;
             r->kind=list ? YAN_MCP_BLOCK_LIST : YAN_MCP_BLOCK_REFS;
         } else if (note != YAN_NOTE_TOOL_NONE) {
+            if (!note_arguments(r,args)) goto done;
             r->kind=note==YAN_NOTE_TOOL_CREATE ? YAN_MCP_NOTE_CREATE : YAN_MCP_NOTE_REPLACE;
         } else {
             if (!args || !block_arguments(r,args,true,read)) goto done;
@@ -413,8 +436,11 @@ YanMcpReplyStatus yan_mcp_reply_ex(const YanMcpRequest *r,const char *payload,si
             yyjson_mut_val *content=yyjson_mut_arr(doc), *text=yyjson_mut_obj(doc), *value=NULL;
             if (!token && r->kind==YAN_MCP_TOOL_ERROR) token="INVALID";
             ok=ok && body && content && text && yyjson_mut_obj_add_bool(doc,body,"isError",token!=NULL);
-            if (token) { value=yyjson_mut_obj(doc); ok=ok && value && yyjson_mut_obj_add_str(doc,value,"code",token); }
-            else {
+            if (token) {
+                value=yyjson_mut_obj(doc);
+                ok=ok && value && yyjson_mut_obj_add_str(doc,value,"code",token);
+                if (ok && r->committed) ok=yyjson_mut_obj_add_bool(doc,value,"committed",true);
+            } else {
                 value=payload && size<=YAN_MCP_OUTPUT_MAX ? copy_json(doc,payload,size,a) : NULL;
                 ok=ok && yyjson_mut_is_obj(value) && yyjson_mut_obj_add_val(doc,body,"structuredContent",value);
             }
