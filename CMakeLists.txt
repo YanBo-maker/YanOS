@@ -1059,6 +1059,18 @@ if(BUILD_TESTING)
                         --work "${CMAKE_BINARY_DIR}/yanfs-mkfs")
             set_tests_properties(yanfs_mkfs PROPERTIES TIMEOUT 180
                                  LABELS "0036-R1-AC1;0036-R1-AC2;0036-R1-AC3")
+            # 0036-R2-AC4: fixed v1 write sequence vs the 41b83b5 SHA-256.
+            add_executable(yanfs_write_probe tests/yanfs_write_probe.c)
+            target_link_libraries(yanfs_write_probe PRIVATE yan_fs)
+            target_compile_options(yanfs_write_probe PRIVATE ${YAN_WARNINGS})
+            add_test(NAME yanfs_write_sha
+                COMMAND "${Python3_EXECUTABLE}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_yanfs_write_sha.py"
+                        --mkfs "$<TARGET_FILE:yan_mkfs>"
+                        --probe "$<TARGET_FILE:yanfs_write_probe>"
+                        --work "${CMAKE_BINARY_DIR}/yanfs-write-sha")
+            set_tests_properties(yanfs_write_sha PROPERTIES TIMEOUT 60
+                                 LABELS "0036-R2-AC4")
         endif()
         add_test(NAME persistent_combined_gate
             COMMAND "${Python3_EXECUTABLE}"
