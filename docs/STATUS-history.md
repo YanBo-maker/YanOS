@@ -702,3 +702,12 @@ CI 覆盖 Linux Debug 检测构建、Linux Release 和 Windows Debug。外部验
 - ACT4 自带构建系统、UDB配置与框架生成RVMODEL的接入方式。
 - YanFS 后续格式演进、事务恢复与层次目录；初版语义已由 0021 锁定。
 - 项目许可证。
+
+## 归档：2026-10-20 替换前的「当前阶段」
+
+[0034](specs/0034-ci-guest-tests-and-status-archive.md) 已批准（2026-10-19）。R1–R5 已随 [PR #43](https://github.com/YanBo-maker/YanOS/pull/43) 合入 main（41b83b5，提交 e483bf9）。两个 ubuntu-22.04 任务用 apt 安装 `gcc-riscv64-linux-gnu`，并以 `-DYAN_BUILD_TOOLS=ON -DYAN_RISCV_PREFIX=riscv64-linux-gnu-` 配置。`YAN_RISCV_GCC` 不是可执行路径，或 `ctest -N -R '^guest_'` 为 0 时，任务在测试前失败。Linux 的 ctest 输出经 `tee` 记入日志，出现 `(Skipped)` 则失败。windows-2022 仍只做 Debug，配置、构建和 `ctest` 命令与 PR #43 之前相同，不安装 RISC-V 工具链。
+
+合入后 main 的 [Actions 39339094819](https://github.com/YanBo-maker/YanOS/actions/runs/39339094819) 三项成功。安装包为 `gcc-11-riscv64-linux-gnu 11.4.0-1ubuntu1~22.04cross1`。该次运行的配置日志写明差分测试未注册（参考模型路径为空）。`YAN_ENABLE_MUTATION_TESTS` 与 `YAN_BUILD_SEMANTIC` 不在这套 CI 里。
+
+[0033](specs/0033-block-mcp-navigation.md) 的四个只读块工具已随 [PR #38](https://github.com/YanBo-maker/YanOS/pull/38) 合入 main（75e057a）。各阶段验证明细在对应规格的 VERIFY 执行记录，不在本页展开。
+

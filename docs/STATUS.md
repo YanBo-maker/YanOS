@@ -2,11 +2,11 @@
 
 ## 当前阶段
 
-[0034](specs/0034-ci-guest-tests-and-status-archive.md) 已批准（2026-10-19）。R1–R5 已随 [PR #43](https://github.com/YanBo-maker/YanOS/pull/43) 合入 main（41b83b5，提交 e483bf9）。两个 ubuntu-22.04 任务用 apt 安装 `gcc-riscv64-linux-gnu`，并以 `-DYAN_BUILD_TOOLS=ON -DYAN_RISCV_PREFIX=riscv64-linux-gnu-` 配置。`YAN_RISCV_GCC` 不是可执行路径，或 `ctest -N -R '^guest_'` 为 0 时，任务在测试前失败。Linux 的 ctest 输出经 `tee` 记入日志，出现 `(Skipped)` 则失败。windows-2022 仍只做 Debug，配置、构建和 `ctest` 命令与 PR #43 之前相同，不安装 RISC-V 工具链。
+[0035](specs/0035-agent-writable-knowledge.md) 的规格头仍是 Approved（2026-10-20）。Host 侧镜像旁锁与原子写已随 [PR #52](https://github.com/YanBo-maker/YanOS/pull/52) 合入 main（4af3cfd）。`yanos_note_create`、`yanos_note_replace` 与 `--allow-write` 已随 [PR #55](https://github.com/YanBo-maker/YanOS/pull/55) 合入 main（2921fed）。`serverInfo.version` 为 `0035`（`tools/mcp_protocol.c` 的 `SERVER_INFO`）。
 
-合入后 main 的 [Actions 39339094819](https://github.com/YanBo-maker/YanOS/actions/runs/39339094819) 三项成功。安装包为 `gcc-11-riscv64-linux-gnu 11.4.0-1ubuntu1~22.04cross1`。该次运行的配置日志写明差分测试未注册（参考模型路径为空）。`YAN_ENABLE_MUTATION_TESTS` 与 `YAN_BUILD_SEMANTIC` 不在这套 CI 里。
+Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `YAN_BUILD_SEMANTIC`，安装 curl、yyjson 和 `mcp==2.3.0`，并在测试前检查 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk` 的注册数为 4。windows-2022 仍只做 Debug，配置步骤不打开 `YAN_BUILD_SEMANTIC`，也不安装 RISC-V 工具链。
 
-[0033](specs/0033-block-mcp-navigation.md) 的四个只读块工具已随 [PR #38](https://github.com/YanBo-maker/YanOS/pull/38) 合入 main（75e057a）。各阶段验证明细在对应规格的 VERIFY 执行记录，不在本页展开。
+规格 R8 要求放在 `tests/` 的示例学习笔记夹具，2921fed 的树里还没有。各阶段验证明细仍只写在对应规格的 VERIFY 执行记录。
 
 ## 已交付能力
 
@@ -43,6 +43,7 @@
 - 0032 具名块与精确正文引用。[0032](specs/0032-block-references.md)，[PR #36](https://github.com/YanBo-maker/YanOS/pull/36)（d8804be）
 - 0033 Agent 只读块导航。[0033](specs/0033-block-mcp-navigation.md)，[PR #38](https://github.com/YanBo-maker/YanOS/pull/38)（75e057a）
 - 0034 Linux CI 编译并运行 Guest 默认测试。[0034](specs/0034-ci-guest-tests-and-status-archive.md)，[PR #43](https://github.com/YanBo-maker/YanOS/pull/43)（41b83b5）
+- 0035 镜像旁锁、原子写，以及 MCP 写工具 `yanos_note_create` / `yanos_note_replace`。[0035](specs/0035-agent-writable-knowledge.md)，[PR #52](https://github.com/YanBo-maker/YanOS/pull/52)（4af3cfd）、[PR #55](https://github.com/YanBo-maker/YanOS/pull/55)（2921fed）
 
 ## 覆盖边界与已知限制
 
@@ -52,7 +53,7 @@
 - 第三方证据来自官方 riscv-tests 与 Sail 签名，范围是用户态 RV32IM。Guest trap 自检覆盖 MSIP 与 MTIP；MEIP 由 Host 侧测试驱动。
 - `tests/official/run_act4.sh` 在 Sail 与 DUT 都没有签名时把用例记为 skipped；结束条件仍是 differed 为 0 且 matched 大于 0。跳过数大于 0 本身不使脚本失败。
 - CI 不打开 `YAN_ENABLE_MUTATION_TESTS`。默认套件里的 `*_mutation_gate` 纯门禁仍会注册。`guest_console_mutation_gate` 只在变异配置打开时注册（`CMakeLists.txt` 中该门禁与 `YAN_ENABLE_MUTATION_TESTS` 同支）。
-- CI 不打开 `YAN_BUILD_SEMANTIC`。因此 `yan_mcp`、`mcp_*`，以及写在该开关内的 `semantic_cli`、`semantic_json`、`semantic_json_memory`、`semantic_provider` 不注册。`guest_note_blocks_host` 还要求已有 `yan_mcp` 目标（`CMakeLists.txt` 中 `if(TARGET yan_mcp)`），本次 CI 名单里没有它。不依赖该开关的 Host 侧测试仍会注册。Actions 39339094819 的 Linux 名单含 `semantic`、`semantic_corpus`、`semantic_text`、`semantic_text_oracle`、`semantic_rank_oracle`、`semantic_sha256`、`semantic_mutation_gate`、`semantic_posix`；Windows 名单相同，但没有只在 Linux 注册的 `semantic_posix`。
+- Linux CI（`.github/workflows/build.yml`，2921fed）打开 `YAN_BUILD_SEMANTIC`，因此会构建 `yan_mcp`。`CMakeLists.txt` 在该开关下注册 `mcp_protocol`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk`、`mcp_faults` 等测试；`mcp_note` 还要求已有 `yan_mcp`、`yan_run`、`yanfs_terminal` 和 `note_read_probe`。workflow 在配置后检查 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk` 四项都已注册。`guest_note_blocks_host` 写在 `if(TARGET yan_mcp)` 里，Linux 打开该开关后满足条件。windows-2022 的配置不传 `YAN_BUILD_SEMANTIC`（默认 OFF），不构建 `yan_mcp`。不依赖该开关的 Host 侧测试仍会注册。`YAN_ENABLE_MUTATION_TESTS` 仍然不打开。
 - 没有 S/U 模式、`medeleg` / `mideleg`、虚拟内存分页和抢占式调度。YanFS 初版仍是单根目录、最多 63 个文件、连续 extent；元数据写失败可能拒挂，不保证断电一致性。
 
 ## 待定设计
@@ -64,7 +65,7 @@
 
 ## 下一步
 
-[决策 0001](decisions/0001-roadmap-A-D-B.md) 的 A 与 D 的 CI 部分已经落在 main。下一步是 B：写入类 MCP。C（U-mode / syscall）暂缓。
+[决策 0001](decisions/0001-roadmap-A-D-B.md) 的 A 与 D 的 CI 部分已经落在 main。B 的写工具代码已在 main（见当前阶段）。C（U-mode / syscall）仍暂缓。0035 的规格状态仍是 Approved。
 
 ## 历史归档
 
