@@ -206,7 +206,7 @@ static YanNoteResult load_snapshot(YanNoteContext *context)
         YanFsResult listed = yan_fs_list(context->fs, &cursor, &info);
         if (listed == YAN_FS_END) return YAN_NOTE_OK;
         if (listed != YAN_FS_OK) return note_map_fs(listed);
-        if (context->entry_count >= YAN_FS_MAX_FILES) return YAN_NOTE_PROTOCOL;
+        if (context->entry_count >= context->capacity) return YAN_NOTE_PROTOCOL;
         memcpy(context->entries[context->entry_count].name, info.name,
                sizeof info.name);
         context->entries[context->entry_count].size_bytes = info.size_bytes;
@@ -513,9 +513,20 @@ static YanNoteResult publish_change(YanNoteContext *context, const char *name,
 
 /* -------------------------------------------------------------- public API */
 
-YanNoteResult yan_note_init(YanNoteContext *context, YanFs *fs)
+uint32_t yan_note_entries_storage_bytes(uint32_t capacity)
 {
-    if (context == NULL || fs == NULL) {
+    return capacity * (uint32_t)sizeof(YanNoteEntry);
+}
+
+uint32_t yan_note_sort_name_storage_bytes(uint32_t capacity)
+{
+    return capacity * 32u;
+}
+
+YanNoteResult yan_note_init(YanNoteContext *context, YanFs *fs,
+                            YanNoteEntry *entries, char (*sort_name)[32])
+{
+    if (context == NULL || fs == NULL || entries == NULL || sort_name == NULL) {
         return YAN_NOTE_INVALID;
     }
     if (!span_valid(context, sizeof *context) || !span_valid(fs, sizeof *fs)) {
@@ -527,10 +538,19 @@ YanNoteResult yan_note_init(YanNoteContext *context, YanFs *fs)
     if (context->initialized && context->busy) {
         return YAN_NOTE_BUSY; /* an active operation owns the object */
     }
-    YanNoteResult state = fs_state(fs, fs->initialized);
-    if (state != YAN_NOTE_OK) return state;
+    /* 0036-R3: the terminal initializes the services between init_directory
+     * and mount, so an initialized but still UNMOUNTED filesystem is legal
+     * here. A faulted one is not, and queries still require MOUNTED. */
+    if (!fs->initialized) return YAN_NOTE_INVALID;
+    if (fs->busy) return YAN_NOTE_BUSY;
+    if (fs->state == YAN_FS_STATE_FAULTED) return YAN_NOTE_FAULTED;
+    if (fs->entry_capacity == 0u) return YAN_NOTE_INVALID;
+    uint32_t capacity = fs->entry_capacity;
     memset(context, 0, sizeof *context);
     context->fs = fs;
+    context->entries = entries;
+    context->sort_name = sort_name;
+    context->capacity = capacity;
     context->initialized = true;
     context->busy = false;
     return YAN_NOTE_OK;
@@ -862,7 +882,7 @@ YanNoteResult yan_note_list(YanNoteContext *context,
         if (!qualified) {
             continue;
         }
-        if (eligible >= YAN_FS_MAX_FILES) {
+        if (eligible >= context->capacity) {
             result = YAN_NOTE_PROTOCOL;
             break;
         }

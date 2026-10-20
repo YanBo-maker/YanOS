@@ -136,7 +136,19 @@ static YanImageOpenResult mount_opened_image(YanSemanticPosix *p, bool record_in
         p->input_dev[0] = target.st_dev; p->input_ino[0] = target.st_ino;
     }
     YanFsBlockIo io = {p, capacity, read_block, refuse_write};
-    YanImageOpenResult r = map_fs_image(yan_fs_init(&p->fs, io));
+    uint8_t scratch[4096];
+    uint32_t directory_blocks = 0u;
+    YanImageOpenResult r = map_fs_image(yan_fs_probe(&io, scratch,
+                                                     &directory_blocks));
+    if (r == YAN_IMAGE_OPEN_OK) {
+        p->directory = calloc(directory_blocks, 4096u);
+        if (p->directory == NULL) {
+            r = YAN_IMAGE_OPEN_IO;
+        } else {
+            r = map_fs_image(yan_fs_init_directory(&p->fs, io, p->directory,
+                                                   directory_blocks));
+        }
+    }
     if (r == YAN_IMAGE_OPEN_OK) r = map_fs_image(yan_fs_mount(&p->fs));
     return r;
 }
@@ -290,5 +302,9 @@ YanSemanticResult yan_semantic_posix_cleanup(YanSemanticPosix *p)
     YanSemanticResult r = yan_semantic_posix_close_source(p);
     YanSemanticResult index = close_index(p);
     discard_index(p);
+    free(p->directory);
+    p->directory = NULL;
+    p->fs.directory = NULL;
+    p->fs.directory_blocks = 0u;
     return r == YAN_SEMANTIC_OK ? index : r;
 }

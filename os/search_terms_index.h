@@ -98,7 +98,9 @@ typedef struct {
     uint32_t atom_cursor[YAN_SEARCH_TERMS_QUERY_MAX];
     uint16_t group_atom_start[YAN_SEARCH_TERMS_GROUP_MAX];
     uint16_t group_atom_count[YAN_SEARCH_TERMS_GROUP_MAX];
-    YanFsInfo entries[YAN_FS_MAX_FILES];
+    /* 0036-R3: caller-owned directory snapshot, `entry_capacity` entries. */
+    YanFsInfo *entries;
+    uint32_t entry_capacity;
     uint32_t key_pool_used;
     uint32_t skipped;
 
@@ -125,7 +127,12 @@ _Static_assert(sizeof(YanSearchTermsIndex) <= 2u * 1024u * 1024u,
  * embedded linear fallback. It publishes EMPTY: no cache exists yet. No disk
  * I/O. */
 YanSearchTermsResult yan_search_terms_index_init(YanSearchTermsIndex *index,
-                                                 YanFs *fs);
+                                                 YanFs *fs,
+                                                 YanFsInfo *entries,
+                                                 uint8_t *metadata_eligible);
+/* 0036-R3 storage size for the directory snapshot. The embedded linear
+ * backend's per-slot flags use yan_search_terms_linear_storage_bytes. */
+uint32_t yan_search_terms_index_entries_storage_bytes(uint32_t capacity);
 
 /* Builds the vtable that the caller injects into a YanSearchTerms. Every entry
  * point operates on the index context; the source span is the borrowed YanFs.

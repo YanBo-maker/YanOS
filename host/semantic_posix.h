@@ -19,6 +19,9 @@
  * OK result. CLI does this before returning. */
 typedef struct {
     YanFs fs;
+    /* 0036-R3: the directory cache is calloc'd for the image's D blocks and
+     * released by cleanup. */
+    uint8_t *directory;
     int image_fd, index_fd;
     FILE *temporary;
     uint64_t image_size;

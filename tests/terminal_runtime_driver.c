@@ -118,12 +118,10 @@ enum { FAULT_NONE = 0, FAULT_IO = 1, FAULT_PROTOCOL = 2 };
  * reason), a trap, or an application code with an unknown reason - is a harness
  * error, never a named owner failure. APP_REASON_LAST tracks the highest reason
  * defined by apps/yanfs_terminal/main.c, so a legitimate startup failure such as
- * APP_REASON_CAPACITY (25, token CAPACITY, the temporary 0036 PR2a guard),
- * APP_REASON_ARENA (24, token ARENA) or APP_REASON_BLOCK_INIT (23, token
- * BLOCK_INIT) is an owner failure while every unassigned code stays a harness
- * error. */
+ * APP_REASON_BLOCK_INIT (23, token BLOCK_INIT) is an owner failure while
+ * every unassigned code stays a harness error. */
 #define APP_FAIL_TOP UINT32_C(0x71000000)
-#define APP_REASON_LAST 25u
+#define APP_REASON_LAST 24u
 #define FIXTURE_FAIL_TOP UINT32_C(0x72000000)
 #define FIXTURE_FAIL_LAST 17u
 
@@ -171,9 +169,9 @@ typedef struct {
     size_t baseline_length;
     bool baseline_loaded;
     uint32_t tohost_addr, probe_addr, tasks_addr, predicate_addr;
-    uint32_t putc_addr, console_addr;
+    uint32_t putc_addr, console_addr, arena_addr;
     bool tohost_known, probe_known, tasks_known, predicate_known;
-    bool putc_known, console_known;
+    bool putc_known, console_known, arena_known;
     uint32_t predicate_ra, predicate_entries;
     bool predicate_entered, window_fired, observed_blocked, wake_seen, rearm_seen;
     size_t line2_start;
@@ -820,6 +818,10 @@ int main(int argc, char **argv)
                               &drive.console_addr) == YAN_OK) {
         drive.console_known = 1;
     }
+    if (yan_image_find_symbol(image, image_size, "yan_arena_used_bytes",
+                              &drive.arena_addr) == YAN_OK) {
+        drive.arena_known = 1;
+    }
     /* A symbol a mode needs is required, never guessed or bypassed. */
     if (!drive.tohost_known) {
         HARNESS_FAIL("the image has no tohost symbol");
@@ -1056,6 +1058,11 @@ done:
                                      drive.probe_addr + 4u * TW_TICKS)
                           : 0u,
                       (int)drive.protocol_fired, (int)drive.backend.tx_failed);
+        (void)fprintf(status_file, "arena_used=%" PRIu32 "\narena_known=%d\n",
+                      drive.arena_known
+                          ? bus_word(&machine.bus, drive.arena_addr)
+                          : 0u,
+                      (int)drive.arena_known);
         if (fflush(status_file) != 0 || ferror(status_file)) {
             result = EXIT_HOST_ERROR;
             verdict = "harness";

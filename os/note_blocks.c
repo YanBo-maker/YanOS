@@ -53,14 +53,22 @@ static YanBlockResult fs_state(const YanFs *fs)
     if (fs->state != YAN_FS_MOUNTED) return YAN_BLOCK_NOT_MOUNTED;
     return YAN_BLOCK_OK;
 }
-YanBlockResult yan_blocks_init(YanBlockContext *c, YanFs *fs)
+uint32_t yan_blocks_names_storage_bytes(uint32_t capacity)
+{ return capacity * 32u; }
+
+YanBlockResult yan_blocks_init(YanBlockContext *c, YanFs *fs,
+                               char (*names)[32])
 {
-    if (!span(c, sizeof *c) || !span(fs, sizeof *fs) ||
+    if (!span(c, sizeof *c) || !span(fs, sizeof *fs) || names == NULL ||
         overlap(c, sizeof *c, fs, sizeof *fs)) return YAN_BLOCK_INVALID;
     if (c->busy) return YAN_BLOCK_BUSY;
-    YanBlockResult r = fs_state(fs);
-    if (r != YAN_BLOCK_OK) return r;
-    c->fs = fs; c->initialized = true; c->busy = false;
+    /* 0036-R3: init runs before mount; a query still requires MOUNTED. */
+    if (!fs->initialized) return YAN_BLOCK_INVALID;
+    if (fs->busy) return YAN_BLOCK_BUSY;
+    if (fs->state == YAN_FS_STATE_FAULTED) return YAN_BLOCK_FAULTED;
+    if (fs->entry_capacity == 0u) return YAN_BLOCK_INVALID;
+    c->fs = fs; c->names = names; c->name_capacity = fs->entry_capacity;
+    c->initialized = true; c->busy = false;
     return YAN_BLOCK_OK;
 }
 static bool address_valid(const YanBlockAddress *a)
@@ -243,7 +251,7 @@ static YanBlockResult directory(YanBlockContext *c)
         YanFsResult r = yan_fs_list(c->fs, &cursor, &file);
         if (r == YAN_FS_END) break;
         if (r != YAN_FS_OK) return map_fs(r);
-        if (c->name_count == YAN_FS_MAX_FILES) return YAN_BLOCK_PROTOCOL;
+        if (c->name_count == c->name_capacity) return YAN_BLOCK_PROTOCOL;
         memcpy(c->names[c->name_count++], file.name, sizeof file.name);
     }
     for (uint32_t i = 1; i < c->name_count; ++i) {

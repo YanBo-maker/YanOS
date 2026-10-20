@@ -1,4 +1,5 @@
 #include "note_blocks.h"
+#include "fs_test_support.h"
 #include "unity.h"
 #include <stdint.h>
 #include <string.h>
@@ -51,7 +52,7 @@ static bool row_sink(void *p, const YanBlockRow *row)
     if (show_fault_after != 0u) fail_read = reads + show_fault_after;
     if (reenter) {
         uint32_t old = reads;
-        nested = yan_blocks_init(&context, &fs);
+        nested = test_blocks_init(&context, &fs);
         TEST_ASSERT_EQUAL_UINT32_MESSAGE(old, reads, "blocks_reentry_no_io");
     }
     return !stop_row;
@@ -73,9 +74,9 @@ void setUp(void)
     show_fault_after = 0;
     YanFsBlockIo io = {NULL, capacity, read_block, write_block};
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_format_metadata(medium[0], BLOCKS));
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, io));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs, io));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
-    TEST_ASSERT_EQUAL_INT(YAN_BLOCK_OK, yan_blocks_init(&context, &fs));
+    TEST_ASSERT_EQUAL_INT(YAN_BLOCK_OK, test_blocks_init(&context, &fs));
 }
 void tearDown(void) { }
 

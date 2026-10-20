@@ -1,4 +1,5 @@
 #include "editor.h"
+#include "fs_test_support.h"
 #include "unity.h"
 
 #include <stddef.h>
@@ -220,7 +221,7 @@ static void fixture(void)
     io.capacity = device_capacity;
     io.read_block = device_read;
     io.write_block = device_write;
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, io));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs, io));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
     memset(&editor, 0, sizeof editor);
     YanShellOutput output;

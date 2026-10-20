@@ -96,9 +96,9 @@ typedef bool (*YanRelationRowFn)(void *context, const YanRelationRow *row);
 
 /* Caller-owned, long-lived storage. A caller zero-initializes it before
  * yan_relation_init and never edits the fields afterwards. The bounded prefix,
- * the parser workspace, the source/candidate info and the row table are why
- * this object is static: no entry point copies them onto the stack. The whole
- * object stays inside the 64 KiB engineering budget. */
+ * parser workspace and source/candidate info are why this object is static;
+ * the row table is borrowed from the caller and never goes on the stack. The
+ * whole object stays inside the 64 KiB engineering budget. */
 typedef struct {
     YanFs *fs;
     bool initialized;
@@ -112,8 +112,10 @@ typedef struct {
     YanNoteInfo source_info;
     /* Validated metadata of the one candidate currently under observation. */
     YanNoteInfo candidate_info;
-    /* Bounded relation/sort scratch: at most 63 rows. */
-    YanRelationRow rows[YAN_RELATION_MAX_ROWS];
+    /* 0036-R3: caller-owned relation/sort scratch, `row_capacity` rows, one per
+     * file the image can hold. The context only borrows it. */
+    YanRelationRow *rows;
+    uint32_t row_capacity;
     uint32_t row_count;
 } YanRelationContext;
 
@@ -127,7 +129,10 @@ _Static_assert(sizeof(YanRelationContext) <= 65536u,
  * an uninitialized filesystem and a faulted filesystem are rejected without
  * writing the object; an initialized, idle context may be re-initialized after
  * validating the new pair, while an active context answers BUSY. */
-YanNoteResult yan_relation_init(YanRelationContext *context, YanFs *fs);
+YanNoteResult yan_relation_init(YanRelationContext *context, YanFs *fs,
+                                YanRelationRow *rows);
+/* 0036-R3 storage size for one `capacity`-row table. */
+uint32_t yan_relation_rows_storage_bytes(uint32_t capacity);
 
 /* Declares one existing source; emits one row per declared link in original
  * declaration order. A target is observed only through the directory, so a

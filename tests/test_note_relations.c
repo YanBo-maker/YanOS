@@ -2,7 +2,7 @@
  * implementation.
  *
  * The contract is os/note_relations.h and
- * docs/specs/0028-knowledge-relations.md ("公共服务与接口责任"). yan_relation_init
+ * docs/specs/0028-knowledge-relations.md ("公共服务与接口责任"). test_relation_init
  * and queries are implemented; the initial stub's semantic RED is retained
  * separately in build/search-relations-red.log. The assertions below exercise
  * the real service, not a compile/link shortcut. The device is a caller-owned static 8 MiB byte
@@ -41,6 +41,7 @@
  * owner-specific mutation gate. */
 
 #include "note_relations.h"
+#include "fs_test_support.h"
 #include "note_metadata_format.h"
 #include "yanfs.h"
 #include "unity.h"
@@ -151,7 +152,7 @@ static void fs_mount_fresh(void)
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK,
                                   yan_fs_format_metadata(medium[0], RELATION_BLOCKS),
                                   "relation_fixture_format");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_init(&fs, fs_backend()),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, test_fs_init(&fs, fs_backend()),
                                   "relation_fixture_init");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_mount(&fs),
                                   "relation_fixture_mount");
@@ -159,7 +160,7 @@ static void fs_mount_fresh(void)
 
 static void with_service(void)
 {
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK, yan_relation_init(&context, &fs),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK, test_relation_init(&context, &fs),
                                   "relation_service_init");
 }
 
@@ -304,7 +305,7 @@ static void relation_init_records_a_borrowed_fs_without_io(void)
     fs_mount_fresh();
     uint32_t reads = device_reads;
     uint32_t writes = device_writes;
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK, yan_relation_init(&context, &fs),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK, test_relation_init(&context, &fs),
                                   "relation_init_ok");
     TEST_ASSERT_TRUE_MESSAGE(context.initialized,
                              "relation_init_sets_initialized");
@@ -314,7 +315,7 @@ static void relation_init_records_a_borrowed_fs_without_io(void)
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(writes, device_writes,
                                      "relation_init_writes_no_block");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK,
-                                  yan_relation_init(&context, &fs),
+                                  test_relation_init(&context, &fs),
                                   "relation_init_idle_reuse_ok");
 }
 
@@ -322,14 +323,14 @@ static void relation_init_rejects_bad_context_and_fs(void)
 {
     fs_mount_fresh();
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID,
-                                  yan_relation_init(NULL, &fs),
+                                  test_relation_init(NULL, &fs),
                                   "relation_init_null_context_invalid");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID,
-                                  yan_relation_init(&context, NULL),
+                                  test_relation_init(&context, NULL),
                                   "relation_init_null_fs_invalid");
     memset(&fs, 0, sizeof fs);
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID,
-                                  yan_relation_init(&context, &fs),
+                                  test_relation_init(&context, &fs),
                                   "relation_init_uninitialized_fs_invalid");
 }
 
@@ -338,11 +339,11 @@ static void relation_init_rejects_context_fs_overlap(void)
     fs_mount_fresh();
     YanFs *overlap = (YanFs *)(void *)&context;
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID,
-                                  yan_relation_init(&context, overlap),
+                                  test_relation_init(&context, overlap),
                                   "relation_init_context_fs_overlap_invalid");
     YanRelationContext *alias = (YanRelationContext *)(void *)&fs;
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID,
-                                  yan_relation_init(alias, &fs),
+                                  test_relation_init(alias, &fs),
                                   "relation_init_fs_context_overlap_invalid");
 }
 
@@ -1106,15 +1107,19 @@ static void relation_failed_init_preserves_an_existing_idle_context(void)
     static YanRelationContext before_context;
     memcpy(&before_context, &context, sizeof context);
     uint32_t before = device_reads;
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID, yan_relation_init(&context, NULL),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID, test_relation_init(&context, NULL),
                                   "relation_init_failure_invalid");
     TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&before_context, &context, sizeof context,
                                      "relation_init_failure_preserves_bytes");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_unmount(&fs), "relation_init_failure_unmount");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_NOT_MOUNTED, yan_relation_init(&context, &fs),
-                                  "relation_init_unmounted_rejected");
-    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&before_context, &context, sizeof context,
-                                     "relation_init_unmounted_preserves_bytes");
+    /* 0036-R3: the terminal initializes services between init_directory and
+     * mount, so init accepts an initialized-but-unmounted filesystem and
+     * publishes an empty service. Queries still report NOT_MOUNTED. */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK, test_relation_init(&context, &fs),
+                                  "relation_init_unmounted_accepted");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_NOT_MOUNTED,
+                                  yan_relation_links(&context, "n", NULL, NULL, NULL),
+                                  "relation_query_unmounted_rejected");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(before, device_reads, "relation_init_failure_zero_reads");
 }
 

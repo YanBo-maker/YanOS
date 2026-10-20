@@ -1,4 +1,5 @@
 #include "search.h"
+#include "fs_test_support.h"
 #include "search_linear.h"
 #include "unity.h"
 
@@ -331,7 +332,7 @@ static void real_setup(void)
     io.capacity = device_capacity;
     io.read_block = device_read_block;
     io.write_block = device_write_block;
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_init(&fs, io),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, test_fs_init(&fs, io),
                                   "the fixture must initialize the filesystem");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_mount(&fs),
                                   "the fixture must mount the empty directory");
@@ -1736,7 +1737,7 @@ static void real_search_unmounted_source_reports_not_mounted(void)
     io.capacity = device_capacity;
     io.read_block = device_read_block;
     io.write_block = device_write_block;
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, io));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs, io));
     /* Deliberately no yan_fs_mount: the public FS call must be the one that
      * reports the unmounted state. */
     memset(&linear, 0, sizeof linear);
@@ -2428,7 +2429,7 @@ static void linear_init_rejects_context_overlapping_borrowed_filesystem(void)
     io.capacity = device_capacity;
     io.read_block = device_read_block;
     io.write_block = device_write_block;
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_init(&container.fs, io),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, test_fs_init(&container.fs, io),
                                   "the overlap fixture must initialize the FS");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_mount(&container.fs),
                                   "the overlap fixture must mount the FS");

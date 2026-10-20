@@ -6,6 +6,7 @@
  * second implementation, not yanfs.c's encoder: tampered images are resealed
  * here so mount is asked about the field under test, not about a stale CRC. */
 #include "yanfs.h"
+#include "fs_test_support.h"
 #include "unity.h"
 
 #include <stdint.h>
@@ -373,7 +374,7 @@ static void test_0036_R2_init_directory_rejects_bad_arguments(void)
         YAN_FS_INVALID,
         yan_fs_init_directory(&local, io, (uint8_t *)(void *)&local, 1u));
 
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&local, io));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&local, io));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_unmount(&local));
     free(first);
 }
@@ -400,6 +401,7 @@ static void test_0036_R2_external_directory_is_not_caller_scratch(void)
                       (const uint8_t *)"x", 1u));
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
 }
+
 
 /* 0036-R3: probe reads block 0 and publishes D without touching the instance
  * or the medium. It is the startup step that decides how large the arena must

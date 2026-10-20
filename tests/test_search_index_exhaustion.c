@@ -1,4 +1,5 @@
 #include "search_terms.h"
+#include "fs_test_support.h"
 #include "search_terms_index.h"
 #include "yanfs.h"
 #include "unity.h"
@@ -118,13 +119,13 @@ static void index_source_exhaustion_is_uncacheable_and_scans(void)
         "this suite is pinned to YAN_FS_SOURCE_TOKEN_SEED = UINT64_MAX - 64");
 
     /* Instance A holds a live source and an attached index before exhaustion. */
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs_a, ex_backend(&dev_a)));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs_a, ex_backend(&dev_a)));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs_a));
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_OK,
         yan_fs_create(&fs_a, "note.md", (const uint8_t *)"hit\n", 4u));
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK,
-                          yan_search_terms_index_init(&index_a, &fs_a));
+                          test_terms_index_init(&index_a, &fs_a));
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_TERMS_OK,
         yan_search_terms_init(&terms_a,
@@ -139,7 +140,7 @@ static void index_source_exhaustion_is_uncacheable_and_scans(void)
             YAN_FS_OK, yan_fs_format_metadata(medium_b[0], EX_BLOCKS));
         memset(&fs_b, 0, sizeof fs_b);
         TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
-                              yan_fs_init(&fs_b, ex_backend(&dev_b)));
+                              test_fs_init(&fs_b, ex_backend(&dev_b)));
         TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs_b));
         TEST_ASSERT_EQUAL_INT(
             YAN_FS_OK,

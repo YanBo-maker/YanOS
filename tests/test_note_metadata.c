@@ -40,6 +40,7 @@
  * not pinned here beyond "the stored tags are exactly the expected set". */
 
 #include "note_metadata.h"
+#include "fs_test_support.h"
 #include "yanfs.h"
 #include "unity.h"
 
@@ -157,7 +158,7 @@ static void fs_mount_fresh(void)
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK,
                                   yan_fs_format_metadata(medium[0], NOTE_BLOCKS),
                                   "fs_fixture_format");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_init(&fs, fs_backend()),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, test_fs_init(&fs, fs_backend()),
                                   "fs_fixture_init");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_mount(&fs),
                                   "fs_fixture_mount");
@@ -166,7 +167,7 @@ static void fs_mount_fresh(void)
 
 static void with_service(void)
 {
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK, yan_note_init(&context, &fs),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK, test_note_init(&context, &fs),
                                   "service_init");
 }
 
@@ -296,7 +297,7 @@ static void note_init_records_a_borrowed_fs_without_io(void)
     fs_mount_fresh();
     uint32_t reads = device_reads;
     uint32_t writes = device_writes;
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK, yan_note_init(&context, &fs),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK, test_note_init(&context, &fs),
                                   "init_ok");
     TEST_ASSERT_TRUE_MESSAGE(context.initialized, "init_sets_initialized");
     TEST_ASSERT_FALSE_MESSAGE(context.busy, "init_clears_busy");
@@ -304,19 +305,19 @@ static void note_init_records_a_borrowed_fs_without_io(void)
                                      "init_reads_no_block");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(writes, device_writes,
                                      "init_writes_no_block");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK, yan_note_init(&context, &fs),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK, test_note_init(&context, &fs),
                                   "init_idle_reuse_ok");
 }
 
 static void note_init_rejects_bad_context_and_fs(void)
 {
     fs_mount_fresh();
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID, yan_note_init(NULL, &fs),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID, test_note_init(NULL, &fs),
                                   "init_null_context_invalid");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID, yan_note_init(&context, NULL),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID, test_note_init(&context, NULL),
                                   "init_null_fs_invalid");
     memset(&fs, 0, sizeof fs);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID, yan_note_init(&context, &fs),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID, test_note_init(&context, &fs),
                                   "init_uninitialized_fs_invalid");
 }
 
@@ -325,11 +326,11 @@ static void note_service_rejects_context_fs_overlap(void)
     fs_mount_fresh();
     YanFs *overlap = (YanFs *)(void *)&context;
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID,
-                                  yan_note_init(&context, overlap),
+                                  test_note_init(&context, overlap),
                                   "init_context_fs_overlap_invalid");
     YanNoteContext *fs_alias = (YanNoteContext *)(void *)&fs;
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_INVALID,
-                                  yan_note_init(fs_alias, &fs),
+                                  test_note_init(fs_alias, &fs),
                                   "init_fs_context_overlap_invalid");
 }
 

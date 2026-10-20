@@ -1,4 +1,5 @@
 #include "yanfs.h"
+#include "fs_test_support.h"
 #include "unity.h"
 
 #include <string.h>
@@ -148,8 +149,8 @@ static void source_allocator_hands_out_distinct_live_identities(void)
     memset(&a, 0, sizeof a);
     memset(&b, 0, sizeof b);
 
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&a, backend()));
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_init(&b, backend()),
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&a, backend()));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, test_fs_init(&b, backend()),
         "a second object must initialize independently");
     uint64_t a_token = live_token(&a,
         "the first object must receive a live source identity");
@@ -165,7 +166,7 @@ static void source_allocator_rejections_and_read_only_do_not_allocate(void)
         yan_fs_format_metadata(device.blocks[0], DEVICE_BLOCKS));
     YanFs context;
     memset(&context, 0, sizeof context);
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&context, backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&context, backend()));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&context));
     uint8_t byte = 0x11u;
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_create(&context, "x", &byte, 1u));
@@ -193,7 +194,7 @@ static void source_allocator_exhaustion_crosses_max_without_wrap(void)
     bool exhausted = false;
     YanFs retained;
     memset(&retained, 0, sizeof retained);
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&retained, backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&retained, backend()));
     uint64_t retained_token = live_token(&retained,
         "an older instance must initially be cacheable");
     uint8_t retained_snapshot[sizeof retained];
@@ -207,7 +208,7 @@ static void source_allocator_exhaustion_crosses_max_without_wrap(void)
             yan_fs_format_metadata(device.blocks[0], DEVICE_BLOCKS));
         YanFs scratch;
         memset(&scratch, 0, sizeof scratch);
-        TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&scratch, backend()));
+        TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&scratch, backend()));
         if (record_or_exhausted(&scratch, &last_live)) {
             exhausted = true;
             break;
@@ -247,7 +248,7 @@ static void source_allocator_exhaustion_crosses_max_without_wrap(void)
     for (uint32_t index = 0u; index < 4u; ++index) {
         YanFs scratch;
         memset(&scratch, 0, sizeof scratch);
-        TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&scratch, backend()));
+        TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&scratch, backend()));
         YanFsSource source = observe(&scratch);
         TEST_ASSERT_EQUAL_UINT64_MESSAGE(0u, source.token,
             "post-exhaustion allocations must stay at token 0");
@@ -260,7 +261,7 @@ static void source_allocator_exhaustion_crosses_max_without_wrap(void)
         yan_fs_format_metadata(device.blocks[0], DEVICE_BLOCKS));
     YanFs faulted;
     memset(&faulted, 0, sizeof faulted);
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&faulted, backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&faulted, backend()));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&faulted));
     uint8_t byte = 0x33u;
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_create(&faulted, "x", &byte, 1u));

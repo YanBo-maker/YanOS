@@ -343,9 +343,15 @@ static void sort_rows(YanRelationRow *rows, uint32_t count)
 
 /* -------------------------------------------------------------- public API */
 
-YanNoteResult yan_relation_init(YanRelationContext *context, YanFs *fs)
+uint32_t yan_relation_rows_storage_bytes(uint32_t capacity)
 {
-    if (context == NULL || fs == NULL) {
+    return capacity * (uint32_t)sizeof(YanRelationRow);
+}
+
+YanNoteResult yan_relation_init(YanRelationContext *context, YanFs *fs,
+                                YanRelationRow *rows)
+{
+    if (context == NULL || fs == NULL || rows == NULL) {
         return YAN_NOTE_INVALID;
     }
     if (!span_valid(context, sizeof *context) || !span_valid(fs, sizeof *fs)) {
@@ -357,12 +363,17 @@ YanNoteResult yan_relation_init(YanRelationContext *context, YanFs *fs)
     if (context->initialized && context->busy) {
         return YAN_NOTE_BUSY; /* an active operation owns the object */
     }
-    YanNoteResult state = fs_state(fs, fs->initialized);
-    if (state != YAN_NOTE_OK) {
-        return state;
-    }
+    /* 0036-R3: init runs before mount in the terminal, so UNMOUNTED is legal;
+     * queries still go through relation_guard, which requires MOUNTED. */
+    if (!fs->initialized) return YAN_NOTE_INVALID;
+    if (fs->busy) return YAN_NOTE_BUSY;
+    if (fs->state == YAN_FS_STATE_FAULTED) return YAN_NOTE_FAULTED;
+    if (fs->entry_capacity == 0u) return YAN_NOTE_INVALID;
+    uint32_t capacity = fs->entry_capacity;
     memset(context, 0, sizeof *context);
     context->fs = fs;
+    context->rows = rows;
+    context->row_capacity = capacity;
     context->initialized = true;
     context->busy = false;
     return YAN_NOTE_OK;
@@ -471,7 +482,7 @@ YanNoteResult yan_relation_backlinks(YanRelationContext *context,
             break;
         }
         if (link_matches(&context->candidate_info, name_copy)) {
-            if (context->row_count >= YAN_RELATION_MAX_ROWS) {
+            if (context->row_count >= context->row_capacity) {
                 result = YAN_NOTE_PROTOCOL;
                 break;
             }
@@ -549,7 +560,7 @@ YanNoteResult yan_relation_related(YanRelationContext *context, const char *name
             if (!outgoing && !incoming && shared == 0u) {
                 continue; /* prechecked, but not a candidate */
             }
-            if (context->row_count >= YAN_RELATION_MAX_ROWS) {
+            if (context->row_count >= context->row_capacity) {
                 result = YAN_NOTE_PROTOCOL;
                 break;
             }

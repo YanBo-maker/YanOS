@@ -26,10 +26,10 @@ class RelationGuestGate(unittest.TestCase):
                 runtime.classify_production(result, path, 'relation-startup', {1})
             accepted = runtime.classify_production(result, path, 'relation-startup', {0x71000016})
             self.assertEqual(0x71000016, accepted['_tohost'])
-            values['tohost'] = '0x7100001a'
+            values['tohost'] = '0x71000019'
             path.write_text(''.join('%s=%s\n' % item for item in values.items()))
             with self.assertRaises(runtime.HarnessError):
-                runtime.classify_production(result, path, 'unknown-startup', {0x7100001a})
+                runtime.classify_production(result, path, 'unknown-startup', {0x71000019})
 
     def test_rv32_requires_both_signatures_and_prioritizes_harness(self):
         for rc, out, err, code, expected in (

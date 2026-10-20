@@ -19,10 +19,11 @@
  * Host header and depends on no test code, so the same source compiles for the
  * Guest.
  *
- * YanFs is larger than 8 KiB because it carries the metadata and scratch
- * blocks, so it lives in static storage or another long-lived object; it does
- * not fit the 4 KiB task stack of 0019, and no entry point allocates a whole
- * block on the stack. */
+ * 0036-R3 removed the built-in metadata block: the directory is caller-owned
+ * and its size follows the image, while YanFs itself keeps the 4 KiB scratch
+ * block and the borrowed directory pointer. It is still larger than the 4 KiB
+ * task stack of 0019, so it lives in static storage or another long-lived
+ * object, and no entry point allocates a whole block on the stack. */
 
 #define YAN_FS_BLOCK_SIZE UINT32_C(4096)
 #define YAN_FS_MAX_FILES UINT32_C(63)
@@ -82,7 +83,6 @@ typedef struct {
     YanFsState state;
     bool busy;
     uint32_t capacity_blocks;
-    uint8_t metadata[4096];
     uint8_t *directory;
     uint32_t directory_blocks;
     uint32_t entry_capacity;
@@ -91,10 +91,10 @@ typedef struct {
     bool source_cacheable;
 } YanFs;
 
-YanFsResult yan_fs_init(YanFs *, YanFsBlockIo);
 /* 0036: use a caller-owned directory cache of directory_blocks * 4096 bytes.
- * The buffer is long-lived and must not overlap the YanFs object; yan_fs_init
- * is the built-in D=1 case using the metadata member. */
+ * The buffer is long-lived and must not overlap the YanFs object. This is the
+ * only initializer: the D=1 built-in member was removed so the directory size
+ * always follows the image instead of a fixed array. */
 YanFsResult yan_fs_init_directory(YanFs *, YanFsBlockIo, uint8_t *directory,
                                   uint32_t directory_blocks);
 /* 0036-R3: read block 0 and validate only the fields the startup allocation

@@ -170,12 +170,25 @@ static YanFsResult write_image(const char *target, bool replace,
     ImageCopy copy = {source, temporary, blocks};
     YanFsBlockIo io = {&copy, copy_capacity, copy_read, copy_write};
     YanFs fs = {0};
-    result = yan_fs_init(&fs, io);
+    uint8_t scratch[YAN_FS_BLOCK_SIZE];
+    uint8_t *directory = NULL;
+    uint32_t directory_blocks = 0u;
+    result = yan_fs_probe(&io, scratch, &directory_blocks);
+    if (result == YAN_FS_OK) {
+        directory = calloc(directory_blocks, YAN_FS_BLOCK_SIZE);
+        if (directory == NULL) {
+            result = YAN_FS_IO;
+        } else {
+            result = yan_fs_init_directory(&fs, io, directory,
+                                           directory_blocks);
+        }
+    }
     if (result == YAN_FS_OK) result = yan_fs_mount(&fs);
     if (result == YAN_FS_OK) {
         result = replace ? yan_fs_replace(&fs, name, text, length)
                          : yan_fs_create(&fs, name, text, length);
     }
+    free(directory);
     if (result != YAN_FS_OK) goto out;
 
     if (fsync(temporary) != 0) {

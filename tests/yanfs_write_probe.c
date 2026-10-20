@@ -1,9 +1,10 @@
 /* 0036-R2-AC4 write-sequence probe. Loads an image into memory, runs one fixed
- * create/replace/remove/rename/copy sequence through yan_fs_init (the v1 path)
+ * create/replace/remove/rename/copy sequence through test_fs_init (the v1 path)
  * and writes the image back. tests/test_yanfs_write_sha.py compares the
  * result with the SHA-256 the same probe produced against 41b83b5's
  * os/yanfs.c, so the v1 write path stays byte-identical. */
 #include "yanfs.h"
+#include "fs_test_support.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,7 +49,7 @@ int main(int argc, char **argv)
     disk_blocks = (uint64_t)size / 4096u;
     for (size_t i = 0; i < sizeof big; ++i) big[i] = (uint8_t)(i * 7u + 3u);
 
-    STEP(yan_fs_init(&fs, (YanFsBlockIo){NULL, cap, rd, wr}));
+    STEP(test_fs_init(&fs, (YanFsBlockIo){NULL, cap, rd, wr}));
     STEP(yan_fs_mount(&fs));
     STEP(yan_fs_create(&fs, "a.txt", (const uint8_t *)"alpha\n", 6u));
     STEP(yan_fs_create(&fs, "b.txt", big, sizeof big));

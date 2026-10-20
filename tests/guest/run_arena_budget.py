@@ -45,9 +45,6 @@ def load_segments(data):
 
 
 def expected_arena(files, start):
-    # 0036 实施澄清: only the one copy of #4 the terminal uses. PR2a itself
-    # allocates only the directory; this reserves the documented PR2b order so
-    # the terminal image plus the largest arena is still proven to fit.
     sizes = [
         (files + 1) * 64,
         files * 36,
@@ -79,10 +76,14 @@ def main():
         return 1
     load_bytes = sum(end - start for start, end in spans)
     arena_start = (max(end for _, end in spans) + 15) & ~15
+    oracle = {63: 15008, 1023: 242528, 2047: 485216, 4095: 970592}
     arena = {}
     for files in (63, 1023, 2047, 4095):
         arena[files] = expected_arena(files, arena_start)
-        print("0036-R3-AC2 N=%d arena=%d" % (files, arena[files]), flush=True)
+        print("0036-R3-AC2 N=%d arena=%d oracle=%d"
+              % (files, arena[files], oracle[files]), flush=True)
+        if arena[files] != oracle[files]:
+            FAILURES.append("N=%d is not the approved arena size" % files)
     total = load_bytes + arena[4095]
     print("0036-R3-AC2 load_bytes=%d arena4095=%d total=%d limit=%d"
           % (load_bytes, arena[4095], total, LIMIT), flush=True)

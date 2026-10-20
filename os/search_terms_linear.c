@@ -86,10 +86,16 @@ static YanSearchTermsResult linear_read(void *context, uint32_t offset,
     return linear_map_fs(result);
 }
 
-YanSearchTermsResult yan_search_terms_linear_init(YanSearchTermsLinear *linear,
-                                                  YanFs *fs)
+uint32_t yan_search_terms_linear_storage_bytes(uint32_t capacity)
 {
-    if (linear == NULL || fs == NULL) {
+    return capacity;
+}
+
+YanSearchTermsResult yan_search_terms_linear_init(YanSearchTermsLinear *linear,
+                                                  YanFs *fs,
+                                                  uint8_t *metadata_eligible)
+{
+    if (linear == NULL || fs == NULL || metadata_eligible == NULL) {
         return YAN_SEARCH_TERMS_INVALID;
     }
     if (linear_ranges_overlap(linear, sizeof *linear, fs, sizeof *fs)) {
@@ -99,6 +105,10 @@ YanSearchTermsResult yan_search_terms_linear_init(YanSearchTermsLinear *linear,
         return YAN_SEARCH_TERMS_BUSY;
     }
     linear->fs = fs;
+    linear->metadata_eligible = metadata_eligible;
+    /* An uninitialized source is a legal status input (UNAVAILABLE); it has no
+     * directory capacity yet, so the flag array is simply never indexed. */
+    linear->capacity = fs->initialized ? fs->entry_capacity : 0u;
     linear->initialized = true;
     linear->busy = false;
     linear->snippet = NULL;
@@ -200,7 +210,7 @@ YanSearchTermsResult yan_search_terms_linear_qualify(
     if (!yan_search_terms_linear_filter_valid(linear, filter)) {
         return YAN_SEARCH_TERMS_INVALID;
     }
-    for (uint32_t i = 0u; i < YAN_FS_MAX_FILES; ++i) {
+    for (uint32_t i = 0u; i < linear->capacity; ++i) {
         linear->metadata_eligible[i] = YAN_NOTE_META_TAG;
     }
     linear->metadata_skipped = 0u;
@@ -219,7 +229,7 @@ YanSearchTermsResult yan_search_terms_linear_qualify(
          * cursor - 1; the eligibility table is indexed by that same physical
          * slot, never by the entry's ordinal position. */
         uint32_t slot = cursor - 1u;
-        if (slot >= YAN_FS_MAX_FILES) {
+        if (slot >= linear->capacity) {
             return YAN_SEARCH_TERMS_PROTOCOL;
         }
         bool valid = true;
@@ -295,7 +305,7 @@ static YanSearchTermsResult linear_query_locked(
          * touching the skip count. A plain (unfiltered) query never consults
          * the table, so its warm path and read bound are unchanged. */
         if (linear->metadata_filtered) {
-            if (slot >= YAN_FS_MAX_FILES) {
+            if (slot >= linear->capacity) {
                 return YAN_SEARCH_TERMS_PROTOCOL;
             }
             if (linear->metadata_eligible[slot] != YAN_NOTE_META_ELIGIBLE) {

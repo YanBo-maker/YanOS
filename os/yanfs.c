@@ -309,9 +309,8 @@ static bool context_overlap(const YanFs *fs, const void *pointer, uint64_t lengt
                           (uintptr_t)pointer, length);
 }
 
-/* 0036: a caller-owned directory is live cache, so it gets the same alias
- * protection the built-in metadata array used to get from being inside the
- * context. The exact built-in buffer is already covered by context_overlap. */
+/* 0036: a caller-owned directory is live cache, so every input and output that
+ * could alias it is rejected explicitly; it may sit outside the YanFs object. */
 static bool directory_overlap(const YanFs *fs, const void *pointer, uint64_t length)
 {
     if (fs->directory == NULL || fs->directory_blocks == 0u) {
@@ -745,11 +744,7 @@ YanFsResult yan_fs_init_directory(YanFs *fs, YanFsBlockIo io,
         directory_blocks > YAN_FS_MAX_DIR_BLOCKS) {
         return YAN_FS_INVALID;
     }
-    /* The built-in D=1 metadata member is the one intentional overlap; every
-     * other directory must be caller-owned memory outside the context. */
-    bool builtin = directory == fs->metadata && directory_blocks == 1u;
-    if (!builtin &&
-        context_overlap(fs, directory,
+    if (context_overlap(fs, directory,
                         (uint64_t)directory_blocks * YAN_FS_BLOCK_SIZE)) {
         return YAN_FS_INVALID;
     }
@@ -765,19 +760,10 @@ YanFsResult yan_fs_init_directory(YanFs *fs, YanFsBlockIo io,
     /* 0026: a successful init is a source change and takes a fresh identity. */
     source_identity_allocate(fs);
     for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
-        fs->metadata[i] = 0;
         fs->scratch[i] = 0;
     }
     clear_directory(fs);
     return YAN_FS_OK;
-}
-
-YanFsResult yan_fs_init(YanFs *fs, YanFsBlockIo io)
-{
-    if (fs == NULL) {
-        return YAN_FS_INVALID;
-    }
-    return yan_fs_init_directory(fs, io, fs->metadata, 1u);
 }
 
 YanFsResult yan_fs_probe(const YanFsBlockIo *io, uint8_t scratch[4096],
@@ -979,7 +965,6 @@ YanFsResult yan_fs_unmount(YanFs *fs)
     fs->capacity_blocks = 0;
     clear_directory(fs);
     for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
-        fs->metadata[i] = 0;
         fs->scratch[i] = 0;
     }
     /* 0026: every successful unmount, including a repeated one, is a source

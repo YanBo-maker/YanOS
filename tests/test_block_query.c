@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "block_query.h"
+#include "fs_test_support.h"
 #include "unity.h"
 
 #include <stdio.h>
@@ -144,8 +145,9 @@ static void adapter_mount(void)
     memset(&adapter, 0, sizeof adapter);
     adapter.image_fd = adapter.index_fd = -1;
     YanFsBlockIo io = {NULL, capacity, fault_read, read_only_write};
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&adapter.fs, io));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&adapter.fs, io));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&adapter.fs));
+    yan_block_query_destroy(&query);
     memset(&query, 0, sizeof query);
     reset_hooks();
     TEST_ASSERT_EQUAL_INT(YAN_BLOCK_QUERY_OK,
@@ -164,10 +166,13 @@ void setUp(void)
     memset(&read_result, 0xA5, sizeof read_result); read_sentinel = read_result;
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_format_metadata(medium[0], BLOCKS));
     YanFsBlockIo io = {NULL, capacity, store_read, store_write};
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&store, io));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&store, io));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&store));
 }
-void tearDown(void) {}
+void tearDown(void)
+{
+    yan_block_query_destroy(&query);
+}
 static void list_fresh(const char *name, const uint8_t expected[32])
 {
     memset(&list_result, 0xA5, sizeof list_result);
@@ -874,7 +879,7 @@ static void test_init_rejects_unmounted_adapter(void)
     memset(&unmounted, 0, sizeof unmounted);
     unmounted.image_fd = unmounted.index_fd = -1;
     YanFsBlockIo io = {NULL, capacity, fault_read, read_only_write};
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&unmounted.fs, io));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&unmounted.fs, io));
     YanBlockQuery fresh;
     memset(&fresh, 0, sizeof fresh);
     TEST_ASSERT_EQUAL_INT(YAN_BLOCK_QUERY_NOT_MOUNTED,

@@ -1009,6 +1009,17 @@ if(BUILD_TESTING)
                 set_tests_properties(guest_terminal_runtime PROPERTIES
                                      SKIP_RETURN_CODE 77 TIMEOUT 600)
                 if(TARGET yan_mkfs AND TARGET yan_run AND YAN_RISCV_READELF)
+                    add_test(NAME arena_accounting
+                        COMMAND "${Python3_EXECUTABLE}" -B
+                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_arena_accounting.py"
+                                --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                                --work "${CMAKE_BINARY_DIR}/arena-accounting"
+                                --mkfs "$<TARGET_FILE:yan_mkfs>"
+                                --guest "${YAN_TERMINAL_ELF}"
+                                --cc "${CMAKE_C_COMPILER}")
+                    set_tests_properties(arena_accounting PROPERTIES
+                                         SKIP_RETURN_CODE 77 TIMEOUT 1800
+                                         LABELS "0036-R3-AC1")
                     add_test(NAME arena_reject
                         COMMAND "${Python3_EXECUTABLE}" -B
                                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_arena_reject.py"
@@ -1039,9 +1050,9 @@ if(BUILD_TESTING)
                                          SKIP_RETURN_CODE 77 TIMEOUT 300
                                          LABELS "0036-R3-AC4")
                 endif()
-                # 0036 PR2a temporary guard: an N=127 (D=2) image is refused
-                # with APP_REASON_CAPACITY until PR2b moves the services off
-                # their 63-entry static arrays. No cross compiler is needed.
+                # 0036-R3: an N=127 (D=2) image mounts and boots normally now
+                # that the services size their tables from the image. No cross
+                # compiler is needed.
                 add_test(NAME capacity_guard
                     COMMAND "${Python3_EXECUTABLE}" -B
                             "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_capacity_guard.py"
@@ -1050,7 +1061,7 @@ if(BUILD_TESTING)
                             --mkfs "$<TARGET_FILE:yan_mkfs>"
                             --guest "${YAN_TERMINAL_ELF}")
                 set_tests_properties(capacity_guard PROPERTIES TIMEOUT 300
-                                     LABELS "0036-PR2a")
+                                     LABELS "0036-R3-AC1;0036-R3-AC2")
                 add_test(NAME guest_editor_faults
                     COMMAND "${Python3_EXECUTABLE}" -B
                             "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_editor_faults.py"

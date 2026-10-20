@@ -44,8 +44,12 @@ BUILD_TIMEOUT = 180
 RUN_TIMEOUT = 90
 
 OS_FILES = ["yanfs.h", "yanfs.c", "yanfs_block.h", "yanfs_block.c",
-            "block.h", "platform.h", "task.h"]
-TEST_FILES = ["test_yanfs.c", "test_yanfs_adapter.c"]
+            "block.h", "platform.h", "task.h",
+            "note_metadata_format.h", "note_metadata.h", "note_relations.h",
+            "note_blocks_format.h", "note_blocks.h", "search_terms.h",
+            "search_terms_core.h", "search_terms_linear.h",
+            "search_terms_index.h"]
+TEST_FILES = ["test_yanfs.c", "test_yanfs_adapter.c", "fs_test_support.h"]
 
 # mutation name -> (owning Unity test function, required assertion marker)
 # The marker is the exact FAIL message the intended owning assertion prints in

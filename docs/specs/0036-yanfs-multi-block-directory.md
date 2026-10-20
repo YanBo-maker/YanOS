@@ -43,22 +43,22 @@
 | 1 | `YanNoteContext.entries`（`os/note_metadata.h:88`），`YanNoteEntry` 36 B | 36 | 2 268 | 36 828 | 73 692 | 147 420 |
 | 2 | `YanNoteContext.sort_name`（`os/note_metadata.h:89`） | 32 | 2 016 | 32 736 | 65 504 | 131 040 |
 | 3 | `YanRelationContext.rows`（`os/note_relations.h:57,116`），`YanRelationRow` 36 B | 36 | 2 268 | 36 828 | 73 692 | 147 420 |
-| 4 | `YanSearchTermsLinear.metadata_eligible`（`os/search_terms_linear.h:69`），有两份：`search_linear` 一份，`term_index.linear` 内嵌一份 | 1×2 | 126 | 2 046 | 4 094 | 8 190 |
+| 4 | `YanSearchTermsLinear.metadata_eligible`（`os/search_terms_linear.h:69`），只分配一份（`index_eligible`，即 `term_index.linear` 内嵌那份；`search_linear` 不再单独分配） | 1 | 63 | 1 023 | 2 047 | 4 095 |
 | 5 | `YanSearchTermsIndex.entries`（`os/search_terms_index.h:101`），`YanFsInfo` 36 B | 36 | 2 268 | 36 828 | 73 692 | 147 420 |
 | 6 | `YanBlockContext.names`（`os/note_blocks.h:56`） | 32 | 2 016 | 32 736 | 65 504 | 131 040 |
 | 7 | Host：`YanSemanticCorpus.files`（`host/semantic_corpus.h:48`，312 B/项），另有两个栈上数组 `YanSemanticFile files[63]`（`host/semantic_corpus.c:109,202`，40 B/项） | 312+80 | 24 696 | 401 016 | 802 424 | 1 605 240 |
-| 8 | `allocate_extent` 的 `used_start/used_count`（`os/yanfs.c:442-443`），从栈移到 arena scratch（R5） | 8 | 504（栈上） | 8 184 | 16 376 | 32 760 |
-| — | Guest 合计 #0–#6 + #8 | 246 | 15 562 | 251 722（**+236 160 ≈ +231 KiB**） | 503 626（**+488 064 ≈ +477 KiB**） | 1 007 434（**+991 872 ≈ +969 KiB**） |
+| 8 | `allocate_extent` 的 `used_start/used_count`（`os/yanfs.c:442-443`），PR1 已改为不用数组，**不再分配，不计入合计** | — | — | — | — | — |
+| — | Guest 合计 #0–#6（未含 align16 填充；arena 实测见实施澄清） | 237 | 14 995 | 242 515（**+227 520 ≈ +222 KiB**） | 485 203（**+470 208 ≈ +459 KiB**） | 970 579（**+955 584 ≈ +933 KiB**） |
 
 与现有预算对比（RV32 值）：
 
 - **每个 context ≤ 64 KiB**（`os/note_metadata.h:93`、`os/note_relations.h:120`、`os/note_blocks.h:66` 的静态断言）。如果把数组照旧留在 context 里，N=1023 时 note context 达到 30 536 + 960×68 = 95 816 B，**会超**；N=2047 时 block context 达到 26 424 + 1 984×32 = 89 912 B，**也会超**。所以本规格把 #1–#6 从 context 里移出、改为 arena 指针。context 自身随之缩小（note 约 26 252 B，relation 约 9 876 B，block 约 24 408 B），三个断言继续成立。
-- **五个 context（index/note/shell/relation/block）合计**（旧规则 ≤ 2 MiB，已由 Guest 整体 32 MiB 预算取代，见实施澄清 3）：现为 1 645 488 B。把数组按容量计入后：N=1023 时为 1 645 488 + 960×173 = **1 811 568 B**，余量 285 584 B；N=2047 时为 1 645 488 + 1 984×173 = **1 988 720 B**，余量 108 432 B；N=4095 时为 1 645 488 + 4 032×173 = **2 343 024 B**，超出旧的 2 MiB，但在 32 MiB Guest 预算内。（173 = #1+#2+#3+#5+#6，再加上 index 内嵌的那一份 #4；目录缓存和 `search_linear` 原本就不计入五项合计，这里另列在 #0 和 #4。）
+- **五个 context（index/note/shell/relation/block）合计**（旧规则 ≤ 2 MiB，已由 Guest 整体 32 MiB 预算取代，见实施澄清 3）：现为 1 645 488 B。把数组按容量计入后：N=1023 时为 1 645 488 + 960×173 = **1 811 568 B**，余量 285 584 B；N=2047 时为 1 645 488 + 1 984×173 = **1 988 720 B**，余量 108 432 B；N=4095 时为 1 645 488 + 4 032×173 = **2 343 024 B**，超出旧的 2 MiB，但在 32 MiB Guest 预算内。（173 = #1+#2+#3+#5+#6，再加上 index 内嵌的那一份 #4；目录缓存不计入五项合计，另列在 #0；`search_linear` 的那份 #4 已不分配。）
 - **4 KiB 任务栈**：`allocate_extent` 在栈上开了 `used_start/used_count[YAN_FS_MAX_FILES]`（`os/yanfs.c:442-443`），占 8×N B。N=63 时 504 B，N=1023 时 8 184 B，**超过任务栈**。必须移进 YanFs 的 arena scratch（0036-R5）。
 
 ### 硬上限定为 4095（D=64）
 
-> 闫博 2026-10-20 裁定：硬上限直接提到 4095，RAM 64 MiB、Guest 可用 32 MiB。以下第 1–3 条是原 2047 的理由，留作背景；4095 的内存账见 `/workspace/0040/0040-nlogn-algorithms.md`「内存账」（arena 约 0.99 MiB，Guest 总计约 24.8 MiB，32 MiB 内余约 7.2 MiB【源码计算】），O(N²) 由 0040 消除。
+> 闫博 2026-10-20 裁定：硬上限直接提到 4095，RAM 64 MiB、Guest 可用 32 MiB。以下第 1–3 条是原 2047 的理由，留作背景；4095 的内存账见 `/workspace/0040/0040-nlogn-algorithms.md`「内存账」（arena 约 0.93 MiB（970 592 B），Guest 总计约 24.8 MiB，32 MiB 内余约 7.2 MiB【源码计算】），O(N²) 由 0040 消除。
 
 
 1. 2047 是策略上限，不是预算允许的最大值：按上面的公式，预算能容纳到约 N=2623（D=41），但那时余量只剩约 9 KiB。取 D=32（2 的幂）时，五个 context 合计 1 988 720 B，留出约 106 KiB（约 5%），用来容纳新增的指针、容量字段和对齐填充，以及以后的小改动；4095 则明确超出。
@@ -120,13 +120,13 @@ Guest 增加一次性 bump arena：
 - `os/guest.ld` 在所有加载段（包括 .bss 里的启动栈和 `.tohost`）之后导出 `__yan_arena_start`（16 字节对齐），并定义 `__yan_arena_end = 0x80000000 + 32 MiB`。
 - `yan_run` 加载 ELF 时检查 `__yan_arena_start ≤ __yan_arena_end ≤ 环形缓冲区基址`，且 arena 不与任何加载段重叠；不满足，或者生产终端 ELF 缺少这两个符号，就打印原因并以非 0 退出。
 - bump 分配要检查对齐后的加法溢出和越界。每次分配先把当前指针按 16 向上取整，再加上请求的字节数。
-- 启动顺序：读块 0，校验 magic、version、D、N（`N = 64·D−1`，`D ≤ 64`），通过后才分配 → 从 arena 依次分配目录缓存 (N+1)×64 B、上表 #1–#6 和 #8 → 初始化各服务 → 挂载。arena 不够时，启动报告初始化失败（新增一个 APP_REASON），不运行 shell。
+- 启动顺序：读块 0，校验 magic、version、D、N（`N = 64·D−1`，`D ≤ 64`），通过后才分配 → 从 arena 依次分配目录缓存 (N+1)×64 B、上表 #1–#6（#4 一份）→ 初始化各服务 → 挂载。arena 不够时，启动报告初始化失败（新增一个 APP_REASON），不运行 shell。
 - 之后不再分配。挂载容量与启动时不同的镜像返回 INVALID。
 - Host 侧同一套代码用 calloc 分配同样大小的存储。
 - 上表 #1–#6 改为指针加容量。
 
 验收：
-- 0036-R3-AC1：Given N=63 和 N=1023 的镜像，When 启动 Guest，Then 实测 arena 用量等于按分配顺序逐次计算的 Σ(align16(当前指针) − 当前指针 + 各项字节数)，各项字节数为：目录 (N+1)×64、#1 36N、#2 32N、#3 36N、#4 两份各 N、#5 36N、#6 32N、#8 8N；同一个 ELF 跑这两个镜像（bss 不随 N 变化）。块 0 的 version/D/N 不合法时，启动失败，并且没有发生任何分配。
+- 0036-R3-AC1：Given N=63 和 N=1023 的镜像，When 启动 Guest，Then 实测 arena 用量等于按分配顺序逐次计算的 Σ(align16(当前指针) − 当前指针 + 各项字节数)，各项字节数为：目录 (N+1)×64、#1 36N、#2 32N、#3 36N、#4 一份 N、#5 36N、#6 32N；同一个 ELF 跑这两个镜像（bss 不随 N 变化）。块 0 的 version/D/N 不合法时，启动失败，并且没有发生任何分配。
 - 0036-R3-AC2：When 构建 Host 和 RV32，Then 现有三处 64 KiB 静态断言仍然通过；新增测试断言「Guest 代码 + bss + N=4095 时 arena 实际分配（包括对齐）≤ 32 MiB」也通过；N=63、1023、2047、4095 四档的实测数值写进 PR。
 - 默认 RAM：`tools/yan_run.c:122` 的 `ram_size` 由 16 MiB 改为 64 MiB；环形缓冲区仍在 RAM 顶部 16 KiB，基址变为 0x83FFC000。测试驱动里写死的 16 MiB 改为 64 MiB：`tests/guest/block_drive.c:636`、`tests/guest/run_runtime.sh:288`、`tests/guest/run_console.sh:334`、`tests/terminal_runtime_driver.c:636`。`tests/guest/run_golden.sh:141` 和 `tools/yan_difftest.c:87` 保持 16 MiB（golden trace 含该值）。
 - 0036-R3-AC4：Given 不带 `--ram` 运行 `yan_run`，Then RAM 为 64 MiB，环形缓冲区基址为 0x83FFC000，`__yan_arena_end`（0x82000000）≤ 该基址，启动检查通过；上述 4 个测试驱动不再含 16 MiB 字面值，原有 Guest 测试全部通过；golden 与 difftest 输出不变。
@@ -224,10 +224,11 @@ search（线性与索引）、带标签的 search、`links`、`backlinks`、`rel
 - 挂载时 D 与初始化缓冲不一致，返回 INVALID。这是提前套用 R3 的规则。
 - 旧测试夹具里用 version 2 表示「未知版本」的，改成 3，断言不变。
 - 现有测试调用 mkfs 时都加上 `--files 63`，保持旧格式。
-- （答 #62）在 R3 合入之前，`yan_mkfs` 的 `--files` 默认值保持 63，PR1 可以显式传参生成 v2 镜像。默认值在 R3 那个 PR（R3+R5）里改成 1023，并在那里验证 R1-AC2 的默认行为（原文误写为 R1-AC1）。这样 main 上的每个提交，用默认参数做出的镜像都能被所有使用方挂载。
+- （答 #62）在 R3 合入之前，`yan_mkfs` 的 `--files` 默认值保持 63，PR1 可以显式传参生成 v2 镜像。默认值在 PR2b 里改成 1023（PR2 拆分后，见下条），并在那里验证 R1-AC2 的默认行为（原文误写为 R1-AC1）。这样 main 上的每个提交，用默认参数做出的镜像都能被所有使用方挂载。
 - ~~（答 PR2）R5-AC1 步数上限移交 0040~~ **撤回**（闫博 2026-10-20 于 #70 裁定：R5-AC1 留在 0036，算法在 0036 内修，见 R8）。N=1023 实测步数保留为基线。
 - PR2 拆成两个 PR。PR2a 包含 arena、guest.ld、yan_run 的 64 MiB RAM、启动顺序，以及 R3-AC3/AC4。PR2b 包含服务改用指针、Host 端 calloc、1023 默认值，以及 R3-AC1/AC2。1023 默认值跟 PR2b 一起进。
-- R3-AC1 的 arena 公式去掉 #8（按文件分配的 allocate_extent 数组，PR1 已删除）。实测 arena 用量：N=63 时 15,072 B，N=1023 时 243,552 B，N=4095 时 974,688 B。
+- R3-AC1 的 arena 公式去掉 #8（按文件分配的 allocate_extent 数组，PR1 已删除）。#4 只分配一份（index_eligible）。arena 用量（一份 #4、无 #8，含 align16 填充）：N=63 时 15,008 B，N=1023 时 242,528 B，N=2047 时 485,216 B，N=4095 时 970,592 B。此前的 15,072 / 243,552 / 974,688 是按两份 #4 算的，作废。
+- R5-AC1 的栈部分（N=1023 和 2047 时 task0 栈 ≤ 4 KiB；当前实测 1088 B）随 R8 在 PR3 里一起验收，不在 PR2a/PR2b 验收。
 - 两个 arena 符号必须同时存在或同时缺失；只缺其中一个时，yan_run 拒绝运行。
 - 第 4 项只分配 terminal 实际用到的那一份，内存表跟着改。
 - 下面几处按实现方的做法确认：R3-AC3 用临时链接脚本；启动时在 mount 之前多读一次块 0，7 个故障注入脚本的索引后移一位；删掉 yan_fs_init，统一改用 yan_fs_init_directory；服务允许在 mount 之前 init，但查询要求已挂载；README 示例改用 `--blocks 64`。

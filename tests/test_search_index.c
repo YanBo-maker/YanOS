@@ -1,4 +1,5 @@
 #include "search_terms.h"
+#include "fs_test_support.h"
 #include "search_terms_index.h"
 #include "search_terms_linear.h"
 #include "yanfs.h"
@@ -209,7 +210,7 @@ static void assert_rows_equal(const Capture *expected, const Capture *actual)
 static void mount_fs(void)
 {
     memset(&fs, 0, sizeof fs);
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, fs_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs, fs_backend()));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
 }
 
@@ -222,7 +223,7 @@ static void index_attach(void)
 {
     memset(&index, 0, sizeof index);
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK,
-                          yan_search_terms_index_init(&index, &fs));
+                          test_terms_index_init(&index, &fs));
     memset(&terms, 0, sizeof terms);
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_TERMS_OK,
@@ -234,7 +235,7 @@ static void ref_attach(void)
 {
     memset(&linear_ref, 0, sizeof linear_ref);
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK,
-                          yan_search_terms_linear_init(&linear_ref, &fs));
+                          test_terms_linear_init(&linear_ref, &fs));
     memset(&terms_ref, 0, sizeof terms_ref);
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_TERMS_OK,
@@ -330,20 +331,20 @@ static void index_init_rejects_null_and_alias(void)
 {
     mount_fs();
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_INVALID,
-                          yan_search_terms_index_init(NULL, &fs));
+                          test_terms_index_init(NULL, &fs));
     memset(&spare_index, 0, sizeof spare_index);
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_INVALID,
-                          yan_search_terms_index_init(&spare_index, NULL));
+                          test_terms_index_init(&spare_index, NULL));
     /* The context placed over the borrowed filesystem overlaps its own span. */
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_TERMS_INVALID,
-        yan_search_terms_index_init((YanSearchTermsIndex *)(void *)&fs, &fs));
+        test_terms_index_init((YanSearchTermsIndex *)(void *)&fs, &fs));
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK,
-                          yan_search_terms_index_init(&spare_index, &fs));
+                          test_terms_index_init(&spare_index, &fs));
     TEST_ASSERT_TRUE(spare_index.initialized);
     /* An idle context may be re-initialized. */
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK,
-                          yan_search_terms_index_init(&spare_index, &fs));
+                          test_terms_index_init(&spare_index, &fs));
 }
 
 static void index_status_empty_is_zero_io(void)
@@ -546,7 +547,7 @@ static void index_unavailable_sources_report_zero_counts(void)
     memset(&virgin_fs, 0, sizeof virgin_fs);
     memset(&virgin_index, 0, sizeof virgin_index);
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK,
-                          yan_search_terms_index_init(&virgin_index,
+                          test_terms_index_init(&virgin_index,
                                                       &virgin_fs));
     memset(&virgin_terms, 0, sizeof virgin_terms);
     TEST_ASSERT_EQUAL_INT(
@@ -825,7 +826,7 @@ static void index_remount_and_address_reuse_invalidate_ready(void)
     /* Reusing the same address with a fresh init must not match the old token. */
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_unmount(&fs));
     memset(&fs, 0, sizeof fs);
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, fs_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs, fs_backend()));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
     status = status_now();
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SEARCH_INDEX_STALE, status.state,

@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "note_write.h"
+#include "fs_test_support.h"
 #include "unity.h"
 #include "yanfs.h"
 
@@ -191,7 +192,7 @@ static void assert_note_bytes(const char *name, const uint8_t *bytes, uint32_t l
     TEST_ASSERT_EQUAL_INT(0, fstat(mounted.fd, &info));
     mounted.blocks = (uint32_t)((size_t)info.st_size / YAN_FS_BLOCK_SIZE);
     YanFsBlockIo io = {&mounted, mounted_capacity, mounted_read, mounted_write};
-    TEST_ASSERT_EQUAL(YAN_FS_OK, yan_fs_init(&mounted.fs, io));
+    TEST_ASSERT_EQUAL(YAN_FS_OK, test_fs_init(&mounted.fs, io));
     TEST_ASSERT_EQUAL(YAN_FS_OK, yan_fs_mount(&mounted.fs));
     YanFsInfo note;
     TEST_ASSERT_EQUAL(YAN_FS_OK, yan_fs_stat(&mounted.fs, name, &note));
