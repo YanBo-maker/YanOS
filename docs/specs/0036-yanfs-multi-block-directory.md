@@ -205,3 +205,9 @@ search（线性与索引）、带标签的 search、`links`、`backlinks`、`rel
 - 旧测试夹具里用 version 2 表示「未知版本」的，改成 3，断言不变。
 - 现有测试调用 mkfs 时都加上 `--files 63`，保持旧格式。
 - （答 #62）在 R3 合入之前，`yan_mkfs` 的 `--files` 默认值保持 63，PR1 可以显式传参生成 v2 镜像。默认值在 R3 那个 PR（R3+R5）里改成 1023，并在那里验证 R1-AC2 的默认行为（原文误写为 R1-AC1）。这样 main 上的每个提交，用默认参数做出的镜像都能被所有使用方挂载。
+- （答 PR2，2026-10-20）R5-AC1 里 5×10⁷ 的步数上限移交给 0040。实测 N=1023 时 mount 用了 7.45e7 步，backlinks 和 related 约 1.9e8 步，主要花在逐字节的块传输和 mount 的两两比较上，这两处都属于 0040 的范围。0036 只保留 R5-AC1 里的栈用量检查，再把上面这些实测步数记成基线，供 0040 对比。
+- PR2 拆成两个 PR。PR2a 包含 arena、guest.ld、yan_run 的 64 MiB RAM、启动顺序，以及 R3-AC3/AC4。PR2b 包含服务改用指针、Host 端 calloc、1023 默认值，以及 R3-AC1/AC2。1023 默认值跟 PR2b 一起进。
+- R3-AC1 的 arena 公式去掉 #8（按文件分配的 allocate_extent 数组，PR1 已删除）。实测 arena 用量：N=63 时 15,072 B，N=1023 时 243,552 B，N=4095 时 974,688 B。
+- 两个 arena 符号必须同时存在或同时缺失；只缺其中一个时，yan_run 拒绝运行。
+- 第 4 项只分配 terminal 实际用到的那一份，内存表跟着改。
+- 下面几处按实现方的做法确认：R3-AC3 用临时链接脚本；启动时在 mount 之前多读一次块 0，7 个故障注入脚本的索引后移一位；删掉 yan_fs_init，统一改用 yan_fs_init_directory；服务允许在 mount 之前 init，但查询要求已挂载；README 示例改用 `--blocks 64`。
