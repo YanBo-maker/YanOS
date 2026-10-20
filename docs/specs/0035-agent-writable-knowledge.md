@@ -125,13 +125,13 @@ name 沿用 YanFS 名称规则；text 必须满足 0032 的文本资格，长度
 - 0035-R10-AC5：Given 不合格的输入（同 0035-R7-AC1），When `dry_run:true`，Then 返回与提交相同的 INVALID，不打开镜像。
 
 ### 0035-R11：两个镜像，两个实例
-学习镜像和普通笔记镜像各由一个 `yan_mcp` 进程服务，在 MCP 客户端里配置成两个 server。每个进程仍然只接受一个 `--disk-image`，所有工具都作用在这一个镜像上；锁文件（`realpath(image).lock`）和库身份都只属于这个镜像，因此天然独立。`yan_mcp` 的启动参数、工具名和参数都不变。学习实例照 0033 的规则也必须给出 index/model/runner 三个路径（可以指向不存在的文件，0033 的块工具不打开它们）；在学习实例上调用 `yanos_search` 会得到它现有的「索引缺失」结果。
+学习镜像和普通笔记镜像各由一个 `yan_mcp` 进程服务，在 MCP 客户端里配置成两个 server。每个进程仍然只接受一个 `--disk-image`，所有工具都作用在这一个镜像上；锁文件（`realpath(image).lock`）和库身份都只属于这个镜像，因此天然独立。`yan_mcp` 的启动参数、工具名和参数都不变。学习实例照 0033 的规则也必须给出 index/model/runner 三个路径（可以指向不存在的文件，0033 的块工具不打开它们）；在学习实例上调用 `yanos_search` 返回 0033 现有的 DEPENDENCY 错误。
 
 选「两个实例」、不在工具参数里加库枚举的理由：0033 的身份、锁、错误、启动参数都是按「一个进程一个镜像」设计的，开两个进程就直接得到独立的锁和身份，不改任何协议和 schema，0033 的只读工具也自然兼容。加枚举则要给六个旧工具加参数（改 schema、改兼容测试），还要在一个进程里管理两套挂载状态和锁，换来的只是客户端少配一个 server。
 - 0035-R11-AC1：Given 两个实例分别服务 `notes.img` 和 `learning.img`，When 另一进程持有 `learning.img.lock` 的排他锁，Then 普通笔记实例的提交照常成功，学习实例的提交返回 BUSY；反过来持有 `notes.img.lock` 时，学习实例照常成功，普通笔记实例返回 BUSY。
 - 0035-R11-AC2：Given 两个实例都空闲（没有任何进程持锁），When 在学习实例上提交一次写入，Then 普通笔记实例上 0033 计算的 `source_sha256` 和 `notes.img` 的 SHA-256 都不变；反过来也一样。
 - 0035-R11-AC3：Given 两个实例以 `--disk-image` 指向同一个文件（`realpath` 相同），Then 两者共用同一把锁，行为退回单镜像情形，不额外报错（本规格不防这种误配，见假设）。
-- 0035-R11-AC4：Given 学习实例启动时 index/model/runner 三个路径都指向不存在的文件，Then 启动成功；块工具和写工具正常工作；`yanos_search` 返回 0033 现有的索引缺失结果。
+- 0035-R11-AC4：Given 学习实例启动时 index/model/runner 三个路径都指向不存在的文件，Then 启动成功；块工具和写工具正常工作；`yanos_search` 返回 0033 现有的 DEPENDENCY 错误。
 
 ### 0035-R12：只读工具对两个镜像的兼容
 0033 的六个只读工具不改：在哪个实例上调用，就读哪个镜像。普通笔记实例的行为与 0033 逐字节相同（0035-R1）。
@@ -197,3 +197,6 @@ name 沿用 YanFS 名称规则；text 必须满足 0032 的文本资格，长度
 - 错误响应里的 `committed:true` 放进 content 的 text JSON，形如 `{"code":"IO","committed":true}`。
 - 报错顺序：先检查库身份（STALE），再做按笔记的检查（EXISTS 等）；预览和提交都按这个顺序。所以 create 遇到同名且 expected_source 过期时，返回 STALE；身份一致时，再按名字已存在返回 EXISTS。
 - 拆分 PR：PR-B 保持 eea97c8 和 6280209 两个提交（R1–R7、R10–R12）；PR-C 做 R8 的夹具和 Guest 测试、R9 的 README、锁文件说明、#53 和 #54。
+- （第三轮，答 #56）判定顺序：先判 unchanged（内容和现有完全相同就返回 unchanged:true，因为提交成功后再重试，expected_source 必然已经过期），然后判 STALE，最后做按笔记的检查（EXISTS 等）。
+- 镜像旁边还没有 `.lock` 文件时，允许 dry_run 创建它。锁文件是空文件，只用于部署，不算对知识库的写入。
+- spec 负责人 develop-gpt 批准 PR-B 的非测试代码超过 400 行（约 450 行），并同意把剩下的工作拆到 PR-C。
