@@ -192,3 +192,8 @@ name 沿用 YanFS 名称规则；text 必须满足 0032 的文本资格，长度
 - R11-AC4：沿用 0033 现有行为，index、model、runner 缺失时返回 DEPENDENCY，不新增“索引缺失”这种错误码。
 - 只有重试时内容与现有内容相同，响应才带 `unchanged:true`。
 - 目录 fsync 失败时，MCP 层按 R6 返回 IO，并带 `committed:true`。
+- （第二轮）不抬高 0033 的帧上限 YAN_MCP_INPUT_MAX=16384。R7-AC1 的超长情形在工具层测试；MCP 层收到超长帧或非法 UTF-8 时，沿用 0033 现有的 JSON 解析错误 -32700。
+- rename 成功后重新计算身份失败时，返回 IO，并带 `committed:true`。
+- 错误响应里的 `committed:true` 放进 content 的 text JSON，形如 `{"code":"IO","committed":true}`。
+- 报错顺序：先检查库身份（STALE），再做按笔记的检查（EXISTS 等）；预览和提交都按这个顺序。所以 create 遇到同名且 expected_source 过期时，返回 STALE；身份一致时，再按名字已存在返回 EXISTS。
+- 拆分 PR：PR-B 保持 eea97c8 和 6280209 两个提交（R1–R7、R10–R12）；PR-C 做 R8 的夹具和 Guest 测试、R9 的 README、锁文件说明、#53 和 #54。
