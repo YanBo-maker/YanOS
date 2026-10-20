@@ -211,3 +211,4 @@ search（线性与索引）、带标签的 search、`links`、`backlinks`、`rel
 - 两个 arena 符号必须同时存在或同时缺失；只缺其中一个时，yan_run 拒绝运行。
 - 第 4 项只分配 terminal 实际用到的那一份，内存表跟着改。
 - 下面几处按实现方的做法确认：R3-AC3 用临时链接脚本；启动时在 mount 之前多读一次块 0，7 个故障注入脚本的索引后移一位；删掉 yan_fs_init，统一改用 yan_fs_init_directory；服务允许在 mount 之前 init，但查询要求已挂载；README 示例改用 `--blocks 64`。
+- （答 PR2a）PR2a 加一个临时守卫：terminal 挂载后，如果 N>63 就拒绝并给出明确的 reason code，避免服务里 63 项的固定数组越界。PR2b 删掉这个守卫和这个 reason code。PR2a 非测试代码约 341 行，yan_fs_init 的删除放到 PR2b。第 4 项在 PR2a 里不分配，到 PR2b 只分配 index_eligible 那一份。
