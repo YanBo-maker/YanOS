@@ -118,7 +118,7 @@ name 沿用 YanFS 名称规则；text 必须满足 0032 的文本资格，长度
 
 选 `dry_run` 参数、不另加预览工具的理由：预览和提交的参数、校验、错误顺序完全相同，同一条代码路径加一个分支就够；多一个工具就要多一套 schema、注解和测试，而且两套校验容易漂移。不另发确认 token：库身份已经把预览和提交绑定到同一个库状态；token 要多存一份服务端状态，而它同样证明不了闫博确认过，所以不多拦住任何情况。
 
-- 0035-R10-AC1：Given 镜像里有 `a.txt`，When 以 `dry_run:true` 调用 replace，Then 返回预览，镜像和 `<image>.lock` 的 SHA-256、mtime 都不变；另一进程持有排他锁时预览返回 BUSY，持有共享锁时预览照样成功。
+- 0035-R10-AC1：Given 镜像里有 `a.txt`，When 以 `dry_run:true` 调用 replace，Then 返回预览，镜像的 SHA-256、mtime 不变；已存在的 `<image>.lock` 在 dry_run 前后 SHA-256、mtime 不变，不存在时允许 dry_run 创建空的 `.lock`；另一进程持有排他锁时预览返回 BUSY，持有共享锁时预览照样成功。
 - 0035-R10-AC2：Given 旧内容 `"x\ny\nz\n"`、新内容 `"x\nY\nz\n"`，Then `diff` 为 `{"start_line":2,"removed":["y\n"],"added":["Y\n"]}`。另外三例：旧 `"a"` 新 `"a\n"` → `{"start_line":1,"removed":["a"],"added":["a\n"]}`；新建 `"q\n"` → `{"start_line":1,"removed":[],"added":["q\n"]}`；新旧相同 → `{"start_line":0,"removed":[],"added":[]}`。
 - 0035-R10-AC3：Given 预览返回身份 S，When 带 S 提交同样的参数，Then 提交成功，写后的内容等于预览里的 `text`。
 - 0035-R10-AC4：Given 预览返回 S 之后库被改过，When 带 S 提交不同的内容，Then 返回 STALE，零写入。
