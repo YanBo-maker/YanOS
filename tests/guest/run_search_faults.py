@@ -9,9 +9,9 @@ script or the provided real ELF is a hard failure (exit 1).
 
 The fixture is one 5000-byte logical line over two blocks: ``x`` everywhere,
 the literal ``needle`` near the start, and the three UTF-8 bytes of U+4E2D at
-offsets 4095/4096/4097. The block-request order is mount 1-2, NUL preflight
-3-4, match scan 5-6, matched-range reader 7-8, so a corrupted response tag at
-3..8 lands in exactly one search phase.
+offsets 4095/4096/4097. The block-request order is probe 1, capacity 2, mount 3, NUL
+preflight 4-5, match scan 6-7, matched-range reader 8-9, so a corrupted response
+tag at 4..9 lands in exactly one search phase.
 """
 
 import argparse
@@ -107,7 +107,7 @@ def case_healthy_baseline(driver, args, results):
 def case_protocol_tags(driver, args, results):
     body = search_body()
     image = image_for(body)
-    for response in range(3, 9):
+    for response in range(4, 10):
         owner = "search-protocol-%d" % response
         result, status, disk, capture = run(
             driver, args, image, "protocol-%d" % response, "protocol",
@@ -124,16 +124,16 @@ def case_protocol_tags(driver, args, results):
                 raise runtime.OwnerFailure("%s: the later exit still ran" % owner)
             if b"ERROR PROTOCOL\r\n" not in output:
                 raise runtime.OwnerFailure("%s: ERROR PROTOCOL is missing" % owner)
-            if response == 7:
+            if response == 8:
                 if not output.endswith(b"f:1:\r\nERROR PROTOCOL\r\nERROR SHELL_FATAL\r\n"):
                     raise runtime.OwnerFailure(
-                        "%s: the resp7 record prefix differs: %r" % (owner, output))
-            elif response == 8:
+                        "%s: the resp9 record prefix differs: %r" % (owner, output))
+            elif response == 9:
                 prefix = (b"f:1:" + display(body[:4095]) +
                           b"\\xE4\r\nERROR PROTOCOL\r\nERROR SHELL_FATAL\r\n")
                 if not output.endswith(prefix):
                     raise runtime.OwnerFailure(
-                        "%s: the resp8 record prefix differs: %r" % (owner, output))
+                        "%s: the resp9 record prefix differs: %r" % (owner, output))
             elif b"f:1:" in output:
                 raise runtime.OwnerFailure(
                     "%s: a record prefix appeared before the whole line was"

@@ -97,6 +97,15 @@ YanFsResult yan_fs_init(YanFs *, YanFsBlockIo);
  * is the built-in D=1 case using the metadata member. */
 YanFsResult yan_fs_init_directory(YanFs *, YanFsBlockIo, uint8_t *directory,
                                   uint32_t directory_blocks);
+/* 0036-R3: read block 0 and validate only the fields the startup allocation
+ * decision needs: magic, version (1 or 2), directory_blocks (v1 is 1, v2 is
+ * 1..64) and entry_capacity == 64*D-1. It allocates nothing, writes nothing
+ * and does not inspect the CRC, capacity, reserved bytes or entries; mount
+ * still validates the whole image. A read error is IO/PROTOCOL, an unknown
+ * version is UNSUPPORTED and every other rejected field is CORRUPT.
+ * *directory_blocks is written only on OK. */
+YanFsResult yan_fs_probe(const YanFsBlockIo *io, uint8_t scratch[4096],
+                         uint32_t *directory_blocks);
 YanFsResult yan_fs_mount(YanFs *);
 YanFsResult yan_fs_unmount(YanFs *);
 YanFsResult yan_fs_list(YanFs *, uint32_t *cursor, YanFsInfo *out);

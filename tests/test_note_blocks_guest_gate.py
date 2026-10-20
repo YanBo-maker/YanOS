@@ -26,10 +26,10 @@ class BlockGuestGate(unittest.TestCase):
                 runtime.classify_production(result, path, 'block-init', {1})
             self.assertEqual(0x71000017, runtime.classify_production(
                 result, path, 'block-init', {0x71000017})['_tohost'])
-            values['tohost'] = '0x71000018'
+            values['tohost'] = '0x7100001a'
             path.write_text(''.join('%s=%s\n' % item for item in values.items()))
             with self.assertRaises(runtime.HarnessError):
-                runtime.classify_production(result, path, 'unknown', {0x71000018})
+                runtime.classify_production(result, path, 'unknown', {0x7100001a})
 
     def test_rv32_marker_signature_and_harness_priority(self):
         for rc, out, err, code, expected in (

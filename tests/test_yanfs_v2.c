@@ -401,6 +401,84 @@ static void test_0036_R2_external_directory_is_not_caller_scratch(void)
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
 }
 
+/* 0036-R3: probe reads block 0 and publishes D without touching the instance
+ * or the medium. It is the startup step that decides how large the arena must
+ * be, so it must not allocate or write. */
+static void test_0036_R3_probe_reads_v1_and_v2(void)
+{
+    uint8_t scratch[YAN_FS_BLOCK_SIZE];
+    uint32_t blocks = 0u;
+    YanFsBlockIo io = v2_backend();
+
+    v2_start_image(1u, 16u);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
+                          yan_fs_probe(&io, scratch, &blocks));
+    TEST_ASSERT_EQUAL_UINT32(1u, blocks);
+
+    free(directory);
+    free(device.data);
+    directory = NULL;
+    device.data = NULL;
+    v2_start_image(16u, 64u);
+    blocks = 0u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
+                          yan_fs_probe(&io, scratch, &blocks));
+    TEST_ASSERT_EQUAL_UINT32(16u, blocks);
+}
+
+static void test_0036_R3_probe_rejects_bad_headers_without_writing(void)
+{
+    uint8_t scratch[YAN_FS_BLOCK_SIZE];
+    uint32_t blocks = 0u;
+    YanFsBlockIo io = v2_backend();
+
+    v2_start_image(1u, 16u);
+    device.writes = 0u;
+    /* Unknown version is UNSUPPORTED, not CORRUPT. */
+    device.data[8] = 3u;
+    device.data[9] = device.data[10] = device.data[11] = 0u;
+    blocks = 123u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_UNSUPPORTED,
+                          yan_fs_probe(&io, scratch, &blocks));
+    TEST_ASSERT_EQUAL_UINT32(123u, blocks);
+
+    /* v2 with D outside 1..64. */
+    device.data[8] = 2u;
+    device.data[24] = 0u;
+    device.data[25] = 0u;
+    device.data[26] = 0u;
+    device.data[27] = 0u;
+    device.data[24] = 65u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_CORRUPT,
+                          yan_fs_probe(&io, scratch, &blocks));
+
+    /* v2 with a legal D but entry_capacity != 64*D-1. */
+    device.data[24] = 2u;
+    device.data[20] = 64u;
+    device.data[21] = device.data[22] = device.data[23] = 0u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_CORRUPT,
+                          yan_fs_probe(&io, scratch, &blocks));
+
+    /* Bad magic. */
+    device.data[0] = (uint8_t)'X';
+    TEST_ASSERT_EQUAL_INT(YAN_FS_CORRUPT,
+                          yan_fs_probe(&io, scratch, &blocks));
+
+    /* A read error is IO; an unknown callback value is PROTOCOL. */
+    device.blocks = 0u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_IO,
+                          yan_fs_probe(&io, scratch, &blocks));
+
+    /* Invalid arguments never read. */
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+                          yan_fs_probe(NULL, scratch, &blocks));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+                          yan_fs_probe(&io, NULL, &blocks));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+                          yan_fs_probe(&io, scratch, NULL));
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -410,5 +488,7 @@ int main(void)
     RUN_TEST(test_0036_R2_v2_mismatch_is_invalid_version_three_unsupported);
     RUN_TEST(test_0036_R2_init_directory_rejects_bad_arguments);
     RUN_TEST(test_0036_R2_external_directory_is_not_caller_scratch);
+    RUN_TEST(test_0036_R3_probe_reads_v1_and_v2);
+    RUN_TEST(test_0036_R3_probe_rejects_bad_headers_without_writing);
     return UNITY_END();
 }

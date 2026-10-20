@@ -121,13 +121,14 @@ def main():
         if receipt not in healthy:
             raise runtime.OwnerFailure(label + ': healthy receipt absent')
         count = int(status.get('block_responses', '-1'))
-        if count < 9:
+        if count < 10:
             raise runtime.OwnerFailure(label + ': expected complete three-block preflight')
         passed += 1; print('PASS', label, 'responses=' + str(count), flush=True)
-        # mount consumes1/2; n eligibility3..5, head6, structure7..9.
-        preflight_last = 9 if verb == 'show' else count
+        # probe consumes1; capacity/mount2/3; n eligibility4..6, head7,
+        # structure8..10.
+        preflight_last = 10 if verb == 'show' else count
         for fault in ('io', 'protocol'):
-            for response in sorted({3, (3 + preflight_last) // 2, preflight_last}):
+            for response in sorted({4, (4 + preflight_last) // 2, preflight_last}):
                 label = '%s-%s-%d' % (verb, fault, response)
 
                 def check_read(label=label, fault=fault, response=response, command=command):
@@ -137,13 +138,13 @@ def main():
 
                 case(label, check_read)
         if verb == 'show':
-            # The unaligned first range chunk consumes responses10/11;12 is
+            # The unaligned first range chunk consumes responses11/12;13 is
             # the next chunk's first physical block. A visible prefix is legal.
             for fault in ('io', 'protocol'):
                 label = 'show-late-' + fault
 
                 def check_late(label=label, fault=fault):
-                    output, _ = exercise(label, command, fault=fault, response=12)
+                    output, _ = exercise(label, command, fault=fault, response=13)
                     if b'2 ' + b'x' * 4096 not in output:
                         raise runtime.OwnerFailure(label + ': preceding raw chunk was not displayed')
 
@@ -162,7 +163,7 @@ def main():
                         or output != healthy[:at] or actual_reads > count):
                     raise runtime.OwnerFailure(label + ': exact post-accept TX prefix/stop mismatch')
                 if command.startswith(b'block show'):
-                    expected_reads = 11 if at <= start + 2 + 4096 else 13 if at <= start + 2 + 8192 else count
+                    expected_reads = 12 if at <= start + 2 + 4096 else 14 if at <= start + 2 + 8192 else count
                     if actual_reads != expected_reads:
                         raise runtime.OwnerFailure(label + ': continued reading after output rejection')
                 elif actual_reads != count:

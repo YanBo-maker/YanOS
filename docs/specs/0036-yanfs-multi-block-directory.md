@@ -141,8 +141,28 @@ search（线性与索引）、带标签的 search、`links`、`backlinks`、`rel
 
 ### 0036-R5：栈和耗时
 `allocate_extent` 的两个数组改用 YanFs 的 arena scratch（2×4×N B）。O(N²) 的算法暂时保留（挂载查重、allocate_extent，以及 note_metadata、note_relations、note_blocks 中的三处插入排序），但规定步数上限。
-- 0036-R5-AC1：Given N=1023 和 N=2047 两个装满文件的镜像（N=4095 的步数由 `/workspace/0040/0040-nlogn-algorithms.md` 的 0040-R5-AC1 验收，原文见实施澄清 2，0036 保留的 O(N²) 在 4095 时不要求达标），When 在 Guest 中分别执行挂载、create、`list`、`backlinks`、`related`、`block backlinks`，Then 每个操作的 Guest 步数都 ≤ 5×10⁷（PR 中记录实测值）；任务 0 的实测栈用量 ≤ 4 KiB。create 的测法是在装满的镜像里先删除 slot N/2 上的文件，再 create 一个同样大小的文件，确保真的走到 extent 分配；计步从命令行输入完成开始，到输出提示符为止。
+- 0036-R5-AC1：Given N=1023 和 N=2047 两个装满文件的镜像（N=4095 的步数由 0040-R5-AC1 验收；1023/2047 的达标手段见 0036-R8），When 在 Guest 中分别执行挂载、create、`list`、`backlinks`、`related`、`block backlinks`，Then 每个操作的 Guest 步数都 ≤ 5×10⁷（PR 中记录实测值）；任务 0 的实测栈用量 ≤ 4 KiB。create 的测法是在装满的镜像里先删除 slot N/2 上的文件，再 create 一个同样大小的文件，确保真的走到 extent 分配；计步从命令行输入完成开始，到输出提示符为止。
 - 0036-R5-AC2：When 用 `-fstack-usage` 构建 RV32，Then `allocate_extent` 的栈帧不随 N 增长（N=63 和 N=4095 时帧大小相同）。
+
+### 0036-R8：让 R5-AC1 达标的改动（闫博 2026-10-20 #70 裁定）
+基线：N=1023 实测 mount 7.45e7、create 8.9e6、list 1.2e6、backlinks 1.91e8、related 1.90e8、block backlinks >7e8（未跑完）。主要开销是逐字节块传输（每 4 KiB 块 19–28 万步），其次是挂载两两比较、`find_entry` 线性查找（`os/yanfs.c:490`）和按 36 B 行逐字节搬移的插入排序。
+必须修的查询：**mount、backlinks、related、block backlinks**；`meta list`（含标签过滤）和搜索扫描同样逐文件读头，必须在 PR 中实测，超标即同样适用本条改动。create、`list` 已达标，只回归。
+改动（设计沿用 0040 原方案，0040 对应条目已标「移至 0036」）：
+1. Guest 块传输（ring 拷贝）和 `memcpy`/`memmove` 按 32 位字拷贝，非对齐头尾逐字节。
+2. 挂载校验：非空 slot 下标按名字排序后比相邻（重名），`start≠0` 的 extent 按 start 排序后比相邻（重叠），仍只返回 CORRUPT（0040 原 R1）。
+3. `find_entry` 改为在 `name_order[N]`（uint16，arena）上二分；挂载成功和 `commit_metadata` 发布时整体重建（0040 原 R4）。
+4. 公共下标堆排序 `yan_sort_index`（迭代 sift-down），供第 2、3 项使用，并替换 metadata、relations、blocks 三处插入排序（0040 原 R3）。
+5. block backlinks 若在 1–4 之后仍超标：同一次查询内对 `target()` 的重复读做去重（按目标 slot 记一位，arena N 位），不建持久链接索引。
+- 0036-R8-AC1：Given N=63、1023、2047 的同一组镜像（含 related 同分只能靠名字区分的行、重名/重叠/首尾相接的挂载夹具），When 分别用基线（本 PR 前的 main，PR 中写 SHA）和新实现执行 mount、create、`ls`、`meta list`、`backlinks`、`related`、`block backlinks`、`search`，以及 MCP `yanos_block_backlinks`，Then 终端输出、返回码、MCP JSON 和镜像 SHA-256 逐字节相同。
+- 0036-R8-AC2：Given 随机 create/delete/rename/copy 序列（固定种子，10⁴ 步，N=2047），Then 每步后 `find_entry` 与线性 oracle 结果相同，`name_order` 严格递增且恰好覆盖非空 slot；注入写失败后不变量仍成立。
+- 0036-R8-AC3：Given 0..2047 个随机名字及已排序、逆序输入，Then `yan_sort_index` 与插入排序参考实现逐项相同；源码中不再有 `while (j > 0` 形式的插入排序。
+- 0036-R8-AC4：R5-AC1 在 N=1023、2047 全部通过（PR 中记录改前、改后步数）；`validate_metadata` 栈帧在 N=63 与 4095 时相同。
+- 落位：PR2b 之后新开 **PR3（R8）**，原 R4+R6、R7 顺延为 PR4、PR5。非测试代码约 200 行【估算】（字拷贝约 40、sort 约 45、挂载约 50、name_order 约 45、三处排序调用约 20；第 5 项若需要再加约 20），测试约 350 行。
+
+#### 数据结构结论
+1. 光加内存索引不够：开销主要在 I/O，每个文件读头约 2×10⁵ 步，backlinks 在 N=1023 时就要 ~2×10⁸ 步；`find_entry` 线性查找 ×N 只有 ~5×10⁶ 步【估算】。改成按字拷贝后，每文件约 1–2×10⁴ 步，N=2047 约 2–4×10⁷ 步，所以 `name_order` 加字拷贝就能达标【估算，以 R8-AC4 实测为准】。backlink/link 索引要么在挂载时把 N 个文件头全读一遍（成本转嫁给 mount），要么写到盘上，所以不建。
+2. 盘上格式不变。
+3. 新增内存：`name_order` 2N + 三处排序下标 3×2N = 8N B，N=1023 时 8 184 B，N=4095 时 32 760 B【源码计算】；第 5 项再加 N/8 B。挂载排序复用 R5 现有的 8N scratch。对 32 MiB 预算影响可忽略：4095 时总量约 24.8 MiB，余约 7.2 MiB 不变（0040 内存账已含这几项）。
 
 ### 0036-R6：Host 语义语料
 `YAN_SEMANTIC_FILE_MAX` 改为运行时容量：`files` 数组和两个栈上数组都按 N 用 calloc 分配；加载索引时，索引头里 skipped 的检查改为「≤ 当前镜像的 N」。SEGMENT_MAX 保持 8192，超出时按现有逻辑返回 LIMIT，并且 CLI 和 MCP 都要明确报出。
@@ -166,7 +186,7 @@ search（线性与索引）、带标签的 search、`links`、`backlinks`、`rel
 
 - 不做子目录，不做在线扩充目录，不做原地升级。
 - 不调大词项索引表、语义 SEGMENT_MAX、单文件 16384 字节的编辑和写入上限，以及 MCP 的输入输出上限。
-- 不把 O(N²) 换成更快的算法（除非 0036-R5 的步数上限不达标）。
+- 不把 O(N²) 换成更快的算法，0036-R8 列出的几处除外（闫博 2026-10-20 裁定）。
 - 不做通用堆（不提供 free），不支持在一次运行中换挂一个更大的镜像。
 - 不改 0030/0033 的身份格式和 MCP schema；不做断电恢复（沿用 0021）。
 
@@ -204,4 +224,11 @@ search（线性与索引）、带标签的 search、`links`、`backlinks`、`rel
 - 挂载时 D 与初始化缓冲不一致，返回 INVALID。这是提前套用 R3 的规则。
 - 旧测试夹具里用 version 2 表示「未知版本」的，改成 3，断言不变。
 - 现有测试调用 mkfs 时都加上 `--files 63`，保持旧格式。
-- （答 #62）在 R3 合入之前，`yan_mkfs` 的 `--files` 默认值保持 63，PR1 可以显式传参生成 v2 镜像。默认值在 R3 那个 PR（R3+R5）里改成 1023，并在那里验证 R1-AC1 的默认行为。这样 main 上的每个提交，用默认参数做出的镜像都能被所有使用方挂载。
+- （答 #62）在 R3 合入之前，`yan_mkfs` 的 `--files` 默认值保持 63，PR1 可以显式传参生成 v2 镜像。默认值在 R3 那个 PR（R3+R5）里改成 1023，并在那里验证 R1-AC2 的默认行为（原文误写为 R1-AC1）。这样 main 上的每个提交，用默认参数做出的镜像都能被所有使用方挂载。
+- ~~（答 PR2）R5-AC1 步数上限移交 0040~~ **撤回**（闫博 2026-10-20 于 #70 裁定：R5-AC1 留在 0036，算法在 0036 内修，见 R8）。N=1023 实测步数保留为基线。
+- PR2 拆成两个 PR。PR2a 包含 arena、guest.ld、yan_run 的 64 MiB RAM、启动顺序，以及 R3-AC3/AC4。PR2b 包含服务改用指针、Host 端 calloc、1023 默认值，以及 R3-AC1/AC2。1023 默认值跟 PR2b 一起进。
+- R3-AC1 的 arena 公式去掉 #8（按文件分配的 allocate_extent 数组，PR1 已删除）。实测 arena 用量：N=63 时 15,072 B，N=1023 时 243,552 B，N=4095 时 974,688 B。
+- 两个 arena 符号必须同时存在或同时缺失；只缺其中一个时，yan_run 拒绝运行。
+- 第 4 项只分配 terminal 实际用到的那一份，内存表跟着改。
+- 下面几处按实现方的做法确认：R3-AC3 用临时链接脚本；启动时在 mount 之前多读一次块 0，7 个故障注入脚本的索引后移一位；删掉 yan_fs_init，统一改用 yan_fs_init_directory；服务允许在 mount 之前 init，但查询要求已挂载；README 示例改用 `--blocks 64`。
+- （答 PR2a）PR2a 加一个临时守卫：terminal 挂载后，如果 N>63 就拒绝并给出明确的 reason code，避免服务里 63 项的固定数组越界。PR2b 删掉这个守卫和这个 reason code。PR2a 非测试代码约 341 行，yan_fs_init 的删除放到 PR2b。第 4 项在 PR2a 里不分配，到 PR2b 只分配 index_eligible 那一份。

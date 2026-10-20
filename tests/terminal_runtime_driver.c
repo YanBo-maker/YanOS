@@ -118,10 +118,12 @@ enum { FAULT_NONE = 0, FAULT_IO = 1, FAULT_PROTOCOL = 2 };
  * reason), a trap, or an application code with an unknown reason - is a harness
  * error, never a named owner failure. APP_REASON_LAST tracks the highest reason
  * defined by apps/yanfs_terminal/main.c, so a legitimate startup failure such as
- * APP_REASON_BLOCK_INIT (23, token BLOCK_INIT) is an owner failure while
- * every unassigned code stays a harness error. */
+ * APP_REASON_CAPACITY (25, token CAPACITY, the temporary 0036 PR2a guard),
+ * APP_REASON_ARENA (24, token ARENA) or APP_REASON_BLOCK_INIT (23, token
+ * BLOCK_INIT) is an owner failure while every unassigned code stays a harness
+ * error. */
 #define APP_FAIL_TOP UINT32_C(0x71000000)
-#define APP_REASON_LAST 23u
+#define APP_REASON_LAST 25u
 #define FIXTURE_FAIL_TOP UINT32_C(0x72000000)
 #define FIXTURE_FAIL_LAST 17u
 
@@ -633,7 +635,7 @@ int main(int argc, char **argv)
     const char *disk_image = NULL, *stdin_path = NULL, *scenario = NULL;
     const char *fault_name = "none", *baseline_path = NULL;
     uint64_t base = UINT32_C(0x80000000);
-    uint64_t ram_size = 16u * 1024u * 1024u;
+    uint64_t ram_size = 64u * 1024u * 1024u;
     uint64_t max_steps = 3000000;
     uint64_t corrupt_response = 0, tx_fault_at = 0;
     uint32_t expect_tohost = 0;

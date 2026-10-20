@@ -331,7 +331,7 @@ int main(int argc, char **argv)
     const char *capture_path = NULL;
     const char *feed_hex = NULL;
     uint64_t base = UINT32_C(0x80000000);
-    uint64_t ram_size = 16U * 1024U * 1024U;
+    uint64_t ram_size = 64U * 1024U * 1024U;
     uint64_t max_steps = 1000000;
     long refuse_after = -1;
     long disconnect_after_drain = 0;

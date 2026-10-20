@@ -780,6 +780,46 @@ YanFsResult yan_fs_init(YanFs *fs, YanFsBlockIo io)
     return yan_fs_init_directory(fs, io, fs->metadata, 1u);
 }
 
+YanFsResult yan_fs_probe(const YanFsBlockIo *io, uint8_t scratch[4096],
+                         uint32_t *directory_blocks)
+{
+    static const uint8_t magic[FS_MAGIC_SIZE] = {
+        (uint8_t)'Y', (uint8_t)'A', (uint8_t)'N', (uint8_t)'F',
+        (uint8_t)'S', (uint8_t)'0', (uint8_t)'1', 0u
+    };
+    if (io == NULL || io->read_block == NULL || scratch == NULL ||
+        directory_blocks == NULL) {
+        return YAN_FS_INVALID;
+    }
+    YanFsIoResult io_result = io->read_block(io->context, 0u, scratch);
+    if (io_result != YAN_FS_IO_OK) {
+        return io_result == YAN_FS_IO_ERROR ? YAN_FS_IO : YAN_FS_PROTOCOL;
+    }
+    for (uint32_t i = 0; i < FS_MAGIC_SIZE; ++i) {
+        if (scratch[FS_MAGIC_OFFSET + i] != magic[i]) {
+            return YAN_FS_CORRUPT;
+        }
+    }
+    uint32_t version = load_le32(scratch + FS_VERSION_OFFSET);
+    uint32_t blocks = 1u;
+    if (version == YAN_FS_VERSION) {
+        blocks = 1u;
+    } else if (version == YAN_FS_VERSION_2) {
+        blocks = load_le32(scratch + FS_RESERVED_OFFSET);
+        if (blocks < 1u || blocks > YAN_FS_MAX_DIR_BLOCKS) {
+            return YAN_FS_CORRUPT;
+        }
+    } else {
+        return YAN_FS_UNSUPPORTED;
+    }
+    if (load_le32(scratch + FS_ENTRY_CAPACITY_OFFSET) !=
+        blocks * (YAN_FS_BLOCK_SIZE / YAN_FS_ENTRY_SIZE) - 1u) {
+        return YAN_FS_CORRUPT;
+    }
+    *directory_blocks = blocks;
+    return YAN_FS_OK;
+}
+
 YanFsResult yan_fs_mount(YanFs *fs)
 {
     static const uint8_t magic[FS_MAGIC_SIZE] = {
