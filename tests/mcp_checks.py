@@ -17,6 +17,34 @@ from semantic_json_checks import unique_object, logical_hash
 
 META = {'io.modelcontextprotocol/protocolVersion': '2026-07-28',
         'io.modelcontextprotocol/clientCapabilities': {}}
+# SHA-256 of the exact 0033 six-tool JSON array, captured from the pre-0035
+# tools_json_parts join. R1-AC1 compares the wire bytes against this value.
+TOOLS_0033_SHA256 = '3bbd05c5c7e5adfef17122dbf46a10b2704ee960c8cddf6a163a176c72bab4a2'
+
+
+def json_member(raw, key):
+    marker = b'"' + key.encode() + b'":'
+    start = raw.index(marker) + len(marker)
+    depth = 0
+    quoted = escaped = False
+    for index in range(start, len(raw)):
+        char = raw[index:index + 1]
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == b'\\':
+                escaped = True
+            elif char == b'"':
+                quoted = False
+        elif char == b'"':
+            quoted = True
+        elif char in (b'[', b'{'):
+            depth += 1
+        elif char in (b']', b'}'):
+            depth -= 1
+            if depth == 0:
+                return raw[start:index + 1]
+    raise AssertionError(('unterminated_json_member', key))
 
 
 class Wire:
@@ -39,7 +67,7 @@ class Wire:
                 obj['params']['_meta'] = dict(META)
         self.raw(json.dumps(obj, ensure_ascii=False, separators=(',', ':')).encode() + b'\n')
 
-    def get(self, timeout=15):
+    def read_line(self, timeout=15):
         deadline = time.monotonic() + timeout
         while b'\n' not in self.buffer:
             left = deadline - time.monotonic()
@@ -52,6 +80,10 @@ class Wire:
         line, self.buffer = self.buffer.split(b'\n', 1)
         self.last_length = len(line)
         assert len(line) <= 1024 * 1024, 'output_bound'
+        return line
+
+    def get(self, timeout=15):
+        line = self.read_line(timeout)
         obj = json.loads(line, object_pairs_hook=unique_object,
                          parse_constant=lambda x: (_ for _ in ()).throw(AssertionError(x)))
         assert obj['jsonrpc'] == '2.0', 'jsonrpc_response'
@@ -166,8 +198,12 @@ def main():
             assert r['supportedVersions'] == ['2026-07-28', '2025-11-25'], 'discover_versions'
             assert r['ttlMs'] == 0 and r['cacheScope'] == 'private', 'discovery_cache_fields'
             wire.send('tools/list')
-            tools = wire.get()['result']['tools']
+            raw = wire.read_line()
+            reply = json.loads(raw, object_pairs_hook=unique_object)
+            assert reply['result']['_meta']['io.modelcontextprotocol/serverInfo']['version'] == '0035', 'server_version_0035'
+            tools = reply['result']['tools']
             assert [t['name'] for t in tools] == ['yanos_search', 'yanos_index_status', 'yanos_block_list', 'yanos_block_read', 'yanos_block_refs', 'yanos_block_backlinks'], 'six_read_tools'
+            assert hashlib.sha256(json_member(raw, 'tools')).hexdigest() == TOOLS_0033_SHA256, '0035_r1_ac1_exact_0033_tools'
             for t in tools:
                 assert 'outputSchema' in t and t['inputSchema']['additionalProperties'] is False, 'schemas'
                 assert t['annotations'] == dict(readOnlyHint=True, destructiveHint=False,
@@ -231,6 +267,17 @@ def main():
         before = snapshot()
         wire = Wire(args, dict(env, YAN_MCP_FD_CHECK='1'))
         try:
+            # R1-AC2: without --allow-write the write tool name is unknown.
+            replies = []
+            for tool in ('yanos_note_create', 'yanos_not_a_tool'):
+                request = {'jsonrpc': '2.0', 'id': 90, 'method': 'tools/call',
+                           'params': {'_meta': META, 'name': tool,
+                                      'arguments': {'name': 'a.txt', 'text': 'x',
+                                                    'expected_source': '0' * 64}}}
+                wire.raw(json.dumps(request, separators=(',', ':')).encode() + b'\n')
+                replies.append(wire.read_line())
+            assert replies[0] == replies[1], '0035_r1_ac2_write_tool_unknown'
+            assert snapshot() == before, '0035_r1_ac2_image_unchanged'
             digest = logical_hash(files)
             wire.send('tools/call', params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks.txt'}})
             value = tool_value(wire.get())

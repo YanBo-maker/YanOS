@@ -263,10 +263,13 @@ if(YAN_BUILD_SEMANTIC)
     target_link_libraries(yan_semantic PRIVATE yan_semantic_posix yan_semantic_llama
                           yan_semantic_json yyjson::yyjson)
     target_compile_options(yan_semantic PRIVATE ${YAN_WARNINGS})
+    add_library(yan_mcp_note STATIC tools/mcp_note.c)
+    target_include_directories(yan_mcp_note PUBLIC tools)
+    target_compile_options(yan_mcp_note PRIVATE ${YAN_WARNINGS})
     add_library(yan_mcp_protocol STATIC tools/mcp_protocol.c)
     target_include_directories(yan_mcp_protocol PUBLIC tools)
     target_link_libraries(yan_mcp_protocol PUBLIC yan_semantic_text yan_blocks_format
-                          yan_note_format yyjson::yyjson)
+                          yan_note_format yan_mcp_note yyjson::yyjson)
     target_compile_options(yan_mcp_protocol PRIVATE ${YAN_WARNINGS})
     add_executable(yan_mcp tools/yan_mcp.c tools/mcp_worker.c)
     target_link_libraries(yan_mcp PRIVATE yan_mcp_protocol yan_semantic_posix yan_block_query
@@ -339,12 +342,16 @@ if(BUILD_TESTING)
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_sdk_check.py"
                 $<TARGET_FILE:yan_mcp> $<TARGET_FILE:yan_semantic>
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_fake_runner.py")
-            set_tests_properties(mcp_sdk PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
+            set_tests_properties(mcp_sdk PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77
+                LABELS "0035-R2-AC1;0035-R12-AC1")
             add_test(NAME mcp_stdio COMMAND "${Python3_EXECUTABLE}" -B
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_checks.py"
                 $<TARGET_FILE:yan_mcp> $<TARGET_FILE:yan_semantic>
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_fake_runner.py")
-            set_tests_properties(mcp_protocol mcp_stdio PROPERTIES TIMEOUT 120)
+            set_tests_properties(mcp_protocol PROPERTIES TIMEOUT 120
+                LABELS "0035-R12-AC1")
+            set_tests_properties(mcp_stdio PROPERTIES TIMEOUT 120
+                LABELS "0035-R1-AC1;0035-R1-AC2;0035-R12-AC1")
             add_executable(mcp_fault_probe tools/yan_mcp.c tools/mcp_worker.c tests/mcp_fault_hooks.c)
             target_compile_definitions(mcp_fault_probe PRIVATE _exit=yan_mcp_test_exit
                 clock_gettime=yan_mcp_test_clock_gettime)
