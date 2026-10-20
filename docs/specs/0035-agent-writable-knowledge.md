@@ -185,3 +185,10 @@ name 沿用 YanFS 名称规则；text 必须满足 0032 的文本资格，长度
 - 两个镜像实际放在哪个目录，属于部署配置，不在本 spec 范围。测试用临时目录；README 给出示例路径，并注明镜像不能放在同一个文件上。
 - 本 spec 链接了 `../decisions/0001-roadmap-A-D-B.md`，这个文件随 0034 PR-2 一起加入。如果实现 PR 比 PR-2 先合入，就把这处链接改成纯文本。
 - 拆成两个 PR，不再按 R 的顺序逐条提交：PR-A 是 Host 侧模块，覆盖 R5–R7，不挂到 MCP 上；PR-B 是 MCP 接入，覆盖 R1–R4、R8–R12，以及 R5-AC1、R5-AC2。每个 PR 内部的提交仍然要能追溯到对应的 R/AC。
+
+## 实施澄清（2026-10-20，答 develop-deepseek PR-B）
+- 成功响应：`source_sha256` 为写后身份，`previous_source_sha256` 为写前身份（create 时为 null）。
+- replace 的 dry_run 预览：旧文件不是合法 UTF-8 时返回 INVALID_TEXT。
+- R11-AC4：沿用 0033 现有行为，index、model、runner 缺失时返回 DEPENDENCY，不新增“索引缺失”这种错误码。
+- 只有重试时内容与现有内容相同，响应才带 `unchanged:true`。
+- 目录 fsync 失败时，MCP 层按 R6 返回 IO，并带 `committed:true`。
