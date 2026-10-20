@@ -266,7 +266,8 @@ def fail(message):
 
 
 def fresh_image_check(mkfs, path):
-    proc = run_host([str(mkfs), "--image", str(path), "--blocks", str(BLOCKS)])
+    proc = run_host([str(mkfs), "--image", str(path), "--blocks", str(BLOCKS),
+                     "--files", "63"])
     if proc.returncode != 0:
         raise HarnessError("yan_mkfs failed: %s" % proc.stderr.decode(errors="replace"))
     data = path.read_bytes()

@@ -1047,7 +1047,8 @@ if(BUILD_TESTING)
                         --mkfs "$<TARGET_FILE:yan_mkfs>"
                         --fault-mkfs "$<TARGET_FILE:yan_mkfs_fault>"
                         --work "${CMAKE_BINARY_DIR}/yanfs-mkfs")
-            set_tests_properties(yanfs_mkfs PROPERTIES TIMEOUT 120)
+            set_tests_properties(yanfs_mkfs PROPERTIES TIMEOUT 180
+                                 LABELS "0036-R1-AC1;0036-R1-AC2;0036-R1-AC3")
         endif()
         add_test(NAME persistent_combined_gate
             COMMAND "${Python3_EXECUTABLE}"

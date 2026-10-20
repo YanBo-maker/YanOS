@@ -26,10 +26,12 @@
 
 #define YAN_FS_BLOCK_SIZE UINT32_C(4096)
 #define YAN_FS_MAX_FILES UINT32_C(63)
+#define YAN_FS_MAX_DIR_BLOCKS UINT32_C(64)
 #define YAN_FS_NAME_MAX UINT32_C(31)
 #define YAN_FS_HEADER_SIZE UINT32_C(64)
 #define YAN_FS_ENTRY_SIZE UINT32_C(64)
 #define YAN_FS_VERSION UINT32_C(1)
+#define YAN_FS_VERSION_2 UINT32_C(2)
 
 typedef enum {
     YAN_FS_OK = 0, YAN_FS_END = 1, YAN_FS_INVALID = 2,
@@ -128,5 +130,11 @@ YanFsResult yan_fs_source(const YanFs *fs, YanFsSource *out);
  * format an image; neither gives the Guest a way to format a device. */
 YanFsResult yan_fs_format_metadata(uint8_t out[4096], uint32_t capacity_blocks);
 uint32_t yan_fs_metadata_crc(const uint8_t block[4096]);
+/* 0036 pure helpers for the multi-block directory. V1 (D=1) is the original
+ * format; D>1 writes version 2 and a CRC over all D blocks. */
+YanFsResult yan_fs_format_directory(uint8_t *out, uint32_t directory_blocks,
+                                    uint32_t capacity_blocks);
+uint32_t yan_fs_directory_crc(const uint8_t *directory,
+                              uint32_t directory_blocks);
 
 #endif

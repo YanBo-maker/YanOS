@@ -107,48 +107,89 @@ static void store_le32(uint8_t *bytes, uint32_t value)
     bytes[3] = (uint8_t)(value >> 24);
 }
 
-uint32_t yan_fs_metadata_crc(const uint8_t block[4096])
+/* CRC over a whole directory with one block optionally substituted. Block 0
+ * offsets 60..63 always read as zero, which is where the single stored CRC
+ * lives; the other D-1 blocks contribute every byte. */
+static uint32_t directory_crc_with_block(const uint8_t *directory,
+                                         uint32_t directory_blocks,
+                                         uint32_t replaced_block,
+                                         const uint8_t *replacement)
 {
     uint32_t crc = UINT32_C(0xffffffff);
-    for (uint32_t offset = 0; offset < YAN_FS_BLOCK_SIZE; ++offset) {
-        /* The stored CRC is not part of its own input; it reads as zero. */
-        uint32_t byte = block[offset];
-        if (offset >= FS_CRC_OFFSET && offset < FS_CRC_OFFSET + 4u) {
-            byte = 0;
-        }
-        crc ^= byte;
-        for (uint32_t bit = 0; bit < 8; ++bit) {
-            if ((crc & UINT32_C(1)) != 0) {
-                crc = (crc >> 1) ^ FS_CRC_POLYNOMIAL;
-            } else {
-                crc >>= 1;
+    for (uint32_t block = 0; block < directory_blocks; ++block) {
+        const uint8_t *base = block == replaced_block
+                                  ? replacement
+                                  : directory + (size_t)block * YAN_FS_BLOCK_SIZE;
+        for (uint32_t offset = 0; offset < YAN_FS_BLOCK_SIZE; ++offset) {
+            uint32_t byte = base[offset];
+            if (block == 0u && offset >= FS_CRC_OFFSET &&
+                offset < FS_CRC_OFFSET + 4u) {
+                byte = 0;
+            }
+            crc ^= byte;
+            for (uint32_t bit = 0; bit < 8; ++bit) {
+                if ((crc & UINT32_C(1)) != 0) {
+                    crc = (crc >> 1) ^ FS_CRC_POLYNOMIAL;
+                } else {
+                    crc >>= 1;
+                }
             }
         }
     }
     return crc ^ UINT32_C(0xffffffff);
 }
 
-YanFsResult yan_fs_format_metadata(uint8_t out[4096], uint32_t capacity_blocks)
+uint32_t yan_fs_directory_crc(const uint8_t *directory,
+                              uint32_t directory_blocks)
+{
+    return directory_crc_with_block(directory, directory_blocks, UINT32_MAX, NULL);
+}
+
+uint32_t yan_fs_metadata_crc(const uint8_t block[4096])
+{
+    return yan_fs_directory_crc(block, 1u);
+}
+
+YanFsResult yan_fs_format_directory(uint8_t *out, uint32_t directory_blocks,
+                                    uint32_t capacity_blocks)
 {
     static const uint8_t magic[FS_MAGIC_SIZE] = {
         (uint8_t)'Y', (uint8_t)'A', (uint8_t)'N', (uint8_t)'F',
         (uint8_t)'S', (uint8_t)'0', (uint8_t)'1', 0u
     };
-    if (out == NULL || capacity_blocks < 1u) {
+    /* D=1 keeps 0021's capacity >= 1 rule: a one-block v1 image is still a
+     * valid empty file system. A v2 directory needs at least one data block,
+     * so D>1 requires capacity_blocks > D. */
+    if (out == NULL || directory_blocks < 1u ||
+        directory_blocks > YAN_FS_MAX_DIR_BLOCKS ||
+        capacity_blocks < directory_blocks ||
+        (directory_blocks > 1u && capacity_blocks == directory_blocks)) {
         return YAN_FS_INVALID;
     }
-    for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
+    uint32_t bytes = directory_blocks * YAN_FS_BLOCK_SIZE;
+    for (uint32_t i = 0; i < bytes; ++i) {
         out[i] = 0;
     }
     for (uint32_t i = 0; i < FS_MAGIC_SIZE; ++i) {
         out[FS_MAGIC_OFFSET + i] = magic[i];
     }
-    store_le32(out + FS_VERSION_OFFSET, YAN_FS_VERSION);
+    store_le32(out + FS_VERSION_OFFSET,
+               directory_blocks == 1u ? YAN_FS_VERSION : YAN_FS_VERSION_2);
     store_le32(out + FS_BLOCK_SIZE_OFFSET, YAN_FS_BLOCK_SIZE);
     store_le32(out + FS_CAPACITY_OFFSET, capacity_blocks);
-    store_le32(out + FS_ENTRY_CAPACITY_OFFSET, YAN_FS_MAX_FILES);
-    store_le32(out + FS_CRC_OFFSET, yan_fs_metadata_crc(out));
+    store_le32(out + FS_ENTRY_CAPACITY_OFFSET,
+               directory_blocks * (YAN_FS_BLOCK_SIZE / YAN_FS_ENTRY_SIZE) - 1u);
+    if (directory_blocks > 1u) {
+        store_le32(out + FS_RESERVED_OFFSET, directory_blocks);
+    }
+    store_le32(out + FS_CRC_OFFSET,
+               yan_fs_directory_crc(out, directory_blocks));
     return YAN_FS_OK;
+}
+
+YanFsResult yan_fs_format_metadata(uint8_t out[4096], uint32_t capacity_blocks)
+{
+    return yan_fs_format_directory(out, 1u, capacity_blocks);
 }
 
 /* The allowed set is [A-Za-z0-9._-]; comparison is case sensitive, and the two
