@@ -313,7 +313,9 @@ def test_r6_committed(server, root, probe_path, fault_lib):
     global CASES
     source = make_image(root / "r6.img", [("a.txt", b"old\n")], 16)
     wire = Server(server, source, env={
-        "LD_PRELOAD": str(fault_lib), "YAN_TEST_DIR_FSYNC_FAULT": "1"})
+        "LD_PRELOAD": str(fault_lib), "YAN_TEST_DIR_FSYNC_FAULT": "1",
+        # ASan builds: the preloaded fault shim precedes the ASan runtime.
+        "ASAN_OPTIONS": os.environ.get("ASAN_OPTIONS", "") + ":verify_asan_link_order=0"})
     try:
         expected = wire.identity("a.txt")
         value, error = wire.call("yanos_note_replace", {
