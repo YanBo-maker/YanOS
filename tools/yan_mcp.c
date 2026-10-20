@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "mcp_note.h"
 #include "mcp_worker.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -29,10 +30,14 @@ static bool seconds(const char *s,unsigned *out)
     if (!n) return false;
     *out=n; return true;
 }
-static bool options(int argc,char **argv,YanMcpOptions *o)
+static bool options(int argc,char **argv,YanMcpOptions *o,bool *allow_write)
 {
     memset(o,0,sizeof *o); o->startup=o->request=120; unsigned seen=0;
-    for (int i=1;i<argc;i+=2) {
+    for (int i=1;i<argc;) {
+        if (!strcmp(argv[i],"--allow-write")) {
+            if (*allow_write) return false;
+            *allow_write=true; ++i; continue;
+        }
         if (i+1>=argc) return false;
         unsigned bit; const char **p=NULL;
         if (!strcmp(argv[i],"--disk-image")) { bit=1; p=&o->image; }
@@ -45,6 +50,7 @@ static bool options(int argc,char **argv,YanMcpOptions *o)
         if ((seen&bit) || !*argv[i+1]) return false;
         seen|=bit;
         if (p) *p=argv[i+1]; else if (!seconds(argv[i+1],bit==16?&o->startup:&o->request)) return false;
+        i+=2;
     }
     return (seen&15)==15;
 }
@@ -290,6 +296,21 @@ static bool handle(Server *s,const char *line,size_t length)
         }
         return true;
     }
+    if (request.kind==YAN_MCP_NOTE_CREATE || request.kind==YAN_MCP_NOTE_REPLACE) {
+        if (s->task.active) return enqueue(s,&request,NULL,0,"BUSY",false);
+        YanMcpNoteRequest note={.replace=request.kind==YAN_MCP_NOTE_REPLACE,
+            .dry_run=request.dry_run,.has_expected=request.has_expected_source,
+            .name=request.name,.text=request.text,.length=request.text_length};
+        memcpy(note.expected,request.expected_source,sizeof note.expected);
+        char *payload=NULL; size_t payload_length=0; bool committed=false;
+        YanMcpNoteResult result=yan_mcp_note_execute(s->options.image,&note,&payload,
+            &payload_length,&committed);
+        const char *token=result==YAN_MCP_NOTE_OK?NULL:yan_mcp_note_result_name(result);
+        request.committed=committed;
+        bool queued=enqueue(s,&request,token?NULL:payload,token?0:payload_length,token,false);
+        free(payload);
+        return queued;
+    }
     if (request.kind==YAN_MCP_SEARCH || request.kind==YAN_MCP_STATUS ||
         request.kind==YAN_MCP_BLOCK_LIST || request.kind==YAN_MCP_BLOCK_READ ||
         request.kind==YAN_MCP_BLOCK_REFS || request.kind==YAN_MCP_BLOCK_BACKLINKS) {
@@ -341,7 +362,9 @@ int main(int argc,char **argv)
 {
     Server *s=calloc(1,sizeof *s);
     if (!s) { fputs("ERROR IO\n",stderr); return 5; }
-    if (!options(argc,argv,&s->options)) { free(s); fputs("ERROR USAGE\n",stderr); return 2; }
+    bool allow_write=false;
+    if (!options(argc,argv,&s->options,&allow_write)) { free(s); fputs("ERROR USAGE\n",stderr); return 2; }
+    s->session.allow_write=allow_write;
     struct sigaction action={0}; action.sa_handler=interrupt; sigemptyset(&action.sa_mask);
     bool ready=sigaction(SIGINT,&action,NULL)==0 && sigaction(SIGTERM,&action,NULL)==0;
     /* The harness may ignore child exits or block control signals. Own our

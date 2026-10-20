@@ -128,23 +128,11 @@ static int fsync_parent(const char *target)
     return result;
 }
 
-YanFsResult yan_note_write(const char *image, bool replace, const char *name,
-                           const uint8_t *text, uint32_t length, bool *committed)
+static YanFsResult write_image(const char *target, bool replace,
+                               const char *name, const uint8_t *text,
+                               uint32_t length, bool *committed)
 {
-    if (committed == NULL) return YAN_FS_INVALID;
-    *committed = false;
-    YanFsResult result = yan_note_write_check(name, text, length);
-    if (result != YAN_FS_OK) return result;
-    char *target = image == NULL ? NULL : realpath(image, NULL);
-    if (target == NULL) return YAN_FS_IO;
-
-    int lock_fd = -1;
-    result = yan_image_lock(target, LOCK_EX, &lock_fd);
-    if (result != YAN_FS_OK) {
-        free(target);
-        return result;
-    }
-
+    YanFsResult result = YAN_FS_OK;
     int source = -1;
     int temporary = -1;
     char *temporary_path = NULL;
@@ -216,7 +204,39 @@ out:
         free(temporary_path);
     }
     if (source >= 0) (void)close(source);
-    (void)close(lock_fd);
+    return result;
+}
+
+YanFsResult yan_note_write(const char *image, bool replace, const char *name,
+                           const uint8_t *text, uint32_t length, bool *committed)
+{
+    if (committed == NULL) return YAN_FS_INVALID;
+    *committed = false;
+    YanFsResult result = yan_note_write_check(name, text, length);
+    if (result != YAN_FS_OK) return result;
+    char *target = image == NULL ? NULL : realpath(image, NULL);
+    if (target == NULL) return YAN_FS_IO;
+    int lock_fd = -1;
+    result = yan_image_lock(target, LOCK_EX, &lock_fd);
+    if (result == YAN_FS_OK) {
+        result = write_image(target, replace, name, text, length, committed);
+        (void)close(lock_fd);
+    }
+    free(target);
+    return result;
+}
+
+YanFsResult yan_note_write_locked(const char *image, bool replace,
+                                  const char *name, const uint8_t *text,
+                                  uint32_t length, bool *committed)
+{
+    if (committed == NULL) return YAN_FS_INVALID;
+    *committed = false;
+    YanFsResult result = yan_note_write_check(name, text, length);
+    if (result != YAN_FS_OK) return result;
+    char *target = image == NULL ? NULL : realpath(image, NULL);
+    if (target == NULL) return YAN_FS_IO;
+    result = write_image(target, replace, name, text, length, committed);
     free(target);
     return result;
 }

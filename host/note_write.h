@@ -22,4 +22,10 @@ YanFsResult yan_note_write(const char *image, bool replace, const char *name,
                            const uint8_t *text, uint32_t length,
                            bool *committed);
 
+/* Same write body as yan_note_write without acquiring the lock. The caller
+ * must already hold <realpath(image)>.lock exclusively. */
+YanFsResult yan_note_write_locked(const char *image, bool replace,
+                                  const char *name, const uint8_t *text,
+                                  uint32_t length, bool *committed);
+
 #endif

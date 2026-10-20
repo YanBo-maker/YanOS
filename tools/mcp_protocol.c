@@ -1,4 +1,5 @@
 #include "mcp_protocol.h"
+#include "mcp_note.h"
 #include "note_blocks_format.h"
 #include "note_metadata_format.h"
 #include <stdlib.h>
@@ -229,10 +230,33 @@ static bool block_arguments(YanMcpRequest *r,yyjson_val *args,bool need_id,
     if (r->has_offset && r->offset>0 && !r->has_expected_source) return false;
     return true;
 }
+static bool note_arguments(YanMcpRequest *r,yyjson_val *args)
+{
+    if (!yyjson_is_obj(args) ||
+        !fields4(args,"name","text","expected_source","dry_run")) return false;
+    if (!business_string(yyjson_obj_get(args,"name"),r->name,true)) return false;
+    yyjson_val *text=yyjson_obj_get(args,"text");
+    if (!yyjson_is_str(text)) return false;
+    size_t length=yyjson_get_len(text);
+    if (length>sizeof r->text) return false;
+    memcpy(r->text,yyjson_get_str(text),length); r->text_length=(uint32_t)length;
+    yyjson_val *dry=yyjson_obj_get(args,"dry_run");
+    if (dry) {
+        if (!yyjson_is_bool(dry)) return false;
+        r->dry_run=yyjson_get_bool(dry);
+    }
+    yyjson_val *expected=yyjson_obj_get(args,"expected_source");
+    if (expected) {
+        if (!expected_value(expected,r->expected_source)) return false;
+        r->has_expected_source=true;
+    }
+    return r->dry_run || r->has_expected_source;
+}
 void yan_mcp_parse(const char *text,size_t length,YanMcpSession *session,
     const YanMcpId *active,YanMcpRequest *r,const yyjson_alc *allocator)
 {
     memset(r,0,sizeof *r); protocol_error(r,-32700);
+    r->allow_write=session->allow_write;
     if (!text || !bounded(text,length)) return;
     yyjson_doc *doc=yyjson_read_opts((char *)text,length,0,allocator,NULL);
     if (!doc) return;
@@ -296,7 +320,10 @@ void yan_mcp_parse(const char *text,size_t length,YanMcpSession *session,
         bool search=string_is(name,"yanos_search"), status=string_is(name,"yanos_index_status");
         bool list=string_is(name,"yanos_block_list"), read=string_is(name,"yanos_block_read");
         bool refs=string_is(name,"yanos_block_refs"), backlinks=string_is(name,"yanos_block_backlinks");
-        if (!search && !status && !list && !read && !refs && !backlinks) goto done;
+        YanMcpNoteTool note=r->allow_write ? yan_mcp_note_tool(yyjson_get_str(name))
+                                           : YAN_NOTE_TOOL_NONE;
+        if (!search && !status && !list && !read && !refs && !backlinks &&
+            note==YAN_NOTE_TOOL_NONE) goto done;
         r->kind=YAN_MCP_TOOL_ERROR; r->error=0;
         if (status) { if (!args || yyjson_obj_size(args)==0) r->kind=YAN_MCP_STATUS; }
         else if (search) {
@@ -307,6 +334,9 @@ void yan_mcp_parse(const char *text,size_t length,YanMcpSession *session,
         } else if (list || refs) {
             if (!args || !block_arguments(r,args,false,false)) goto done;
             r->kind=list ? YAN_MCP_BLOCK_LIST : YAN_MCP_BLOCK_REFS;
+        } else if (note != YAN_NOTE_TOOL_NONE) {
+            if (!note_arguments(r,args)) goto done;
+            r->kind=note==YAN_NOTE_TOOL_CREATE ? YAN_MCP_NOTE_CREATE : YAN_MCP_NOTE_REPLACE;
         } else {
             if (!args || !block_arguments(r,args,true,read)) goto done;
             r->kind=read ? YAN_MCP_BLOCK_READ : YAN_MCP_BLOCK_BACKLINKS;
@@ -317,7 +347,7 @@ done:
     yyjson_doc_free(doc);
 }
 
-#define SERVER_INFO "{\"name\":\"YanOS\",\"version\":\"0033\"}"
+#define SERVER_INFO "{\"name\":\"YanOS\",\"version\":\"0035\"}"
 #define INTEGER_SCHEMA "{\"type\":\"integer\",\"minimum\":0}"
 #define HASH_SCHEMA "{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"}"
 /* Split because -Wpedantic -Werror rejects string literals over C17's 4095
@@ -330,13 +360,16 @@ static const char *const tools_json_parts[] = {
     "\"name\":\"yanos_block_list\",\"description\":\"Read-only declaration-order list of all named blocks in one YanFS text file, including marker and content physical lines and absolute byte ranges.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\"],\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"expected_source\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"}}},\"outputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schema_version\",\"operation\",\"source_sha256\",\"name\",\"total\",\"shown\",\"blocks\"],\"properties\":{\"schema_version\":{\"const\":1},\"operation\":{\"const\":\"block_list\"},\"source_sha256\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"},\"name\":{\"type\":\"string\"},\"total\":{\"type\":\"integer\",\"minimum\":0},\"shown\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":64},\"blocks\":{\"type\":\"array\",\"maxItems\":64,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"id\",\"marker_line\",\"first_line\",\"last_line\",\"start\",\"end\"],\"properties\":{\"id\":{\"type\":\"string\"},\"marker_line\":{\"type\":\"integer\",\"minimum\":0},\"first_line\":{\"type\":\"integer\",\"minimum\":0},\"last_line\":{\"type\":\"integer\",\"minimum\":0},\"start\":{\"type\":\"integer\",\"minimum\":0},\"end\":{\"type\":\"integer\",\"minimum\":0}}}}}},\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,\"idempotentHint\":true,\"openWorldHint\":false}},{",
     "\"name\":\"yanos_block_read\",\"description\":\"Read-only bounded page of one named block, up to 65536 original UTF-8/CRLF-safe bytes, with absolute block and page ranges and next_offset.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\",\"block_id\"],\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"block_id\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"offset\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":4294967295},\"expected_source\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"}}},\"outputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schema_version\",\"operation\",\"source_sha256\",\"name\",\"block_id\",\"block\",\"page\",\"text\",\"complete\",\"next_offset\"],\"properties\":{\"schema_version\":{\"const\":1},\"operation\":{\"const\":\"block_read\"},\"source_sha256\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"},\"name\":{\"type\":\"string\"},\"block_id\":{\"type\":\"string\"},\"block\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"start\",\"end\",\"first_line\",\"last_line\"],\"properties\":{\"start\":{\"type\":\"integer\",\"minimum\":0},\"end\":{\"type\":\"integer\",\"minimum\":0},\"first_line\":{\"type\":\"integer\",\"minimum\":0},\"last_line\":{\"type\":\"integer\",\"minimum\":0}}},\"page\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"start\",\"end\",\"first_line\",\"last_line\"],\"properties\":{\"start\":{\"type\":\"integer\",\"minimum\":0},\"end\":{\"type\":\"integer\",\"minimum\":0},\"first_line\":{\"type\":\"integer\",\"minimum\":0},\"last_line\":{\"type\":\"integer\",\"minimum\":0}}},\"text\":{\"type\":\"string\"},\"complete\":{\"type\":\"boolean\"},\"next_offset\":{\"type\":[\"integer\",\"null\"],\"minimum\":0}}},\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,\"idempotentHint\":true,\"openWorldHint\":false}},{",
     "\"name\":\"yanos_block_refs\",\"description\":\"Read-only references in source byte order, first 20 plus the full occurrence count, with target names/IDs and existence state.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\"],\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"expected_source\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"}}},\"outputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schema_version\",\"operation\",\"source_sha256\",\"name\",\"total\",\"shown\",\"refs\"],\"properties\":{\"schema_version\":{\"const\":1},\"operation\":{\"const\":\"block_refs\"},\"source_sha256\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"},\"name\":{\"type\":\"string\"},\"total\":{\"type\":\"integer\",\"minimum\":0},\"shown\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":20},\"refs\":{\"type\":\"array\",\"maxItems\":20,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"source\",\"block_id\",\"line\",\"start\",\"end\",\"target\",\"state\"],\"properties\":{\"source\":{\"type\":\"string\"},\"block_id\":{\"type\":[\"string\",\"null\"]},\"line\":{\"type\":\"integer\",\"minimum\":0},\"start\":{\"type\":\"integer\",\"minimum\":0},\"end\":{\"type\":\"integer\",\"minimum\":0},\"target\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\",\"id\"],\"properties\":{\"name\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}}},\"state\":{\"enum\":[\"OK\",\"DANGLING_FILE\",\"DANGLING_BLOCK\"]}}}}}},\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,\"idempotentHint\":true,\"openWorldHint\":false}},{",
-    "\"name\":\"yanos_block_backlinks\",\"description\":\"Read-only occurrences of one target address across ASCII-ordered files, first 20 plus total, skipped non-text files and target state.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\",\"block_id\"],\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"block_id\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"expected_source\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"}}},\"outputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schema_version\",\"operation\",\"source_sha256\",\"name\",\"block_id\",\"total\",\"shown\",\"skipped\",\"target_state\",\"backlinks\"],\"properties\":{\"schema_version\":{\"const\":1},\"operation\":{\"const\":\"block_backlinks\"},\"source_sha256\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"},\"name\":{\"type\":\"string\"},\"block_id\":{\"type\":\"string\"},\"total\":{\"type\":\"integer\",\"minimum\":0},\"shown\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":20},\"skipped\":{\"type\":\"integer\",\"minimum\":0},\"target_state\":{\"enum\":[\"OK\",\"DANGLING_FILE\",\"DANGLING_BLOCK\"]},\"backlinks\":{\"type\":\"array\",\"maxItems\":20,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"source\",\"block_id\",\"line\",\"start\",\"end\"],\"properties\":{\"source\":{\"type\":\"string\"},\"block_id\":{\"type\":[\"string\",\"null\"]},\"line\":{\"type\":\"integer\",\"minimum\":0},\"start\":{\"type\":\"integer\",\"minimum\":0},\"end\":{\"type\":\"integer\",\"minimum\":0}}}}}},\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,\"idempotentHint\":true,\"openWorldHint\":false}}]}",
+    "\"name\":\"yanos_block_backlinks\",\"description\":\"Read-only occurrences of one target address across ASCII-ordered files, first 20 plus total, skipped non-text files and target state.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\",\"block_id\"],\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"block_id\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"expected_source\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"}}},\"outputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schema_version\",\"operation\",\"source_sha256\",\"name\",\"block_id\",\"total\",\"shown\",\"skipped\",\"target_state\",\"backlinks\"],\"properties\":{\"schema_version\":{\"const\":1},\"operation\":{\"const\":\"block_backlinks\"},\"source_sha256\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"},\"name\":{\"type\":\"string\"},\"block_id\":{\"type\":\"string\"},\"total\":{\"type\":\"integer\",\"minimum\":0},\"shown\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":20},\"skipped\":{\"type\":\"integer\",\"minimum\":0},\"target_state\":{\"enum\":[\"OK\",\"DANGLING_FILE\",\"DANGLING_BLOCK\"]},\"backlinks\":{\"type\":\"array\",\"maxItems\":20,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"source\",\"block_id\",\"line\",\"start\",\"end\"],\"properties\":{\"source\":{\"type\":\"string\"},\"block_id\":{\"type\":[\"string\",\"null\"]},\"line\":{\"type\":\"integer\",\"minimum\":0},\"start\":{\"type\":\"integer\",\"minimum\":0},\"end\":{\"type\":\"integer\",\"minimum\":0}}}}}},\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,\"idempotentHint\":true,\"openWorldHint\":false}}",
 };
-static char *tools_json_join(size_t *length)
+static char *tools_json_join(bool allow_write,size_t *length)
 {
-    size_t total=0;
+    unsigned notes=allow_write ? yan_mcp_note_tool_count() : 0;
+    size_t total=2;
     for (unsigned i=0;i<sizeof tools_json_parts/sizeof *tools_json_parts;++i)
         total+=strlen(tools_json_parts[i]);
+    for (unsigned i=0;i<notes;++i)
+        total+=1+strlen(yan_mcp_note_tool_json(i));
     char *text=malloc(total+1);
     if (!text) { *length=0; return NULL; }
     size_t at=0;
@@ -344,6 +377,12 @@ static char *tools_json_join(size_t *length)
         size_t n=strlen(tools_json_parts[i]);
         memcpy(text+at,tools_json_parts[i],n); at+=n;
     }
+    for (unsigned i=0;i<notes;++i) {
+        const char *tool=yan_mcp_note_tool_json(i);
+        size_t n=strlen(tool);
+        text[at++]=','; memcpy(text+at,tool,n); at+=n;
+    }
+    text[at++]=']'; text[at++]='}';
     text[at]=0; *length=at; return text;
 }
 
@@ -388,7 +427,7 @@ YanMcpReplyStatus yan_mcp_reply_ex(const YanMcpRequest *r,const char *payload,si
             body=copy_json(doc,discover,sizeof discover-1,a);
         } else if (r->kind==YAN_MCP_LIST) {
             size_t tools_length=0;
-            char *tools=tools_json_join(&tools_length);
+            char *tools=tools_json_join(r->allow_write,&tools_length);
             if (tools) body=copy_json(doc,tools,tools_length,a);
             free(tools);
         } else if (r->kind==YAN_MCP_PING) body=yyjson_mut_obj(doc);
@@ -397,8 +436,11 @@ YanMcpReplyStatus yan_mcp_reply_ex(const YanMcpRequest *r,const char *payload,si
             yyjson_mut_val *content=yyjson_mut_arr(doc), *text=yyjson_mut_obj(doc), *value=NULL;
             if (!token && r->kind==YAN_MCP_TOOL_ERROR) token="INVALID";
             ok=ok && body && content && text && yyjson_mut_obj_add_bool(doc,body,"isError",token!=NULL);
-            if (token) { value=yyjson_mut_obj(doc); ok=ok && value && yyjson_mut_obj_add_str(doc,value,"code",token); }
-            else {
+            if (token) {
+                value=yyjson_mut_obj(doc);
+                ok=ok && value && yyjson_mut_obj_add_str(doc,value,"code",token);
+                if (ok && r->committed) ok=yyjson_mut_obj_add_bool(doc,value,"committed",true);
+            } else {
                 value=payload && size<=YAN_MCP_OUTPUT_MAX ? copy_json(doc,payload,size,a) : NULL;
                 ok=ok && yyjson_mut_is_obj(value) && yyjson_mut_obj_add_val(doc,body,"structuredContent",value);
             }

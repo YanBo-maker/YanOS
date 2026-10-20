@@ -16,6 +16,7 @@ from semantic_json_checks import logical_hash
 
 TOOLS = ['yanos_search', 'yanos_index_status', 'yanos_block_list',
          'yanos_block_read', 'yanos_block_refs', 'yanos_block_backlinks']
+WRITE_TOOLS = ['yanos_note_create', 'yanos_note_replace']
 
 BLOCK_KEYS = {'id', 'marker_line', 'first_line', 'last_line', 'start', 'end'}
 RANGE_KEYS = {'start', 'end', 'first_line', 'last_line'}
@@ -466,6 +467,61 @@ async def no_dependency_calls(server, options, root, mode):
         call_error(await client.call_tool('yanos_search', {'query': 'cpu'}), 'DEPENDENCY')
 
 
+async def write_tools(server, options):
+    """0035-R2-AC1: official SDK sees six tools plus the two write tools."""
+    from mcp import Client
+    from mcp.client.stdio import StdioServerParameters
+    target = StdioServerParameters(command=str(server), args=[*options, '--allow-write'])
+    expected_annotations = {
+        'yanos_note_create': {'readOnlyHint': False, 'destructiveHint': False,
+                              'openWorldHint': False},
+        'yanos_note_replace': {'readOnlyHint': False, 'destructiveHint': True,
+                               'idempotentHint': True, 'openWorldHint': False},
+    }
+    expected_operations = {
+        'yanos_note_create': {'note_create', 'note_create_preview'},
+        'yanos_note_replace': {'note_replace', 'note_replace_preview'},
+    }
+    required_text = ('criteria', 'known', 'unknown', 'untouched', 'log',
+                     '写 `log` 和 `unknown`',
+                     '把条目移入 `known` 必须在同一会话里得到闫博明确确认',
+                     '把预览的 `text` 和 `diff` 展示给闫博')
+    async with Client(target, mode='legacy', read_timeout_seconds=15) as client:
+        assert client.server_info is not None, 'sdk_server_identity_missing'
+        assert client.server_info.version == '0035', 'sdk_server_version_write'
+        listing = await client.list_tools()
+        assert [t.name for t in listing.tools] == TOOLS + WRITE_TOOLS, 'sdk_write_discovery'
+        for tool in listing.tools[-2:]:
+            annotations = (tool.annotations.model_dump(by_alias=True, exclude_none=True)
+                           if tool.annotations else {})
+            assert annotations == expected_annotations[tool.name], \
+                ('sdk_write_annotations', tool.name, annotations)
+            schema = tool.input_schema
+            assert schema['type'] == 'object' and schema['additionalProperties'] is False, \
+                ('sdk_write_input_closed', tool.name)
+            assert schema['required'] == ['name', 'text'], ('sdk_write_required', tool.name)
+            assert set(schema['properties']) == {'name', 'text', 'expected_source', 'dry_run'}, \
+                ('sdk_write_input_properties', tool.name)
+            assert schema['properties']['name'] == {
+                'type': 'string', 'minLength': 1, 'maxLength': 31}, 'sdk_write_name_bounds'
+            assert schema['properties']['text']['type'] == 'string', 'sdk_write_text'
+            assert schema['properties']['expected_source']['pattern'] == '^[0-9a-f]{64}$', \
+                'sdk_write_expected_source'
+            assert schema['properties']['dry_run'] == {'type': 'boolean'}, 'sdk_write_dry_run'
+            output = tool.output_schema
+            assert output['type'] == 'object' and len(output['oneOf']) == 2, \
+                ('sdk_write_output_oneof', tool.name)
+            operations = set()
+            for branch in output['oneOf']:
+                operation = branch['properties']['operation']
+                operations.update(operation.get('enum', [operation.get('const')]))
+            assert operations == expected_operations[tool.name], \
+                ('sdk_write_output_operations', tool.name, operations)
+            assert all(phrase in tool.description for phrase in required_text), \
+                ('sdk_write_description', tool.name)
+        print('PASS official mcp==2.3.0 write-tools schema+annotations version=0035')
+
+
 async def run(server, options, source_hash, root, files):
     from mcp import Client
     from mcp.client.stdio import StdioServerParameters
@@ -475,6 +531,8 @@ async def run(server, options, source_hash, root, files):
         async with Client(target, mode=mode, read_timeout_seconds=15) as client:
             expected = '2025-11-25' if mode == 'legacy' else '2026-07-28'
             assert client.protocol_version == expected, ('actual_protocol_version', mode, client.protocol_version)
+            if client.server_info is not None:
+                assert client.server_info.version == '0035', ('sdk_server_version', mode)
             listing = await client.list_tools()
             assert [t.name for t in listing.tools] == TOOLS, 'sdk_discovery'
             status = (await client.call_tool('yanos_index_status')).model_dump(by_alias=True, exclude_none=True)
@@ -524,6 +582,7 @@ async def run(server, options, source_hash, root, files):
         assert isinstance(abandoned[0], BaseException), 'sdk_close_did_not_publish_success'
         await await_gone(eof_pid)
         print('PASS official mcp==2.3.0 stdio', mode, 'cancel+reuse+active-close/reap')
+    await write_tools(server, options)
 
 
 def main():

@@ -234,7 +234,7 @@ static void test_six_tools_schema_order_and_version(void)
     }
     yyjson_val *server=yyjson_obj_get(yyjson_obj_get(result,"_meta"),
         "io.modelcontextprotocol/serverInfo");
-    TEST_ASSERT_EQUAL_STRING("0033",yyjson_get_str(yyjson_obj_get(server,"version")));
+    TEST_ASSERT_EQUAL_STRING("0035",yyjson_get_str(yyjson_obj_get(server,"version")));
     yyjson_doc_free(doc); free(reply);
 }
 static yyjson_val *tool_named(yyjson_val *tools,const char *name)
