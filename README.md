@@ -58,26 +58,16 @@ GCC / Clang 的 Unix 构建可在配置时添加 `-DYAN_ENABLE_SANITIZERS=ON`，
 
 构建 Guest 验证工具可添加 `-DYAN_BUILD_TOOLS=ON`。`yan_run` 支持 RV32 ELF、最大步数、`tohost` 退出、签名区导出和逐条架构状态记录；`yan_difftest` 让 YanCPU 与外部参考模型逐条比较架构状态；`yan_gen` 生成随机 RV32IM 指令流。
 
-Linux 工具配置另提供 `yan_mkfs`，排他创建新 YanFS 镜像，已有文件或链接会被拒绝：
+Linux 工具配置另提供 `yan_mkfs`，排他创建新 YanFS 镜像，已有文件或链接会被拒绝。`--files N` 取 63…4095，缺省 1023（目录占 16 块）；`--blocks` 必须大于目录块数，因此下面的示例用 64 块：
 
 ```sh
 cmake -S . -B build/yanfs -DYAN_BUILD_TOOLS=ON
 cmake --build build/yanfs --parallel
-build/yanfs/yan_mkfs --image new.img --blocks 16
+build/yanfs/yan_mkfs --image new.img --blocks 64
 build/yanfs/yan_run --image guest.elf --disk-image new.img
 ```
 
-`--files N` 是可选参数，设定这个新镜像的目录能存放多少个文件。N 必须等于 `64·D − 1`：D 是目录块数，取 1 到 64，所以 N 只能是 63、127、……、4095。省略 `--files` 时 N 为 63。规格把目标缺省写成 1023，并写明要等 [0036](docs/specs/0036-yanfs-multi-block-directory.md) 的 R3 合入时才从 63 改成 1023。N 为 63 时写出 version 1，与改这个参数之前的 `yan_mkfs --blocks` 逐字节相同。N 大于 63 时写出 version 2。D 为 1 时 `--blocks` 至少为 1；D 大于 1 时 `--blocks` 必须大于 D。
-
-`--files` 写了两次，或后面没有取值时，程序把用法打到 stderr，以退出码 2 结束，此时还没有创建镜像。取值含有非数字字符、是空串、小于 63、大于 4095，或者落在 63 到 4095 之间但不是某个 `64·D − 1` 时，stderr 为 `yan_mkfs: invalid --files '<原文>'`，同样以退出码 2 结束，并且不创建镜像。N 合法而 `--blocks` 放不下这块目录时，stderr 为 `yan_mkfs: --blocks <块数> cannot hold a <D>-block directory`，退出码也是 2，镜像仍不创建。成功时 stdout 为 `yan_mkfs: wrote <路径> (<块数> blocks, <文件数> files)`。
-
-省略 `--files` 或写成 `--files 63` 得到的 v1 镜像，终端 Guest、MCP 写工具和语义工具都能挂载；已经存在的 v1 镜像不用重新格式化。`--files` 大于 63 得到的 v2 镜像，目前只有 YanFS 库的 `yan_fs_init_directory` 能挂载。终端 Guest（`apps/yanfs_terminal/main.c`）现在先 probe 块 0，再从 arena 分配目录缓冲并调用 `yan_fs_init_directory` 挂载；但它的笔记、关系、块和搜索服务仍是 63 项的固定数组，所以挂载后 N>63 时报 `ERROR CAPACITY` 并退出，要等 0036 PR2b 才能使用 v2。`note_write` 和语义工具（`host/semantic_posix.c`）仍调用 `yan_fs_init`，目录缓冲固定为 1 块，镜像的 D 与缓冲不一致时挂载返回 INVALID，同样要等 PR2b。MCP 写工具经 `note_write` 写入，并经 `semantic_posix` 打开镜像，同样要等到那时。
-
-目录容量 1023（D=16）时，`--blocks` 至少为 17：
-
-```sh
-build/yanfs/yan_mkfs --image wide.img --blocks 17 --files 1023
-```
+终端 Guest、`note_write` 和语义/MCP 工具都按镜像的目录块数分配缓冲，v1 与 N 最大 4095 的 v2 都可挂载；PR2a 的 `ERROR CAPACITY` 已移除。
 
 `guest.elf` 是调用文件系统接口的 Guest 程序；公开接口见 [os/yanfs.h](os/yanfs.h)，Guest 块适配见 [os/yanfs_block.h](os/yanfs_block.h)，可运行的整体例子见 [Guest 验收程序](tests/guest/yanfs_check.c) 与 [验收脚本](tests/guest/run_yanfs.py)。mkfs 与当前工具验证使用 Linux/WSL 路径；Guest 不自动格式化镜像。
 
@@ -86,12 +76,12 @@ Linux/WSL 中具备 RISC-V 交叉编译器时，可构建生产终端应用；`B
 ```sh
 cmake -S . -B build/terminal -DYAN_BUILD_TOOLS=ON
 cmake --build build/terminal --target yanfs_terminal yan_run yan_mkfs --parallel
-build/terminal/yan_mkfs --image terminal.img --blocks 16
+build/terminal/yan_mkfs --image terminal.img --blocks 64
 python3 tools/yan_shell.py --run build/terminal/yan_run \
   --guest build/terminal/guest-apps/yanfs_terminal.elf --disk-image terminal.img
 ```
 
-已有镜像可直接传给启动器；上面的 mkfs 仅用于创建新镜像，并且不带 `--files`，得到 63 个文件的 v1 镜像，当前终端可以挂载。输入 `create hello.txt hello`、`cat hello.txt`、`write hello.txt world`、`rm hello.txt`，最后用 `exit` 结束。TEXT 不隐式添加换行，退格按字节处理。启动器临时调整 Unix TTY 并恢复完整属性；stdin EOF 不传给 Guest，必须显式 exit。默认使用很大的有限步数上限，可通过 `--max-steps` 缩小；空闲仍消耗 CPU。文件发布后输出失败不回滚，不自动修复或重新挂载。
+已有镜像可直接传给启动器；上面的 mkfs 仅用于创建新镜像。输入 `create hello.txt hello`、`cat hello.txt`、`write hello.txt world`、`rm hello.txt`，最后用 `exit` 结束。TEXT 不隐式添加换行，退格按字节处理。启动器临时调整 Unix TTY 并恢复完整属性；stdin EOF 不传给 Guest，必须显式 exit。默认使用很大的有限步数上限，可通过 `--max-steps` 缩小；空闲仍消耗 CPU。文件发布后输出失败不回滚，不自动修复或重新挂载。
 
 多行笔记使用同一应用和启动器：
 
