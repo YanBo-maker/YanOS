@@ -67,7 +67,11 @@ build/yanfs/yan_mkfs --image new.img --blocks 64
 build/yanfs/yan_run --image guest.elf --disk-image new.img
 ```
 
-终端 Guest、`note_write` 和语义/MCP 工具都按镜像的目录块数分配缓冲，v1 与 N 最大 4095 的 v2 都可挂载；PR2a 的 `ERROR CAPACITY` 已移除。
+`--files N` 是可选参数，设定这个新镜像的目录能存放多少个文件。N 必须等于 `64·D − 1`：D 是目录块数，取 1 到 64，所以 N 只能是 63、127、……、4095。省略 `--files` 时 N 为 1023（D=16），因此 `--blocks` 至少为 17。N 为 63 时写出 version 1，与改这个参数之前的 `yan_mkfs --blocks` 逐字节相同。N 大于 63 时写出 version 2。D 为 1 时 `--blocks` 至少为 1；D 大于 1 时 `--blocks` 必须大于 D。
+
+`--files` 写了两次，或后面没有取值时，程序把用法打到 stderr，以退出码 2 结束，此时还没有创建镜像。取值含有非数字字符、是空串、小于 63、大于 4095，或者落在 63 到 4095 之间但不是某个 `64·D − 1` 时，stderr 为 `yan_mkfs: invalid --files '<原文>'`，同样以退出码 2 结束，并且不创建镜像。N 合法而 `--blocks` 放不下这块目录时，stderr 为 `yan_mkfs: --blocks <块数> cannot hold a <D>-block directory`，退出码也是 2，镜像仍不创建。成功时 stdout 为 `yan_mkfs: wrote <路径> (<块数> blocks, <文件数> files)`。
+
+终端 Guest、`note_write` 和 `semantic_posix` 按镜像的目录块数分配缓冲，v1 与 N 最大 4095 的 v2 都可挂载；PR2a 的 `ERROR CAPACITY` 已移除。但语义检索和 MCP 检索工具（经 `host/semantic_corpus.c`）仍只接受 slot < 63 的文件，遇到 slot ≥ 63 的文件返回 CORRUPT，完整支持 v2 要等 0036-R6（PR4）。
 
 `guest.elf` 是调用文件系统接口的 Guest 程序；公开接口见 [os/yanfs.h](os/yanfs.h)，Guest 块适配见 [os/yanfs_block.h](os/yanfs_block.h)，可运行的整体例子见 [Guest 验收程序](tests/guest/yanfs_check.c) 与 [验收脚本](tests/guest/run_yanfs.py)。mkfs 与当前工具验证使用 Linux/WSL 路径；Guest 不自动格式化镜像。
 
