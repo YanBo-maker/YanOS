@@ -24,12 +24,16 @@ run_yanfs_mutation.py and run before its mutants.
 Exit codes: 0 all synthetic cases matched, 1 a mismatch, 2 import failure.
 """
 import os
+from pathlib import Path
+import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from run_yanfs_mutation import classify_run, self_test_run_suites
+    import run_yanfs_mutation as RUN
 except ImportError as error:  # pragma: no cover - defensive
     print("HARNESS-ERROR: cannot import the gate: %s" % error, file=sys.stderr)
     sys.exit(2)
@@ -157,6 +161,31 @@ CASES = [
 ]
 
 
+def cli_input_controls():
+    """Exercise the real runner's local-before-external input boundary."""
+    assert "sort.h" in RUN.OS_FILES
+    script = Path(__file__).with_name("run_yanfs_mutation.py")
+    with tempfile.TemporaryDirectory(prefix="yanfs-gate-inputs-") as raw:
+        root = Path(raw)
+        for name in ["os/" + item for item in RUN.OS_FILES] + [
+                "tests/" + item for item in RUN.TEST_FILES]:
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("placeholder")
+
+        def invoke():
+            return subprocess.run([sys.executable, "-B", str(script),
+                "--source", str(root), "--unity", str(root / "absent-unity"),
+                "--cc", str(root / "absent-compiler"), "--work", str(root / "work")],
+                capture_output=True, timeout=20)
+
+        assert invoke().returncode == 77, "complete local inputs retain external-only77"
+        (root / "os/sort.h").unlink()
+        result = invoke()
+        assert result.returncode == 1, "missing sort.h must not become dependency77"
+        assert b"sort.h" in result.stderr and b"missing" in result.stderr
+
+
 def main():
     failures = 0
     for label, returncode, stdout, stderr, assertion, expected in CASES:
@@ -170,6 +199,7 @@ def main():
             failures += 1
     try:
         self_test_run_suites()
+        cli_input_controls()
     except Exception as error:  # HarnessError and anything else is a failure
         print(":FAIL: mocked run_suites controls: %s" % error)
         failures += 1

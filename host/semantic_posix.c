@@ -142,11 +142,14 @@ static YanImageOpenResult mount_opened_image(YanSemanticPosix *p, bool record_in
                                                      &directory_blocks));
     if (r == YAN_IMAGE_OPEN_OK) {
         p->directory = calloc(directory_blocks, 4096u);
-        if (p->directory == NULL) {
+        p->name_order =
+            calloc(directory_blocks * 64u, sizeof *p->name_order);
+        if (p->directory == NULL || p->name_order == NULL) {
             r = YAN_IMAGE_OPEN_IO;
         } else {
             r = map_fs_image(yan_fs_init_directory(&p->fs, io, p->directory,
-                                                   directory_blocks));
+                                                   directory_blocks,
+                                                   p->name_order));
         }
     }
     if (r == YAN_IMAGE_OPEN_OK) r = map_fs_image(yan_fs_mount(&p->fs));
@@ -302,6 +305,8 @@ YanSemanticResult yan_semantic_posix_cleanup(YanSemanticPosix *p)
     YanSemanticResult r = yan_semantic_posix_close_source(p);
     YanSemanticResult index = close_index(p);
     discard_index(p);
+    free(p->name_order);
+    p->name_order = NULL;
     free(p->directory);
     p->directory = NULL;
     p->fs.directory = NULL;

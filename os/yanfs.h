@@ -86,17 +86,26 @@ typedef struct {
     uint8_t *directory;
     uint32_t directory_blocks;
     uint32_t entry_capacity;
+    /* 0036-R8: caller-owned slot indices sorted by name, one uint16 per entry
+     * capacity, rebuilt on mount and after every commit_entry. find_entry
+     * binary-searches this table; no name bytes are duplicated. */
+    uint16_t *name_order;
+    uint32_t name_order_count;
     uint8_t scratch[4096];
     uint64_t source_token;
     bool source_cacheable;
 } YanFs;
 
-/* 0036: use a caller-owned directory cache of directory_blocks * 4096 bytes.
- * The buffer is long-lived and must not overlap the YanFs object. This is the
- * only initializer: the D=1 built-in member was removed so the directory size
- * always follows the image instead of a fixed array. */
+/* 0036: use a caller-owned directory cache of directory_blocks * 4096 bytes
+ * and a caller-owned name_order table of entry_capacity uint16 values. Both are
+ * long-lived, must not overlap each other or the YanFs object, and are live
+ * workspace: callers must not edit them or reuse them as API input/output.
+ * API ranges overlapping either workspace are rejected. This is the only
+ * initializer: the D=1 built-in member was removed so the directory size always
+ * follows the image instead of a fixed array. */
 YanFsResult yan_fs_init_directory(YanFs *, YanFsBlockIo, uint8_t *directory,
-                                  uint32_t directory_blocks);
+                                  uint32_t directory_blocks,
+                                  uint16_t *name_order);
 /* 0036-R3: read block 0 and validate only the fields the startup allocation
  * decision needs: magic, version (1 or 2), directory_blocks (v1 is 1, v2 is
  * 1..64) and entry_capacity == 64*D-1. It allocates nothing, writes nothing
@@ -153,5 +162,15 @@ YanFsResult yan_fs_format_directory(uint8_t *out, uint32_t directory_blocks,
                                     uint32_t capacity_blocks);
 uint32_t yan_fs_directory_crc(const uint8_t *directory,
                               uint32_t directory_blocks);
+
+#ifdef YAN_FS_TEST_HOOKS
+/* 0036-R8-AC2 only: a test translation unit compiles yanfs.c with this macro
+ * and compares the production binary-search lookup with its linear oracle.
+ * Production builds never define it and export none of these symbols. */
+bool yan_fs_test_find_entry(const YanFs *, const char *name, uint32_t length,
+                            uint32_t *slot_out);
+uint32_t yan_fs_test_name_order_count(const YanFs *);
+uint32_t yan_fs_test_name_order_at(const YanFs *, uint32_t index);
+#endif
 
 #endif

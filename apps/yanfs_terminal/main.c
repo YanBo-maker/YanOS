@@ -416,15 +416,26 @@ _Noreturn static void app_session(void)
         &arena, yan_search_terms_index_entries_storage_bytes(capacity));
     char (*block_names)[32] =
         yan_arena_alloc(&arena, yan_blocks_names_storage_bytes(capacity));
+    /* 0036-R8: name_order plus one index table per sorting service, all
+     * allocated once and never resized. */
+    uint16_t *name_order =
+        yan_arena_alloc(&arena, 2u * capacity);
+    uint16_t *note_sort =
+        yan_arena_alloc(&arena, yan_note_sort_index_storage_bytes(capacity));
+    uint16_t *relation_sort = yan_arena_alloc(
+        &arena, yan_relation_sort_index_storage_bytes(capacity));
+    uint16_t *block_sort =
+        yan_arena_alloc(&arena, yan_blocks_sort_index_storage_bytes(capacity));
     if (directory == NULL || note_entries == NULL || note_sort_name == NULL ||
         relation_rows == NULL || index_eligible == NULL ||
-        index_entries == NULL || block_names == NULL) {
+        index_entries == NULL || block_names == NULL || name_order == NULL ||
+        note_sort == NULL || relation_sort == NULL || block_sort == NULL) {
         app_fail(APP_REASON_ARENA, "ARENA");
     }
     yan_arena_used_bytes =
         (uint32_t)yan_arena_used(&arena, __yan_arena_start);
-    if (yan_fs_init_directory(&fs, io, directory, directory_blocks) !=
-        YAN_FS_OK) {
+    if (yan_fs_init_directory(&fs, io, directory, directory_blocks,
+                              name_order) != YAN_FS_OK) {
         app_fail(APP_REASON_FS_INIT, "FS_INIT");
     }
     YanShellOutput output;
@@ -450,15 +461,18 @@ _Noreturn static void app_session(void)
         YAN_SEARCH_TERMS_OK) {
         app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
     }
-    if (yan_note_init(&note_context, &fs, note_entries, note_sort_name) !=
+    if (yan_note_init(&note_context, &fs, note_entries, note_sort_name,
+                      note_sort) !=
         YAN_NOTE_OK) {
         app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
     }
-    if (yan_relation_init(&relation_context, &fs, relation_rows) !=
+    if (yan_relation_init(&relation_context, &fs, relation_rows,
+                          relation_sort) !=
         YAN_NOTE_OK) {
         app_fail(APP_REASON_RELATION_INIT, "RELATION_INIT");
     }
-    if (yan_blocks_init(&block_context, &fs, block_names) != YAN_BLOCK_OK) {
+    if (yan_blocks_init(&block_context, &fs, block_names, block_sort) !=
+        YAN_BLOCK_OK) {
         app_fail(APP_REASON_BLOCK_INIT, "BLOCK_INIT");
     }
     /* The directory and the services are allocated; nothing below allocates. */

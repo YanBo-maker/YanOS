@@ -35,6 +35,8 @@
 
 #include "note_relations.h"
 
+#include "sort.h"
+
 #include "memory.h"
 
 /* ------------------------------------------------------------------ guards */
@@ -328,17 +330,22 @@ static bool row_ranks_after(const YanRelationRow *left,
     return name_compare(left->name, right->name) > 0;
 }
 
-static void sort_rows(YanRelationRow *rows, uint32_t count)
+/* 0036-R8: the shared heapsort orders indices, so a 36-byte row is never moved
+ * by the ranking pass. */
+static bool relation_row_before(const void *context, uint16_t left,
+                                uint16_t right)
 {
-    for (uint32_t i = 1u; i < count; ++i) {
-        YanRelationRow key = rows[i];
-        uint32_t j = i;
-        while (j > 0u && row_ranks_after(&rows[j - 1u], &key)) {
-            rows[j] = rows[j - 1u];
-            --j;
-        }
-        rows[j] = key;
+    const YanRelationContext *relation = context;
+    return row_ranks_after(&relation->rows[right], &relation->rows[left]);
+}
+
+static void sort_rows(YanRelationContext *context)
+{
+    for (uint32_t i = 0u; i < context->row_count; ++i) {
+        context->sort_index[i] = (uint16_t)i;
     }
+    yan_sort_index(context->sort_index, context->row_count,
+                   relation_row_before, context);
 }
 
 /* -------------------------------------------------------------- public API */
@@ -348,10 +355,15 @@ uint32_t yan_relation_rows_storage_bytes(uint32_t capacity)
     return capacity * (uint32_t)sizeof(YanRelationRow);
 }
 
-YanNoteResult yan_relation_init(YanRelationContext *context, YanFs *fs,
-                                YanRelationRow *rows)
+uint32_t yan_relation_sort_index_storage_bytes(uint32_t capacity)
 {
-    if (context == NULL || fs == NULL || rows == NULL) {
+    return capacity * (uint32_t)sizeof(uint16_t);
+}
+
+YanNoteResult yan_relation_init(YanRelationContext *context, YanFs *fs,
+                                YanRelationRow *rows, uint16_t *sort_index)
+{
+    if (context == NULL || fs == NULL || rows == NULL || sort_index == NULL) {
         return YAN_NOTE_INVALID;
     }
     if (!span_valid(context, sizeof *context) || !span_valid(fs, sizeof *fs)) {
@@ -373,6 +385,7 @@ YanNoteResult yan_relation_init(YanRelationContext *context, YanFs *fs,
     memset(context, 0, sizeof *context);
     context->fs = fs;
     context->rows = rows;
+    context->sort_index = sort_index;
     context->row_capacity = capacity;
     context->initialized = true;
     context->busy = false;
@@ -497,9 +510,10 @@ YanNoteResult yan_relation_backlinks(YanRelationContext *context,
     }
     uint32_t shown = 0u;
     if (result == YAN_NOTE_OK) {
-        sort_rows(context->rows, context->row_count);
+        sort_rows(context);
         for (uint32_t i = 0u; i < context->row_count; ++i) {
-            if (!sink(sink_context, &context->rows[i])) {
+            if (!sink(sink_context,
+                      &context->rows[context->sort_index[i]])) {
                 result = YAN_NOTE_STOPPED;
                 break;
             }
@@ -577,12 +591,13 @@ YanNoteResult yan_relation_related(YanRelationContext *context, const char *name
     }
     uint32_t shown = 0u;
     if (result == YAN_NOTE_OK) {
-        sort_rows(context->rows, context->row_count);
+        sort_rows(context);
         uint32_t limit = context->row_count < YAN_RELATION_RELATED_SHOWN
                              ? context->row_count
                              : YAN_RELATION_RELATED_SHOWN;
         for (uint32_t i = 0u; i < limit; ++i) {
-            if (!sink(sink_context, &context->rows[i])) {
+            if (!sink(sink_context,
+                      &context->rows[context->sort_index[i]])) {
                 result = YAN_NOTE_STOPPED;
                 break;
             }

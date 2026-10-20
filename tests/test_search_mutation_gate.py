@@ -174,13 +174,15 @@ def cli_missing_controls():
 
         for rel in ("os/search.c", "os/search.h", "os/search_linear.c",
                     "os/search_linear.h", "os/search_terms.c", "os/note_metadata_format.c",
-                    "os/search_terms_index.c", "os/memory.h",
+                    "os/search_terms_index.c", "os/memory.h", "os/sort.h",
                     "tests/test_search.c", "tests/test_shell.c",
                     "tests/run_yanfs_mutation.py"):
             victim = tree / rel
             saved = victim.read_bytes()
             victim.unlink()
             rc, blob = run_cli(tree, work, unity, placeholder_cc)
+            if rel == "os/sort.h":
+                check("cli-sort-missing-with-absent-cc", run_cli(tree, work, unity, absent_cc)[0], 1)
             victim.write_bytes(saved)
             check("cli-missing-" + rel, rc, 1)
             if rel != "tests/run_yanfs_mutation.py":

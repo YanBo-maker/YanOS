@@ -45,7 +45,7 @@ RUN_TIMEOUT = 240
 # Headers copied for every suite. os/memory.c itself is not compiled here: the
 # native C library supplies memcpy/memset/memcmp/strlen, and only the
 # declarations in memory.h are needed by the term index.
-OS_HEADERS = ["yanfs.h", "memory.h", "search.h", "search_linear.h",
+OS_HEADERS = ["yanfs.h", "memory.h", "sort.h", "search.h", "search_linear.h",
               "search_terms.h", "note_metadata_format.h", "search_terms_core.h", "search_terms_linear.h",
               "search_terms_index.h", "search_text.h", "shell.h", "note_relations.h", "note_blocks.h", "note_blocks_format.h", "note_metadata.h"]
 OS_SOURCES = ["yanfs.c", "search.c", "search_linear.c", "search_terms.c", "note_metadata_format.c",

@@ -2,6 +2,7 @@
 #include "fs_test_support.h"
 #include "unity.h"
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #define BLOCKS 256u
@@ -287,6 +288,98 @@ static void blocks_protocol_error_remains_fatal_class(void)
     TEST_ASSERT_EQUAL_UINT32(0, seen);
     TEST_ASSERT_EQUAL_MEMORY(&sentinel, &summary, sizeof summary);
 }
+static void blocks_backlinks_top_twenty_reorders_after_slot_reuse(void)
+{
+    for (uint32_t i = 0; i < 26u; ++i) {
+        char name[32];
+        (void)snprintf(name, sizeof name, "s%02u", 25u - i);
+        text_file(name, "[[gone#a]]");
+    }
+    YanBlockAddress a = address("gone", "a");
+    TEST_ASSERT_EQUAL_INT(YAN_BLOCK_OK,
+        yan_blocks_backlinks(&context, &a, row_sink, NULL, &summary));
+    TEST_ASSERT_EQUAL_UINT64(26u, summary.total);
+    TEST_ASSERT_EQUAL_UINT32(20u, seen);
+    for (uint32_t i = 0; i < seen; ++i) {
+        char name[32];
+        (void)snprintf(name, sizeof name, "s%02u", i);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(name, rows[i].source,
+            "blocks_r8_top_twenty_ascii");
+    }
+
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_remove(&fs, "s00"));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_remove(&fs, "s01"));
+    text_file("A", "[[gone#a]]");
+    text_file("B", "[[gone#a]]");
+    seen = 0;
+    TEST_ASSERT_EQUAL_INT(YAN_BLOCK_OK,
+        yan_blocks_backlinks(&context, &a, row_sink, NULL, &summary));
+    TEST_ASSERT_EQUAL_UINT64(26u, summary.total);
+    TEST_ASSERT_EQUAL_UINT32(20u, seen);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("A", rows[0].source,
+        "blocks_r8_reused_slot_first");
+    TEST_ASSERT_EQUAL_STRING("B", rows[1].source);
+    TEST_ASSERT_EQUAL_STRING("s02", rows[2].source);
+    TEST_ASSERT_EQUAL_STRING("s19", rows[19].source);
+
+    for (uint32_t i = 2; i < 26u; ++i) {
+        char name[32];
+        (void)snprintf(name, sizeof name, "s%02u", i);
+        TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_remove(&fs, name));
+    }
+    seen = 0;
+    TEST_ASSERT_EQUAL_INT(YAN_BLOCK_OK,
+        yan_blocks_backlinks(&context, &a, row_sink, NULL, &summary));
+    TEST_ASSERT_EQUAL_UINT64(2u, summary.total);
+    TEST_ASSERT_EQUAL_UINT32(2u, seen);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("A", rows[0].source,
+        "blocks_r8_shrunk_candidate_first");
+    TEST_ASSERT_EQUAL_STRING("B", rows[1].source);
+}
+
+static void blocks_small_file_single_read_preserves_original_ranges(void)
+{
+    const char data[] = "@yan-note 1\n@end\n@block a\r\n\xE4\xB8\xAD\tX\r\nZ";
+    text_file("note", data);
+    uint32_t start = reads;
+    TEST_ASSERT_EQUAL_INT(YAN_BLOCK_OK,
+        yan_blocks_list(&context, "note", row_sink, NULL, &summary));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1u, reads - start,
+        "blocks_small_file_one_read");
+    TEST_ASSERT_EQUAL_UINT32(4u, rows[0].block.first_line);
+    TEST_ASSERT_EQUAL_UINT32(5u, rows[0].block.last_line);
+    TEST_ASSERT_EQUAL_UINT32(sizeof data - 1u, rows[0].block.end);
+    seen = 0;
+    YanBlockAddress a = address("note", "a");
+    start = reads;
+    TEST_ASSERT_EQUAL_INT(YAN_BLOCK_OK,
+        yan_blocks_show(&context, &a, row_sink, chunk_sink, NULL, &summary));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2u, reads - start,
+        "blocks_small_show_preflight_and_raw_read");
+    TEST_ASSERT_EQUAL_MEMORY("\xE4\xB8\xAD\tX\r\nZ", raw, 8u);
+}
+
+static void blocks_buffer_boundary_and_late_binary_remain_atomic(void)
+{
+    memset(large, 'x', 4096u);
+    memcpy(large, "@block a\n", 9u);
+    make("exact", large, 4096u);
+    uint32_t start = reads;
+    TEST_ASSERT_EQUAL_INT(YAN_BLOCK_OK,
+        yan_blocks_list(&context, "exact", row_sink, NULL, &summary));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1u, reads - start,
+        "blocks_exact_buffer_single_read");
+    TEST_ASSERT_EQUAL_UINT32(4096u, rows[0].block.end);
+    large[4096] = 0;
+    make("late", large, 4097u);
+    seen = 0;
+    summary = sentinel;
+    TEST_ASSERT_EQUAL_INT(YAN_BLOCK_INVALID_TEXT,
+        yan_blocks_list(&context, "late", row_sink, NULL, &summary));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0u, seen, "blocks_late_binary_no_rows");
+    TEST_ASSERT_EQUAL_MEMORY(&sentinel, &summary, sizeof summary);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -307,5 +400,8 @@ int main(void)
     RUN_TEST(blocks_show_late_io_preserves_prefix_without_summary);
     RUN_TEST(blocks_show_chunk_stop_prevents_more_io);
     RUN_TEST(blocks_protocol_error_remains_fatal_class);
+    RUN_TEST(blocks_backlinks_top_twenty_reorders_after_slot_reuse);
+    RUN_TEST(blocks_small_file_single_read_preserves_original_ranges);
+    RUN_TEST(blocks_buffer_boundary_and_late_binary_remain_atomic);
     return UNITY_END();
 }

@@ -59,6 +59,7 @@ class BlocksGate(unittest.TestCase):
         self.assertEqual('pass', classify_suites({'format': run}, 'owner', 'exact'))
 
     def test_required_inputs_hard_fail_before_external_skip(self):
+        self.assertIn('os/sort.h', REQUIRED)
         script = Path(__file__).with_name('run_note_blocks_mutation.py')
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

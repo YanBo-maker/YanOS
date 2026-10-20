@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""0036-R5-AC2: allocate_extent's RV32 frame does not grow with N.
+"""0036-R5-AC2/R8-AC4: directory algorithm frames do not grow with N.
 
 `allocate_extent` no longer keeps `used_start`/`used_count` arrays; N is a
 runtime value (`fs->entry_capacity`), not a compile-time constant. One
@@ -41,7 +41,7 @@ def main():
     command = [args.gcc, "-std=c17", "-march=rv32im", "-mabi=ilp32",
                "-mcmodel=medany", "-ffreestanding", "-fno-builtin",
                "-fno-stack-protector", "-O2", "-Wall", "-Wextra",
-               "-Wpedantic", "-Werror", "-fstack-usage",
+               "-Wpedantic", "-Werror", "-fstack-usage", "-fno-inline",
                "-I", str(args.source / "os"), "-c",
                str(args.source / "os" / "yanfs.c"), "-o", str(obj)]
     proc = subprocess.run(command, stdout=subprocess.PIPE,
@@ -78,6 +78,14 @@ def main():
           "allocate_extent frame is %r, not static" % alloc_kind)
     check(alloc_bytes <= LIMIT,
           "allocate_extent frame %d exceeds %d bytes" % (alloc_bytes, LIMIT))
+    validation = records.get("validate_directory")
+    check(validation is not None, ".su has no validate_directory record")
+    if validation is not None:
+        frame, kind = validation
+        print("0036-R8-AC4 validate_directory=%d kind=%s; N is runtime (63..4095)"
+              % (frame, kind), flush=True)
+        check(kind == "static", "validate_directory frame is not static")
+        check(frame <= LIMIT, "validate_directory frame exceeds %d bytes" % LIMIT)
     if "extent_candidate_fits" in records:
         fit_bytes, fit_kind = records["extent_candidate_fits"]
         print("0036-R5-AC2 extent_candidate_fits=%d kind=%s"

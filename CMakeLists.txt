@@ -235,7 +235,7 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         list(APPEND _yan_terminal_sources "${CMAKE_CURRENT_SOURCE_DIR}/os/memory.c")
     endif()
     set(_yan_terminal_headers)
-    foreach(_header arena note_blocks note_blocks_format note_relations note_metadata note_metadata_format block console editor memory line platform search search_linear search_terms search_terms_core search_terms_index search_terms_linear search_text shell task terminal yanfs yanfs_block)
+    foreach(_header arena note_blocks note_blocks_format note_relations note_metadata note_metadata_format block console editor memory line platform search search_linear search_terms search_terms_core search_terms_index search_terms_linear search_text shell sort task terminal yanfs yanfs_block)
         list(APPEND _yan_terminal_headers "${CMAKE_CURRENT_SOURCE_DIR}/os/${_header}.h")
     endforeach()
 
@@ -528,6 +528,41 @@ if(BUILD_TESTING)
     add_test(NAME arena COMMAND test_arena)
     set_tests_properties(arena PROPERTIES TIMEOUT 30 LABELS "0036-R3-AC1")
 
+    add_executable(test_sort_index tests/test_sort_index.c)
+    target_include_directories(test_sort_index PRIVATE os)
+    target_compile_options(test_sort_index PRIVATE ${YAN_WARNINGS})
+    add_test(NAME sort_index COMMAND test_sort_index)
+    set_tests_properties(sort_index PROPERTIES TIMEOUT 120 LABELS "0036-R8-AC3")
+
+    add_executable(test_ring_copy tests/test_ring_copy.c)
+    target_include_directories(test_ring_copy PRIVATE os)
+    target_compile_options(test_ring_copy PRIVATE ${YAN_WARNINGS})
+    add_test(NAME ring_copy COMMAND test_ring_copy)
+    set_tests_properties(ring_copy PROPERTIES TIMEOUT 120 LABELS "0036-R8-AC1")
+
+    # Compile the real freestanding helpers under distinct names. Replacing
+    # libc's symbols here would also replace the host runtime and the oracle.
+    add_library(yan_guest_memory_test_impl OBJECT os/memory.c)
+    target_compile_definitions(yan_guest_memory_test_impl PRIVATE
+        memcpy=yan_guest_memcpy memmove=yan_guest_memmove memset=yan_guest_memset
+        memcmp=yan_guest_memcmp strlen=yan_guest_strlen)
+    target_compile_options(yan_guest_memory_test_impl PRIVATE ${YAN_WARNINGS})
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(yan_guest_memory_test_impl PRIVATE -fno-builtin)
+    endif()
+    add_executable(test_guest_memory tests/test_guest_memory.c
+        $<TARGET_OBJECTS:yan_guest_memory_test_impl>)
+    target_compile_options(test_guest_memory PRIVATE ${YAN_WARNINGS})
+    add_test(NAME os_memory_helpers COMMAND test_guest_memory)
+    set_tests_properties(os_memory_helpers PROPERTIES TIMEOUT 60 LABELS "0036-R8-AC1")
+    if(YAN_ENABLE_SANITIZERS)
+        target_compile_options(yan_guest_memory_test_impl PRIVATE
+            -fsanitize=address,pointer-compare)
+        target_link_options(test_guest_memory PRIVATE -fsanitize=address,pointer-compare)
+        set_tests_properties(os_memory_helpers PROPERTIES
+            ENVIRONMENT "ASAN_OPTIONS=detect_invalid_pointer_pairs=2:detect_leaks=1")
+    endif()
+
     # 0036-R2: multi-block v2 directory. The suite allocates the memory device
     # and the external directory with calloc, so it runs the same contract the
     # Guest uses now that 0036-R3 introduces the arena.
@@ -537,6 +572,14 @@ if(BUILD_TESTING)
     add_test(NAME yanfs_v2 COMMAND test_yanfs_v2)
     set_tests_properties(yanfs_v2 PROPERTIES TIMEOUT 900
                          LABELS "0036-R2-AC1;0036-R2-AC2;0036-R2-AC3")
+
+    add_executable(test_yanfs_name_order tests/test_yanfs_name_order.c os/yanfs.c)
+    target_include_directories(test_yanfs_name_order PRIVATE os)
+    target_compile_definitions(test_yanfs_name_order PRIVATE YAN_FS_TEST_HOOKS)
+    target_link_libraries(test_yanfs_name_order PRIVATE unity::framework)
+    target_compile_options(test_yanfs_name_order PRIVATE ${YAN_WARNINGS})
+    add_test(NAME yanfs_name_order COMMAND test_yanfs_name_order)
+    set_tests_properties(yanfs_name_order PROPERTIES TIMEOUT 600 LABELS "0036-R8-AC2")
 
     # 0026 source-identity exhaustion: the same os/yanfs.c compiled a second time
     # with a near-UINT64_MAX allocator seed. It builds its own copy of the source
@@ -1009,6 +1052,17 @@ if(BUILD_TESTING)
                 set_tests_properties(guest_terminal_runtime PROPERTIES
                                      SKIP_RETURN_CODE 77 TIMEOUT 600)
                 if(TARGET yan_mkfs AND TARGET yan_run AND YAN_RISCV_READELF)
+                    add_test(NAME yanfs_r8_performance
+                        COMMAND "${Python3_EXECUTABLE}" -B
+                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_yanfs_r8_performance.py"
+                                --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                                --work "${CMAKE_BINARY_DIR}/yanfs-r8-performance"
+                                --mkfs "$<TARGET_FILE:yan_mkfs>"
+                                --guest "${YAN_TERMINAL_ELF}"
+                                --cc "${CMAKE_C_COMPILER}")
+                    set_tests_properties(yanfs_r8_performance PROPERTIES
+                                         SKIP_RETURN_CODE 77 TIMEOUT 900
+                                         LABELS "0036-R8-AC4")
                     add_test(NAME arena_accounting
                         COMMAND "${Python3_EXECUTABLE}" -B
                                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_arena_accounting.py"

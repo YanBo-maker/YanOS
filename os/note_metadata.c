@@ -36,6 +36,7 @@
 #include "note_metadata.h"
 
 #include "memory.h"
+#include "sort.h"
 #include "yanfs.h"
 
 /* ------------------------------------------------------------------ guards */
@@ -354,6 +355,13 @@ static int name_compare(const char *left, const char *right)
     return 0;
 }
 
+/* 0036-R8: order the listing indices by the borrowed sort_name table. */
+static bool note_name_before(const void *context, uint16_t left, uint16_t right)
+{
+    const YanNoteContext *note = context;
+    return name_compare(note->sort_name[left], note->sort_name[right]) < 0;
+}
+
 /* ------------------------------------------------------------- tag helpers */
 
 static bool tag_present(const YanNoteInfo *info, const uint8_t *value,
@@ -523,10 +531,17 @@ uint32_t yan_note_sort_name_storage_bytes(uint32_t capacity)
     return capacity * 32u;
 }
 
-YanNoteResult yan_note_init(YanNoteContext *context, YanFs *fs,
-                            YanNoteEntry *entries, char (*sort_name)[32])
+uint32_t yan_note_sort_index_storage_bytes(uint32_t capacity)
 {
-    if (context == NULL || fs == NULL || entries == NULL || sort_name == NULL) {
+    return capacity * (uint32_t)sizeof(uint16_t);
+}
+
+YanNoteResult yan_note_init(YanNoteContext *context, YanFs *fs,
+                            YanNoteEntry *entries, char (*sort_name)[32],
+                            uint16_t *sort_index)
+{
+    if (context == NULL || fs == NULL || entries == NULL || sort_name == NULL ||
+        sort_index == NULL) {
         return YAN_NOTE_INVALID;
     }
     if (!span_valid(context, sizeof *context) || !span_valid(fs, sizeof *fs)) {
@@ -550,6 +565,7 @@ YanNoteResult yan_note_init(YanNoteContext *context, YanFs *fs,
     context->fs = fs;
     context->entries = entries;
     context->sort_name = sort_name;
+    context->sort_index = sort_index;
     context->capacity = capacity;
     context->initialized = true;
     context->busy = false;
@@ -887,22 +903,15 @@ YanNoteResult yan_note_list(YanNoteContext *context,
             break;
         }
         memcpy(context->sort_name[eligible], context->entries[i].name, 32u);
+        context->sort_index[eligible] = (uint16_t)eligible;
         eligible += 1u;
     }
     if (result == YAN_NOTE_OK) {
         /* ASCII byte order, exactly the order the callback observes. */
-        for (uint32_t i = 1u; i < eligible; ++i) {
-            char key[32];
-            memcpy(key, context->sort_name[i], 32u);
-            uint32_t j = i;
-            while (j > 0u && name_compare(context->sort_name[j - 1u], key) > 0) {
-                memcpy(context->sort_name[j], context->sort_name[j - 1u], 32u);
-                --j;
-            }
-            memcpy(context->sort_name[j], key, 32u);
-        }
+        yan_sort_index(context->sort_index, eligible, note_name_before, context);
         for (uint32_t i = 0u; i < eligible; ++i) {
-            if (!callback(callback_context, context->sort_name[i])) {
+            if (!callback(callback_context,
+                          context->sort_name[context->sort_index[i]])) {
                 result = YAN_NOTE_STOPPED;
                 break;
             }

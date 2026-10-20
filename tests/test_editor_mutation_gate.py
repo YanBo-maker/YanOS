@@ -206,13 +206,15 @@ def cli_missing_controls():
         work = Path(base) / "work"
         placeholder_cc = sys.executable
         absent_cc = str(Path(base) / "no-such-compiler")
-        for rel in ("os/editor.c", "os/editor.h", "os/yanfs.c", "os/yanfs.h",
+        for rel in ("os/editor.c", "os/editor.h", "os/yanfs.c", "os/yanfs.h", "os/sort.h",
                     "os/shell.h", "os/note_relations.h", "os/note_metadata.h", "os/search.h", "os/search_terms.h", "os/note_metadata_format.h", "tests/test_editor.c",
                     "tests/run_yanfs_mutation.py"):
             victim = tree / rel
             saved = victim.read_bytes()
             victim.unlink()
             rc, _blob = run_cli(tree, work, unity, placeholder_cc)
+            if rel == "os/sort.h":
+                check("cli", "sort-missing-with-absent-cc", run_cli(tree, work, unity, absent_cc)[0], 1)
             victim.write_bytes(saved)
             check("cli", "missing-" + rel, rc, 1)
         rc, _blob = run_cli(tree, work, unity, absent_cc)

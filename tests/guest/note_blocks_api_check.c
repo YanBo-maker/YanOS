@@ -5,6 +5,7 @@
 #include "note_blocks.h"
 
 static char names[YAN_FS_MAX_FILES][32];
+static uint16_t name_index[YAN_FS_MAX_FILES];
 static YanFs fs;
 static YanBlockContext blocks;
 static YanBlockSummary summary;
@@ -33,7 +34,7 @@ static bool stop(void *c, const YanBlockRow *row)
     guest_check(row->block.id[0] == 'a' && row->block.first_line == 2u, 30u);
     callback_reads = reads;
     reentry = yan_blocks_list(&blocks, NULL, NULL, NULL, NULL);
-    reinit = yan_blocks_init(&blocks, &fs, names);
+    reinit = yan_blocks_init(&blocks, &fs, names, name_index);
     guest_check(reads == callback_reads && writes == 0u, 31u);
     return false;
 }
@@ -52,15 +53,15 @@ int main(void)
     guest_check(yan_fs_mount(&fs) == YAN_FS_OK, 4u);
     static const uint8_t content[] = "@block a\n[[n#a]]\r\n@block empty";
     guest_check(yan_fs_create(&fs, "n", content, sizeof content - 1u) == YAN_FS_OK, 5u);
-    guest_check(yan_blocks_init(&blocks, &fs, names) == YAN_BLOCK_OK, 6u);
+    guest_check(yan_blocks_init(&blocks, &fs, names, name_index) == YAN_BLOCK_OK, 6u);
     reads = writes = 0u;
     memset(&summary, 0xA5, sizeof summary);
     YanBlockSummary original; memcpy(&original, &summary, sizeof original);
     YanBlockContext *wrap = (YanBlockContext *)(uintptr_t)(UINTPTR_MAX - sizeof blocks + 1u);
     YanBlockAddress address = {{'n', 0}, {'a', 0}};
     guest_check(yan_blocks_list(wrap, "n", accept, NULL, &summary) == YAN_BLOCK_INVALID, 7u);
-    guest_check(yan_blocks_init(wrap, &fs, names) == YAN_BLOCK_INVALID, 8u);
-    guest_check(yan_blocks_init(&blocks, (YanFs *)(uintptr_t)0xFFFFFFFEu, names) == YAN_BLOCK_INVALID, 9u);
+    guest_check(yan_blocks_init(wrap, &fs, names, name_index) == YAN_BLOCK_INVALID, 8u);
+    guest_check(yan_blocks_init(&blocks, (YanFs *)(uintptr_t)0xFFFFFFFEu, names, name_index) == YAN_BLOCK_INVALID, 9u);
     guest_check(yan_blocks_backlinks(&blocks, &address, accept, NULL,
                 (YanBlockSummary *)(uintptr_t)0xFFFFFFFEu) == YAN_BLOCK_INVALID, 10u);
     guest_check(yan_blocks_list(&blocks, (const char *)(uintptr_t)UINTPTR_MAX,

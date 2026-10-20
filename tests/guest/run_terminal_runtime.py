@@ -87,7 +87,7 @@ GUEST_HEADERS = [
     "os/platform.h", "os/search.h", "os/search_linear.h", "os/shell.h", "os/note_relations.h", "os/note_blocks.h", "os/note_blocks_format.h", "os/note_metadata.h",
     "os/task.h", "os/terminal.h", "os/arena.h", "os/yanfs.h",
     "os/yanfs_block.h", "os/editor.h",
-    "os/memory.h", "os/search_terms.h", "os/note_metadata_format.h", "os/search_terms_core.h",
+    "os/memory.h", "os/sort.h", "os/search_terms.h", "os/note_metadata_format.h", "os/search_terms_core.h",
     "os/search_terms_linear.h", "os/search_terms_index.h", "os/search_text.h",
 ]
 SANITIZER_FLAGS = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all",

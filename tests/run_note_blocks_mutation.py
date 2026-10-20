@@ -44,6 +44,8 @@ def required_inputs(suites):
         inputs.append(test)
         for source in sources:
             inputs.extend(('os/' + source, 'os/' + source.replace('.c', '.h')))
+            if source in ('yanfs.c', 'note_blocks.c', 'note_metadata.c', 'note_relations.c'):
+                inputs.append('os/sort.h')
     return tuple(dict.fromkeys(inputs))
 
 
@@ -103,7 +105,8 @@ SERVICE_MUTATIONS = (
      'if (c->row_count < YAN_BLOCK_REFS_SHOWN - 1u) {',
      'blocks_refs_no_marker_and_unlimited_count', 'blocks_refs_top20'),
     ('backlink-ascii-reversed', 'service', 'note_blocks.c',
-     'name_compare(c->names[j - 1u], name) > 0', 'name_compare(c->names[j - 1u], name) < 0',
+     'name_compare(blocks->names[left], blocks->names[right]) < 0',
+     'name_compare(blocks->names[left], blocks->names[right]) > 0',
      'blocks_backlinks_sort_occurrences_and_skips', 'blocks_backlinks_ascii_first'),
     ('binary-skip-doubled', 'service', 'note_blocks.c',
      '++c->skipped; r = YAN_BLOCK_OK;', 'c->skipped += 2u; r = YAN_BLOCK_OK;',

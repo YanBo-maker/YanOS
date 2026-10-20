@@ -67,6 +67,8 @@ typedef struct {
     /* 0036-R3: names table for the block service, calloc'd for the mounted
      * image's entry_capacity and released by yan_block_query_destroy. */
     char (*block_names)[32];
+    /* 0036-R8: index scratch for the block service's shared heapsort. */
+    uint16_t *block_sort;
     uint8_t page[65536 + 4];   /* bounded stream/page scratch */
     const volatile sig_atomic_t *cancel; /* optional, borrowed */
     /* Set only by a successful operation: the pre/post-verified logical source

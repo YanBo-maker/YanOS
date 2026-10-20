@@ -172,15 +172,17 @@ static YanFsResult write_image(const char *target, bool replace,
     YanFs fs = {0};
     uint8_t scratch[YAN_FS_BLOCK_SIZE];
     uint8_t *directory = NULL;
+    uint16_t *name_order = NULL;
     uint32_t directory_blocks = 0u;
     result = yan_fs_probe(&io, scratch, &directory_blocks);
     if (result == YAN_FS_OK) {
         directory = calloc(directory_blocks, YAN_FS_BLOCK_SIZE);
-        if (directory == NULL) {
+        name_order = calloc(directory_blocks * 64u, sizeof *name_order);
+        if (directory == NULL || name_order == NULL) {
             result = YAN_FS_IO;
         } else {
             result = yan_fs_init_directory(&fs, io, directory,
-                                           directory_blocks);
+                                           directory_blocks, name_order);
         }
     }
     if (result == YAN_FS_OK) result = yan_fs_mount(&fs);
@@ -188,6 +190,7 @@ static YanFsResult write_image(const char *target, bool replace,
         result = replace ? yan_fs_replace(&fs, name, text, length)
                          : yan_fs_create(&fs, name, text, length);
     }
+    free(name_order);
     free(directory);
     if (result != YAN_FS_OK) goto out;
 
