@@ -511,6 +511,16 @@ if(BUILD_TESTING)
     add_test(NAME yanfs COMMAND test_yanfs)
     set_tests_properties(yanfs PROPERTIES TIMEOUT 30)
 
+    # 0036-R2: multi-block v2 directory. The suite allocates the memory device
+    # and the external directory with calloc, so it runs the same contract the
+    # Guest will use once 0036-R3 introduces the arena.
+    add_executable(test_yanfs_v2 tests/test_yanfs_v2.c)
+    target_link_libraries(test_yanfs_v2 PRIVATE yan_fs unity::framework)
+    target_compile_options(test_yanfs_v2 PRIVATE ${YAN_WARNINGS})
+    add_test(NAME yanfs_v2 COMMAND test_yanfs_v2)
+    set_tests_properties(yanfs_v2 PROPERTIES TIMEOUT 900
+                         LABELS "0036-R2-AC1;0036-R2-AC2;0036-R2-AC3")
+
     # 0026 source-identity exhaustion: the same os/yanfs.c compiled a second time
     # with a near-UINT64_MAX allocator seed. It builds its own copy of the source
     # instead of linking yan_fs, because linking both would define yanfs.c twice.

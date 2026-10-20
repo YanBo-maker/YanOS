@@ -495,7 +495,7 @@ def run_cases(args, source, case, run_exe, mkfs_exe, traces):
     version_image = case / "version.img"
     version = bytearray(base.read_bytes())
     version_block = bytearray(metadata_block(BLOCKS))
-    struct.pack_into("<I", version_block, 8, 2)
+    struct.pack_into("<I", version_block, 8, 3)
     reseal(version_block)
     version[0:BLOCK] = version_block
     version_image.write_bytes(bytes(version))

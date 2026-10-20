@@ -464,7 +464,7 @@ def main():
             wire.close()
 
         unsupported = bytearray(image([('note', b'@block a\nx')]))
-        struct.pack_into('<I', unsupported, 8, 2)
+        struct.pack_into('<I', unsupported, 8, 3)
         struct.pack_into('<I', unsupported, 60, zlib.crc32(unsupported[:4096]))
         unsupported_disk = root/'unsupported.img'
         unsupported_disk.write_bytes(unsupported)

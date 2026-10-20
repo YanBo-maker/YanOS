@@ -83,12 +83,20 @@ typedef struct {
     bool busy;
     uint32_t capacity_blocks;
     uint8_t metadata[4096];
+    uint8_t *directory;
+    uint32_t directory_blocks;
+    uint32_t entry_capacity;
     uint8_t scratch[4096];
     uint64_t source_token;
     bool source_cacheable;
 } YanFs;
 
 YanFsResult yan_fs_init(YanFs *, YanFsBlockIo);
+/* 0036: use a caller-owned directory cache of directory_blocks * 4096 bytes.
+ * The buffer is long-lived and must not overlap the YanFs object; yan_fs_init
+ * is the built-in D=1 case using the metadata member. */
+YanFsResult yan_fs_init_directory(YanFs *, YanFsBlockIo, uint8_t *directory,
+                                  uint32_t directory_blocks);
 YanFsResult yan_fs_mount(YanFs *);
 YanFsResult yan_fs_unmount(YanFs *);
 YanFsResult yan_fs_list(YanFs *, uint32_t *cursor, YanFsInfo *out);
