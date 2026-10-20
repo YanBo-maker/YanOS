@@ -51,6 +51,13 @@ if(YAN_RISCV_PREFIX)
 endif()
 unset(YAN_RISCV_GCC CACHE)
 find_program(YAN_RISCV_GCC NAMES ${_yan_gcc_names})
+if(YAN_RISCV_GCC)
+    get_filename_component(_yan_riscv_dir "${YAN_RISCV_GCC}" DIRECTORY)
+    find_program(YAN_RISCV_READELF
+                 NAMES ${YAN_RISCV_PREFIX}readelf riscv64-linux-gnu-readelf
+                       riscv64-unknown-elf-readelf riscv32-unknown-elf-readelf
+                 HINTS "${_yan_riscv_dir}")
+endif()
 
 add_library(yan_machine STATIC src/ram.c src/bus.c src/machine.c src/cpu.c src/csr.c
                               src/interrupt.c src/image.c src/difftest.c
@@ -221,13 +228,14 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_terms_index.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/search_text.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/block.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/os/arena.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/yanfs.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/os/yanfs_block.c")
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/os/memory.c")
         list(APPEND _yan_terminal_sources "${CMAKE_CURRENT_SOURCE_DIR}/os/memory.c")
     endif()
     set(_yan_terminal_headers)
-    foreach(_header note_blocks note_blocks_format note_relations note_metadata note_metadata_format block console editor memory line platform search search_linear search_terms search_terms_core search_terms_index search_terms_linear search_text shell task terminal yanfs yanfs_block)
+    foreach(_header arena note_blocks note_blocks_format note_relations note_metadata note_metadata_format block console editor memory line platform search search_linear search_terms search_terms_core search_terms_index search_terms_linear search_text shell task terminal yanfs yanfs_block)
         list(APPEND _yan_terminal_headers "${CMAKE_CURRENT_SOURCE_DIR}/os/${_header}.h")
     endforeach()
 
@@ -511,9 +519,18 @@ if(BUILD_TESTING)
     add_test(NAME yanfs COMMAND test_yanfs)
     set_tests_properties(yanfs PROPERTIES TIMEOUT 30)
 
+    # 0036-R3-AC1: the one-shot bump arena is plain C over uintptr_t, so the
+    # Guest's allocation rule is also a native Unity suite.
+    add_executable(test_arena tests/test_arena.c os/arena.c)
+    target_include_directories(test_arena PRIVATE os)
+    target_link_libraries(test_arena PRIVATE unity::framework)
+    target_compile_options(test_arena PRIVATE ${YAN_WARNINGS})
+    add_test(NAME arena COMMAND test_arena)
+    set_tests_properties(arena PROPERTIES TIMEOUT 30 LABELS "0036-R3-AC1")
+
     # 0036-R2: multi-block v2 directory. The suite allocates the memory device
     # and the external directory with calloc, so it runs the same contract the
-    # Guest will use once 0036-R3 introduces the arena.
+    # Guest uses now that 0036-R3 introduces the arena.
     add_executable(test_yanfs_v2 tests/test_yanfs_v2.c)
     target_link_libraries(test_yanfs_v2 PRIVATE yan_fs unity::framework)
     target_compile_options(test_yanfs_v2 PRIVATE ${YAN_WARNINGS})
@@ -991,6 +1008,49 @@ if(BUILD_TESTING)
                             ${_yan_terminal_runtime_args})
                 set_tests_properties(guest_terminal_runtime PROPERTIES
                                      SKIP_RETURN_CODE 77 TIMEOUT 600)
+                if(TARGET yan_mkfs AND TARGET yan_run AND YAN_RISCV_READELF)
+                    add_test(NAME arena_reject
+                        COMMAND "${Python3_EXECUTABLE}" -B
+                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_arena_reject.py"
+                                --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                                --work "${CMAKE_BINARY_DIR}/arena-reject"
+                                --gcc "${YAN_RISCV_GCC}"
+                                --run "$<TARGET_FILE:yan_run>"
+                                --mkfs "$<TARGET_FILE:yan_mkfs>"
+                                --guest "${YAN_TERMINAL_ELF}")
+                    set_tests_properties(arena_reject PROPERTIES
+                                         SKIP_RETURN_CODE 77 TIMEOUT 900
+                                         LABELS "0036-R3-AC3")
+                    add_test(NAME arena_budget
+                        COMMAND "${Python3_EXECUTABLE}" -B
+                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_arena_budget.py"
+                                --guest "${YAN_TERMINAL_ELF}")
+                    set_tests_properties(arena_budget PROPERTIES TIMEOUT 60
+                                         LABELS "0036-R3-AC2")
+                    add_test(NAME ram_default
+                        COMMAND "${Python3_EXECUTABLE}" -B
+                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_ram_default.py"
+                                --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                                --work "${CMAKE_BINARY_DIR}/ram-default"
+                                --gcc "${YAN_RISCV_GCC}"
+                                --readelf "${YAN_RISCV_READELF}"
+                                --run "$<TARGET_FILE:yan_run>")
+                    set_tests_properties(ram_default PROPERTIES
+                                         SKIP_RETURN_CODE 77 TIMEOUT 300
+                                         LABELS "0036-R3-AC4")
+                endif()
+                # 0036 PR2a temporary guard: an N=127 (D=2) image is refused
+                # with APP_REASON_CAPACITY until PR2b moves the services off
+                # their 63-entry static arrays. No cross compiler is needed.
+                add_test(NAME capacity_guard
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                            "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_capacity_guard.py"
+                            --work "${CMAKE_BINARY_DIR}/capacity-guard"
+                            --run "$<TARGET_FILE:yan_run>"
+                            --mkfs "$<TARGET_FILE:yan_mkfs>"
+                            --guest "${YAN_TERMINAL_ELF}")
+                set_tests_properties(capacity_guard PROPERTIES TIMEOUT 300
+                                     LABELS "0036-PR2a")
                 add_test(NAME guest_editor_faults
                     COMMAND "${Python3_EXECUTABLE}" -B
                             "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_editor_faults.py"

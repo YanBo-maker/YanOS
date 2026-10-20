@@ -57,6 +57,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "arena.h"
 #include "block.h"
 #include "editor.h"
 #include "line.h"
@@ -76,6 +77,17 @@
 
 /* The finishing word lives in os/trap_entry.S' .tohost section. */
 extern volatile uint32_t tohost;
+
+/* 0036-R3: os/guest.ld places the one-shot bump arena after every loadable
+ * section. The production image exports both symbols; yan_run refuses an ELF
+ * that has only one of them or an arena past the channel rings. */
+extern uint8_t __yan_arena_start[];
+extern uint8_t __yan_arena_end[];
+
+/* Guest acceptance reads this after the run: the bytes the arena handed out,
+ * including alignment padding. It stays 0 when the header is rejected before
+ * the first allocation. */
+uint32_t yan_arena_used_bytes;
 
 #define APP_FAIL_TOP UINT32_C(0x71000000)
 #define APP_FAIL(reason) (APP_FAIL_TOP | (reason))
@@ -103,6 +115,9 @@ extern volatile uint32_t tohost;
 #define APP_REASON_EDITOR_BUSY 21u
 #define APP_REASON_RELATION_INIT 22u
 #define APP_REASON_BLOCK_INIT 23u
+#define APP_REASON_ARENA 24u
+/* 0036 PR2a temporary guard; PR2b removes it with the service pointers. */
+#define APP_REASON_CAPACITY 25u
 
 /* ---------------------------------------------------------- static storage */
 
@@ -374,12 +389,39 @@ _Noreturn static void app_session(void)
     if (yan_fs_block_init(&adapter) != YAN_FS_OK) {
         app_fail(APP_REASON_ADAPTER, "ADAPTER");
     }
-    if (yan_fs_init(&fs, io) != YAN_FS_OK) {
+    /* 0036-R3: learn the directory size from block 0 before any allocation.
+     * The probe borrows the context's scratch block, which init_directory
+     * clears again a moment later, so no extra 4 KiB object is added. */
+    uint32_t directory_blocks = 0u;
+    const YanFsResult probed =
+        yan_fs_probe(&io, fs.scratch, &directory_blocks);
+    if (probed != YAN_FS_OK) {
+        app_mount_fail(probed);
+    }
+    /* 0036 PR2a allocates only the directory cache: the note, relation, block
+     * and search contexts still own their static arrays until PR2b moves them
+     * into this arena. The directory is the one buffer the boot path uses. */
+    YanArena arena;
+    yan_arena_init(&arena, __yan_arena_start, __yan_arena_end);
+    uint8_t *directory =
+        yan_arena_alloc(&arena, directory_blocks * YAN_FS_BLOCK_SIZE);
+    if (directory == NULL) {
+        app_fail(APP_REASON_ARENA, "ARENA");
+    }
+    yan_arena_used_bytes =
+        (uint32_t)yan_arena_used(&arena, __yan_arena_start);
+    if (yan_fs_init_directory(&fs, io, directory, directory_blocks) !=
+        YAN_FS_OK) {
         app_fail(APP_REASON_FS_INIT, "FS_INIT");
     }
     const YanFsResult mounted = yan_fs_mount(&fs);
     if (mounted != YAN_FS_OK) {
         app_mount_fail(mounted);
+    }
+    /* 0036 PR2a: the services still hold 63-entry static arrays, so a
+     * larger directory is refused until PR2b moves them into the arena. */
+    if (fs.entry_capacity > YAN_FS_MAX_FILES) {
+        app_fail(APP_REASON_CAPACITY, "CAPACITY");
     }
     YanShellOutput output;
     output.context = NULL;

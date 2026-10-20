@@ -70,7 +70,7 @@ PRODUCTION_SOURCES = [
     "apps/yanfs_terminal/main.c", "os/trap_entry.S", "os/task_switch.S",
     "os/task.c", "os/console.c", "os/line.c", "os/terminal.c",
     "os/shell.c", "os/note_relations.c", "os/note_blocks.c", "os/note_blocks_format.c", "os/note_metadata.c", "os/editor.c", "os/search.c", "os/search_linear.c",
-    "os/block.c", "os/yanfs.c", "os/yanfs_block.c", "os/memory.c",
+    "os/block.c", "os/arena.c", "os/yanfs.c", "os/yanfs_block.c", "os/memory.c",
     "os/search_terms.c", "os/note_metadata_format.c", "os/search_terms_core.c", "os/search_terms_linear.c",
     "os/search_terms_index.c", "os/search_text.c",
 ]
@@ -85,7 +85,7 @@ HOST_HEADERS = [
 GUEST_HEADERS = [
     "tests/guest/guest.h", "os/block.h", "os/console.h", "os/line.h",
     "os/platform.h", "os/search.h", "os/search_linear.h", "os/shell.h", "os/note_relations.h", "os/note_blocks.h", "os/note_blocks_format.h", "os/note_metadata.h",
-    "os/task.h", "os/terminal.h", "os/yanfs.h",
+    "os/task.h", "os/terminal.h", "os/arena.h", "os/yanfs.h",
     "os/yanfs_block.h", "os/editor.h",
     "os/memory.h", "os/search_terms.h", "os/note_metadata_format.h", "os/search_terms_core.h",
     "os/search_terms_linear.h", "os/search_terms_index.h", "os/search_text.h",
@@ -111,10 +111,11 @@ TOHOST_LINE_UNAVAILABLE = 0x71000009
 TOHOST_SHELL_FATAL = 0x7100000C
 TOHOST_OUTPUT = 0x71000011
 APP_FAIL_TOP = 0x71000000
-# Highest reason defined by apps/yanfs_terminal/main.c (23 is
-# APP_REASON_BLOCK_INIT / BLOCK_INIT). A reason at or below it is a named
-# owner failure; an unassigned code above it is a harness error.
-APP_REASON_LAST = 23
+# Highest reason defined by apps/yanfs_terminal/main.c (25 is
+# APP_REASON_CAPACITY / CAPACITY, the temporary 0036 PR2a guard). A reason at
+# or below it is a named owner failure; an unassigned code above it is a
+# harness error.
+APP_REASON_LAST = 25
 
 # tests/guest/terminal_wait_check.c: TW_FAIL(reason) = 0x72000000 | reason.
 FIXTURE_FAIL_TOP = 0x72000000
@@ -614,12 +615,13 @@ def case_production_faults(driver, args, work, results):
     except HarnessError as error:
         results.append(("production-io", "HARNESS: " + str(error)))
 
-    # A wrong response tag after mount: the cat's first block read (mount uses
-    # responses 1 and 2), so the mount succeeds and the failure is in the read.
+    # A wrong response tag after mount: the cat's first block read (probe,
+    # capacity and mount use responses 1-3), so the mount succeeds and the
+    # failure is in the read.
     big = bytes((i * 7 + 3) & 0xFF for i in range(5000))
     result, status, disk, capture = run_production(
         driver, args, work, seeded_image([("big", big, 1)]),
-        b"cat big\nexit\n", "protocol", "protocol", 3, 0,
+        b"cat big\nexit\n", "protocol", "protocol", 4, 0,
         expect_tohost=TOHOST_SHELL_FATAL)
     try:
         values = classify_production(result, status, "production-protocol",
@@ -641,10 +643,10 @@ def case_production_faults(driver, args, work, results):
         results.append(("production-protocol", "HARNESS: " + str(error)))
 
     # The same fault after the displayed prefix: block 1 is read in 16 chunks
-    # (responses 3..18), so response 19 is the first block-2 read.
+    # (responses 4..19), so response 20 is the first block-2 read.
     result, status, disk, capture = run_production(
         driver, args, work, seeded_image([("big", big, 1)]),
-        b"cat big\nexit\n", "protocol-prefix", "protocol", 19, 0,
+        b"cat big\nexit\n", "protocol-prefix", "protocol", 20, 0,
         expect_tohost=TOHOST_SHELL_FATAL)
     try:
         values = classify_production(result, status, "production-protocol-prefix",

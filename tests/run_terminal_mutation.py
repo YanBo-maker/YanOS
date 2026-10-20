@@ -106,7 +106,7 @@ NATIVE_HEADERS = [
 # runtime production build recipe (the app plus the platform it links).
 PRODUCTION_SOURCES = [
     "apps/yanfs_terminal/main.c", "os/trap_entry.S", "os/task_switch.S",
-    "os/task.c", "os/block.c", "os/console.c", "os/yanfs.c",
+    "os/task.c", "os/block.c", "os/console.c", "os/arena.c", "os/yanfs.c",
     "os/yanfs_block.c", "os/shell.c", "os/note_relations.c", "os/note_blocks.c", "os/note_blocks_format.c", "os/note_metadata.c", "os/search.c", "os/search_linear.c",
     "os/line.c", "os/terminal.c",
     "os/memory.c", "os/editor.c",

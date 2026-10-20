@@ -25,4 +25,18 @@ YanStatus yan_image_load_elf(YanRam *ram, uint32_t base, const uint8_t *data,
 YanStatus yan_image_find_symbol(const uint8_t *data, size_t size,
                                 const char *name, uint32_t *address);
 
+/* One PT_LOAD segment's guest-address span [start, end). */
+typedef struct {
+    uint32_t start;
+    uint32_t end;
+} YanImageSegment;
+
+/* Copies up to `capacity` PT_LOAD spans into `out` and always publishes the
+ * total in *count. A short array is not an error; the caller compares the
+ * total with what it allocated. 0036-R3 uses this to reject an arena that
+ * overlaps a loadable segment. */
+YanStatus yan_image_segments(const uint8_t *data, size_t size, uint32_t base,
+                             YanImageSegment *out, uint32_t capacity,
+                             uint32_t *count);
+
 #endif

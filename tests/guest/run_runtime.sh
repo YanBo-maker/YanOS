@@ -285,7 +285,7 @@ int main(int argc, char **argv)
     const char *capture_path = NULL;
     const char *scenario = "?";
     uint64_t base = UINT32_C(0x80000000);
-    uint64_t ram_size = 16u * 1024u * 1024u;
+    uint64_t ram_size = 64u * 1024u * 1024u;
     uint64_t max_steps = 400000;
     uint64_t inject_stage = 0;
     uint64_t inject_predicate = 0;

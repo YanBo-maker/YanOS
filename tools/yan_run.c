@@ -125,7 +125,7 @@ static int number(const char *text, uint64_t *value)
 
 static int parse_options(int argc, char **argv, Options *options)
 {
-    *options = (Options){.base = UINT32_C(0x80000000), .ram_size = 16U * 1024U * 1024U,
+    *options = (Options){.base = UINT32_C(0x80000000), .ram_size = 64U * 1024U * 1024U,
         .max_steps = UINT64_C(1000000)};
     for (int i = 1; i < argc; ++i) {
         uint64_t value = 0;
@@ -333,6 +333,54 @@ int main(int argc, char **argv)
         fprintf(stderr, "yan_run: '%s' is not a loadable RV32 ELF image\n",
                 options.image);
         goto done;
+    }
+    /* 0036-R3: an image that exports the arena declares where its one-shot
+     * bump region lives. Both symbols or neither: a production terminal has
+     * both, while the older test linkers have neither and are left alone.
+     * The end must stay below the channel rings (or the RAM end when no disk
+     * is attached) and the whole span must stay clear of every loadable
+     * segment. */
+    {
+        uint32_t arena_start = 0, arena_end = 0;
+        const YanStatus start_status = yan_image_find_symbol(
+            image, image_size, "__yan_arena_start", &arena_start);
+        const YanStatus end_status = yan_image_find_symbol(
+            image, image_size, "__yan_arena_end", &arena_end);
+        if (start_status == YAN_OK || end_status == YAN_OK) {
+            if (start_status != YAN_OK || end_status != YAN_OK) {
+                fprintf(stderr, "yan_run: '%s' exports only one of"
+                        " __yan_arena_start/__yan_arena_end\n", options.image);
+                goto done;
+            }
+            const uint32_t limit = disk_attached
+                ? options.base + options.ram_size - DISK_RING_BYTES
+                : options.base + options.ram_size;
+            if (arena_start > arena_end || arena_end > limit) {
+                fprintf(stderr, "yan_run: arena [%08" PRIx32 ", %08" PRIx32
+                        ") is above the ring base %08" PRIx32 "\n",
+                        arena_start, arena_end, limit);
+                goto done;
+            }
+            YanImageSegment segments[16];
+            uint32_t count = 0;
+            if (yan_image_segments(image, image_size, options.base, segments,
+                                   16u, &count) != YAN_OK || count > 16u) {
+                fprintf(stderr, "yan_run: cannot read the loadable segments of"
+                        " '%s'\n", options.image);
+                goto done;
+            }
+            for (uint32_t i = 0; i < count; ++i) {
+                if ((uint64_t)arena_start < segments[i].end &&
+                    (uint64_t)segments[i].start < arena_end) {
+                    fprintf(stderr, "yan_run: arena [%08" PRIx32 ", %08" PRIx32
+                            ") overlaps a loadable segment [%08" PRIx32
+                            ", %08" PRIx32 ")\n",
+                            arena_start, arena_end, segments[i].start,
+                            segments[i].end);
+                    goto done;
+                }
+            }
+        }
     }
     if (yan_cpu_reset(&machine.cpu, info.entry) != YAN_OK) {
         goto done;

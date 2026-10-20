@@ -55,7 +55,7 @@ def main():
                     int(values.get('block_responses', '-1')) != response or
                     b'ERROR PROTOCOL\r\n' not in output):
                 raise runtime.OwnerFailure(label + ': protocol injection/stop/diagnostic absent')
-        if io and (int(values.get('block_responses', '-1')) != 3 or b'ERROR IO\r\n' not in output):
+        if io and (int(values.get('block_responses', '-1')) != 4 or b'ERROR IO\r\n' not in output):
             raise runtime.OwnerFailure(label + ': IO injection/stop/diagnostic absent')
         if (response or io) and any(token in output for token in
                 (b'LINK ', b'BACKLINK ', b'RELATED ', b'OK links', b'OK backlinks', b'OK related', b'yanfs: exit\r\n')):
@@ -111,13 +111,13 @@ def main():
     }
     for name, rows in expected_rows.items():
         command = name.encode() + b' n'
-        count = 3 if name == 'links' else 5  # mount 1/2, then bounded headers
+        count = 4 if name == 'links' else 6  # probe 1, mount 2/3, then bounded headers
         baseline_output, values = exercise(name + '-baseline', command)
         if rows not in baseline_output or int(values.get('block_responses', '-1')) != count:
             raise runtime.OwnerFailure(name + ': healthy rows/read count mismatch')
         passed += 1
         print('PASS', name + '-baseline', flush=True)
-        for response in range(3, count + 1):
+        for response in range(4, count + 1):
             label = name + '-protocol-' + str(response)
             case(label, lambda label=label, response=response, command=command:
                  exercise(label, command, response=response))

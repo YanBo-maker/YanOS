@@ -33,6 +33,12 @@ SECTIONS
   }
   . = ALIGN(16);
   .tohost : { *(.tohost) }
+  /* 0036-R3: one-shot bump arena, after every loadable section. The end is the
+   * Guest's 32 MiB budget (0x80000000 + 32 MiB), well below the channel rings
+   * at 0x83FFC000 when yan_run's default 64 MiB RAM is used. */
+  . = ALIGN(16);
+  __yan_arena_start = .;
+  __yan_arena_end = 0x80000000 + 32M;
   /DISCARD/ : {
     *(.comment)
     *(.note.*)

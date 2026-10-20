@@ -4,7 +4,7 @@
 Uses the existing Host driver and its strict verdict classifier. A short-word
 two-block fixture checks build and snippet faults; an overlong-word fixture
 checks LIMIT followed by scan fallback. Fault numbers count completed block
-responses, including the two mount responses. Each injection must actually
+responses, including the probe, capacity and mount responses. Each injection must actually
 fire and stop exactly at its response, without a result, OK, or later exit.
 """
 import argparse
@@ -118,7 +118,7 @@ def main():
         require(b"f:1:" not in output,
                 "failed build/snippet preparation must not publish partial row")
 
-    for response in range(3, 9):
+    for response in range(4, 10):
         case("protocol-%d" % response, lambda r=response: protocol(r))
 
     def io():
@@ -129,8 +129,8 @@ def main():
         require(b"yanfs: exit" not in output, "IO must stop later commands")
     case("io-preflight", io)
 
-    # One overlong ASCII word makes the build LIMIT. Replies 3-4 preflight,
-    # 5-6 build, 7-8 fallback preflight and 9-10 fallback scan are requested.
+    # One overlong ASCII word makes the build LIMIT. Replies 4-5 preflight,
+    # 6-7 build, 8-9 fallback preflight and 10-11 fallback scan are requested.
     fallback_image = runtime.seeded_image([
         ("f", b"x" * 256 + b" " + body()[257:], 1)])
     def fallback_protocol(response):
@@ -146,7 +146,7 @@ def main():
                 "fallback failure must publish neither result nor success")
         require(b"yanfs: exit" not in output,
                 "fallback failure must stop later commands")
-    for response in range(7, 11):
+    for response in range(8, 12):
         case("fallback-protocol-%d" % response,
              lambda r=response: fallback_protocol(r))
 
@@ -172,7 +172,7 @@ def main():
                         "output must stop at the injected byte")
                 require(output == baseline_output[:at],
                         "output must retain exactly the delivered prefix")
-                require(values["_responses"] == 8,
+                require(values["_responses"] == 9,
                         "output refusal must not initiate another disk request")
             for label, at in thresholds:
                 case("tx-" + label, lambda label=label, at=at: tx(label, at))

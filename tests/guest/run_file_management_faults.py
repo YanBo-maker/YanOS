@@ -27,8 +27,8 @@ Fault surface covered, all with an independent whole-image oracle:
     copy source read. Both stop the session with ERROR IO, leave the old image
     and skip every later command;
   * the scheduled corrupt-response protocol faults. For a 5000-byte copy the
-    request order after mount (responses 1-2) is R1/W3/R2/W4/W0 = responses
-    3-7, and a rename's metadata write is response 3. The Host performs each
+    request order after probe/capacity/mount (responses 1-3) is
+    R1/W3/R2/W4/W0 = responses 4-8, and a rename's metadata write is response 4. The Host performs each
     successful write before the tag is corrupted, so the whole image is exact:
     response 3 leaves the source only, responses 4 and 5 leave one orphan target
     block, response 6 leaves two, and response 7 has already written the new
@@ -256,28 +256,28 @@ def run_all(driver, args, work, results):
                        b"OK cp\r\n", cp_files, cp_stdin, cp_original,
                        cp_committed, path, results)
 
-    # A rename's only metadata write is response 3.
+    # A rename's only metadata write is response 4.
     rename_files = [("old.txt", data, 1)]
     rename_stdin = b"mv old.txt new.txt\nls\nexit\n"
-    protocol_case(driver, args, work, "fm-protocol-rename-w0", 3, rename_files,
+    protocol_case(driver, args, work, "fm-protocol-rename-w0", 4, rename_files,
                   rename_stdin, oracle([("new.txt", data, 1)]), results)
 
-    # A 5000-byte copy: R1/W3/R2/W4/W0 are responses 3/4/5/6/7.
+    # A 5000-byte copy: R1/W3/R2/W4/W0 are responses 4/5/6/7/8.
     copy_files = [("src", data, 1)]
     copy_stdin = b"cp src dst\nls\nexit\n"
-    protocol_case(driver, args, work, "fm-protocol-copy-r1", 3, copy_files,
+    protocol_case(driver, args, work, "fm-protocol-copy-r1", 4, copy_files,
                   copy_stdin, oracle([("src", data, 1)]), results)
-    protocol_case(driver, args, work, "fm-protocol-copy-w3", 4, copy_files,
+    protocol_case(driver, args, work, "fm-protocol-copy-w3", 5, copy_files,
                   copy_stdin, oracle([("src", data, 1)], {3: data[:BLOCK]}),
                   results)
-    protocol_case(driver, args, work, "fm-protocol-copy-r2", 5, copy_files,
+    protocol_case(driver, args, work, "fm-protocol-copy-r2", 6, copy_files,
                   copy_stdin, oracle([("src", data, 1)], {3: data[:BLOCK]}),
                   results)
-    protocol_case(driver, args, work, "fm-protocol-copy-w4", 6, copy_files,
+    protocol_case(driver, args, work, "fm-protocol-copy-w4", 7, copy_files,
                   copy_stdin,
                   oracle([("src", data, 1)],
                          {3: data[:BLOCK], 4: data[BLOCK:]}), results)
-    protocol_case(driver, args, work, "fm-protocol-copy-w0", 7, copy_files,
+    protocol_case(driver, args, work, "fm-protocol-copy-w0", 8, copy_files,
                   copy_stdin, oracle([("src", data, 1), ("dst", data, 3)]),
                   results)
 

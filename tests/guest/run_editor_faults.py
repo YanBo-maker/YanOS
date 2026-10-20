@@ -32,8 +32,8 @@ Fault model actually available (and its limits, so no coverage is invented):
     one create/replace whose data write is the next request, so the metadata
     second-write path is NOT separately injectable here and is not claimed.
   * --fault protocol --corrupt-response N: flips the tag byte of the N-th
-    served response. The mount consumes responses 1 (capacity) and 2 (block 0),
-    so response 3 is the editor's first data-block read and response 4 the
+    served response. Probe 1, capacity 2 and mount 3 come first, so response 4
+    is the editor's first data-block read and response 5 the
     second. Unlike the shell's chunked cat (16 reads per block), the editor
     loads a file with one yan_fs_read whose block reads are responses 3 and 4
     for a 5000-byte file.
@@ -270,13 +270,13 @@ def run_fs_faults(driver, args, results):
         record_failure(results, owner, error)
 
     # A corrupted response tag on the editor's first and second data-block read
-    # of a 5000-byte file. The mount consumes responses 1 and 2, so response 3
-    # is the first read and response 4 the second; the editor's one yan_fs_read
+    # of a 5000-byte file. Probe, capacity and mount consume 1-3, so response 4
+    # is the first read and response 5 the second; the editor's one yan_fs_read
     # reads each block once, unlike the shell's chunked cat.
     big = bytes((index % 95) + 32 for index in range(5000))
     seed = images.expected_image([(0, "big", 5000, 1, 2)], {1: big})
-    for owner, response in (("editor-protocol-first", 3),
-                            ("editor-protocol-second", 4)):
+    for owner, response in (("editor-protocol-first", 4),
+                            ("editor-protocol-second", 5)):
         try:
             result, status, disk, capture = runtime.run_production(
                 driver, args, args.work, seed, b"edit big\nexit\n",

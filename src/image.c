@@ -161,6 +161,43 @@ static int name_matches(const uint8_t *data, size_t size, size_t names_offset,
            memcmp(data + at, name, length) == 0;
 }
 
+/* Copies the PT_LOAD spans so the loader can reject an arena that overlaps a
+ * loaded segment. */
+YanStatus yan_image_segments(const uint8_t *data, size_t size, uint32_t base,
+                             YanImageSegment *out, uint32_t capacity,
+                             uint32_t *count)
+{
+    if (data == NULL || count == NULL || (out == NULL && capacity != 0u)) {
+        return YAN_INVALID_ARGUMENT;
+    }
+    uint32_t entry = 0, phoff = 0, phnum = 0;
+    if (!header_is_supported(data, size, &entry, &phoff, &phnum)) {
+        return YAN_INVALID_IMAGE;
+    }
+    uint32_t total = 0;
+    for (uint32_t index = 0; index < phnum; ++index) {
+        uint32_t type = 0, offset = 0, paddr = 0, filesz = 0, memsz = 0;
+        if (!read_program(data, size, phoff, index, &type, &offset, &paddr,
+                          &filesz, &memsz)) {
+            return YAN_INVALID_IMAGE;
+        }
+        if (type != ELF32_PROGRAM_LOAD) {
+            continue;
+        }
+        if (!range_fits(size, offset, filesz) || filesz > memsz ||
+            paddr < base || (uint64_t)paddr + memsz > UINT32_MAX) {
+            return YAN_INVALID_IMAGE;
+        }
+        if (out != NULL && total < capacity) {
+            out[total].start = paddr;
+            out[total].end = paddr + memsz;
+        }
+        ++total;
+    }
+    *count = total;
+    return YAN_OK;
+}
+
 /* Symbol lookup walks .symtab so a validation harness can find `tohost`
  * without hard coding an address: test linkers place it anywhere. */
 YanStatus yan_image_find_symbol(const uint8_t *data, size_t size,

@@ -36,7 +36,7 @@ def main():
         if response:
             if values['protocol_fired']!='1' or int(values.get('block_responses','-1'))!=response or b'ERROR PROTOCOL\r\n' not in output:
                 raise runtime.OwnerFailure(label+': protocol injection/diagnostic absent')
-        if io and (int(values.get('block_responses','-1'))!=3 or b'ERROR IO\r\n' not in output): raise runtime.OwnerFailure(label+': IO diagnostic absent')
+        if io and (int(values.get('block_responses','-1'))!=4 or b'ERROR IO\r\n' not in output): raise runtime.OwnerFailure(label+': IO diagnostic absent')
         if expected!=1 and not tx and (b'OK meta' in output or b'yanfs: exit\r\n' in output):
             raise runtime.OwnerFailure(label+': success/later command after failure')
         return output,raw,values
@@ -49,16 +49,17 @@ def main():
     healthy,_,_=exercise('show-baseline',b'meta show n')
     passed+=1;print('PASS show-baseline',flush=True)
     for command,label in ((b'meta show n','show'),(b'meta list','list'),(b'search tag:os x','filter')):
-        case(label+'-prefix-protocol',lambda command=command,label=label:exercise(label+'-prefix-protocol',command,response=3,expected=runtime.TOHOST_SHELL_FATAL))
+        case(label+'-prefix-protocol',lambda command=command,label=label:exercise(label+'-prefix-protocol',command,response=4,expected=runtime.TOHOST_SHELL_FATAL))
     case('show-prefix-io',lambda:exercise('show-prefix-io',b'meta show n',io=True,expected=runtime.TOHOST_SHELL_FATAL))
-    # Update: mount responses1/2, head3, whole body4/5, new data6/7, directory8.
-    for response in range(3,9):
+    # Update: probe1, capacity2, mount3, head4, whole body5/6, new data7/8,
+    # directory9.
+    for response in range(4,10):
         def check_update(response=response):
             _,raw,_=exercise('update-protocol-%d'%response,b'meta tag n add os',response=response,
-                expected=runtime.TOHOST_SHELL_FATAL,readonly=response<=5)
-            if response<=7 and raw[:4096]!=image[:4096]:
+                expected=runtime.TOHOST_SHELL_FATAL,readonly=response<=6)
+            if response<=8 and raw[:4096]!=image[:4096]:
                 raise runtime.OwnerFailure('failed update published directory before data complete')
-            if response==8 and raw[:4096]==image[:4096]:
+            if response==9 and raw[:4096]==image[:4096]:
                 raise runtime.OwnerFailure('directory response fixture failed to exercise committed nonrollback write')
         case('update-protocol-%d'%response,check_update)
     baseline=args.work/'show-baseline.bin';baseline.write_bytes(healthy)
@@ -66,7 +67,7 @@ def main():
     for label,at in (('first',start+1),('middle',start+12),('last',tail+len(b'OK meta show\r\n'))):
         def check_tx(label=label,at=at):
             out,_,v=exercise('show-tx-'+label,b'meta show n',tx=at,baseline=baseline,expected=runtime.TOHOST_SHELL_FATAL)
-            if v['tx_fired']!='1' or v['delivered']!=at or int(v.get('block_responses','-1'))!=3 or out!=healthy[:at]:
+            if v['tx_fired']!='1' or v['delivered']!=at or int(v.get('block_responses','-1'))!=4 or out!=healthy[:at]:
                 raise runtime.OwnerFailure('output failure did not stop at exact healthy prefix')
         case('show-tx-'+label,check_tx)
     listed,_,_=exercise('list-baseline',b'meta list')
@@ -76,7 +77,7 @@ def main():
     for label,at in (('name-first',start_list+1),('receipt-middle',start_list+7),('receipt-last',start_list+len(b'n\r\nOK meta list shown=1\r\n'))):
         def check_list_tx(label=label,at=at):
             out,_,v=exercise('list-tx-'+label,b'meta list',tx=at,baseline=baseline_list,expected=runtime.TOHOST_SHELL_FATAL)
-            if v['tx_fired']!='1' or int(v.get('block_responses','-1'))!=3 or out!=listed[:at]:
+            if v['tx_fired']!='1' or int(v.get('block_responses','-1'))!=4 or out!=listed[:at]:
                 raise runtime.OwnerFailure('list output failure continued IO/output')
         case('list-tx-'+label,check_list_tx)
     update,committed,_=exercise('update-baseline',b'meta tag n add os',readonly=False)
@@ -86,7 +87,7 @@ def main():
     for label,at in (('first',receipt+1),('middle',receipt+3),('last',receipt+len(b'OK meta tag\r\n'))):
         def committed_tx(label=label,at=at):
             out,raw,v=exercise('update-receipt-tx-'+label,b'meta tag n add os',tx=at,baseline=baseline2,expected=runtime.TOHOST_SHELL_FATAL,readonly=False)
-            if raw!=committed or out!=update[:at] or v['tx_fired']!='1' or int(v.get('block_responses','-1'))!=8:
+            if raw!=committed or out!=update[:at] or v['tx_fired']!='1' or int(v.get('block_responses','-1'))!=9:
                 raise runtime.OwnerFailure('receipt failure continued IO/output or rolled back committed file')
         case('update-receipt-tx-'+label,committed_tx)
     print('metadata-faults: %d passed, %d failed, %d harness errors'%(passed,failed,harness))

@@ -633,7 +633,7 @@ static int parse_options(int argc, char **argv, Drive *drive, const char **image
     drive->serve = 1;
     drive->piece_steps = 2000;
     drive->base = UINT32_C(0x80000000);
-    drive->ram_size = 16U * 1024U * 1024U;
+    drive->ram_size = 64U * 1024U * 1024U;
 
     for (int i = 1; i < argc; ++i) {
         uint64_t value = 0;
