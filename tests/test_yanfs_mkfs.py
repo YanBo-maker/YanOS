@@ -197,9 +197,11 @@ def v1_baseline_case(mkfs, work):
 
 
 def v2_header_case(mkfs, work):
-    """0036-R1-AC2: no --files, 64 blocks means D=16, N=1023, version 2."""
+    """0036-R1-AC2: --files 1023 with 64 blocks means D=16, N=1023, version 2.
+    The default stays 63 until 0036-R3 (spec 实施澄清, #62); the R3 PR drops
+    --files here and checks the 1023 default."""
     path = os.path.join(work, "v2-64.img")
-    proc = run([mkfs, "--image", path, "--blocks", "64"])
+    proc = run([mkfs, "--image", path, "--blocks", "64", "--files", "1023"])
     check(proc.returncode == 0,
           "R1-AC2 v2 image exits 0, got %d" % proc.returncode)
     data = read_file(path)
