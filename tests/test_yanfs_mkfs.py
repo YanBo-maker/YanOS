@@ -14,6 +14,7 @@ Exit codes follow the repository's gate discipline:
      host cannot create. This is an inconclusive run, not a detection.
 """
 import argparse
+import hashlib
 import os
 import struct
 import subprocess
@@ -24,6 +25,15 @@ import zlib
 BLOCK = 4096
 MAGIC = b"YANFS01\x00"
 FAILURES = []
+
+# 0036-R1-AC1: SHA-256 of the --blocks 16 image written by yan_mkfs built from
+# origin/main 41b83b5. Obtained by extracting /mnt/e/YanOS-work/t41b83b5.tar
+# (Windows git archive of 41b83b5) to /tmp, compiling
+#   gcc -std=c17 -O2 -I os tools/yan_mkfs.c os/yanfs.c -o /tmp/old_mkfs
+# and running `/tmp/old_mkfs --image /tmp/old16.img --blocks 16`.
+V1_16_BLOCK_SHA256 = (
+    "7baad595689d29db2a2ee41571e6cb387caa7677b3a9c132b5008503db93fb75"
+)
 
 
 class HarnessError(RuntimeError):
@@ -57,8 +67,9 @@ def run(command, env=None, timeout=30):
     return proc
 
 
-def invoke(binary, image, blocks, env=None):
-    return run([binary, "--image", image, "--blocks", str(blocks)], env=env)
+def invoke(binary, image, blocks, env=None, files=63):
+    return run([binary, "--image", image, "--blocks", str(blocks),
+                "--files", str(files)], env=env)
 
 
 def read_file(path):
@@ -154,6 +165,8 @@ def arguments_case(mkfs, work):
         [mkfs, "--image", path, "--blocks", "1", "extra"],
         [mkfs, "--blocks", "1", "--image"],
         [mkfs, "--unknown", path, "--blocks", "1"],
+        [mkfs, "--image", path, "--blocks", "16", "--files", "63",
+         "--files", "63"],
     ]
     for command in cases:
         proc = run(command)
@@ -165,6 +178,72 @@ def arguments_case(mkfs, work):
     proc = invoke(mkfs, missing_parent, 1)
     check(proc.returncode == 5,
           "missing parent exits 5, got %d" % proc.returncode)
+
+
+def v1_baseline_case(mkfs, work):
+    """0036-R1-AC1: --files 63 is byte-identical to the 41b83b5 --blocks 16
+    image, whose SHA-256 was captured outside this repository."""
+    path = os.path.join(work, "v1-ac1.img")
+    proc = invoke(mkfs, path, 16, files=63)
+    check(proc.returncode == 0,
+          "R1-AC1 v1 image exits 0, got %d" % proc.returncode)
+    data = read_file(path)
+    check(len(data) == 16 * BLOCK, "R1-AC1 image has 16 blocks")
+    verify_directory(data[:BLOCK], 16)
+    digest = hashlib.sha256(data).hexdigest()
+    check(digest == V1_16_BLOCK_SHA256,
+          "R1-AC1 SHA-256 %s != 41b83b5 baseline %s"
+          % (digest, V1_16_BLOCK_SHA256))
+
+
+def v2_header_case(mkfs, work):
+    """0036-R1-AC2: --files 1023 with 64 blocks means D=16, N=1023, version 2.
+    The default stays 63 until 0036-R3 (spec 实施澄清, #62); the R3 PR drops
+    --files here and checks the 1023 default."""
+    path = os.path.join(work, "v2-64.img")
+    proc = run([mkfs, "--image", path, "--blocks", "64", "--files", "1023"])
+    check(proc.returncode == 0,
+          "R1-AC2 v2 image exits 0, got %d" % proc.returncode)
+    data = read_file(path)
+    check(len(data) == 64 * BLOCK, "R1-AC2 image has 64 blocks")
+    check(data[0:8] == MAGIC, "R1-AC2 magic is YANFS01 0x00")
+    check(struct.unpack_from("<I", data, 8)[0] == 2,
+          "R1-AC2 version is 2")
+    check(struct.unpack_from("<I", data, 12)[0] == BLOCK,
+          "R1-AC2 block_size is 4096")
+    check(struct.unpack_from("<I", data, 16)[0] == 64,
+          "R1-AC2 capacity_blocks is 64")
+    check(struct.unpack_from("<I", data, 20)[0] == 1023,
+          "R1-AC2 entry_capacity is 1023")
+    check(struct.unpack_from("<I", data, 24)[0] == 16,
+          "R1-AC2 directory_blocks is 16")
+    check(all(byte == 0 for byte in data[28:60]),
+          "R1-AC2 reserved header bytes 28..59 are zero")
+    directory = bytearray(data[:16 * BLOCK])
+    directory[60:64] = b"\x00\x00\x00\x00"
+    expected = zlib.crc32(bytes(directory)) & 0xFFFFFFFF
+    check(struct.unpack_from("<I", data, 60)[0] == expected,
+          "R1-AC2 CRC covers all 16 directory blocks with field 60..63 zero")
+    check(all(byte == 0 for byte in data[BLOCK:16 * BLOCK]),
+          "R1-AC2 directory blocks 1..15 are zero")
+
+
+def files_rejection_case(mkfs, work):
+    """0036-R1-AC3: a bad --files value or B <= D creates no image."""
+    cases = [
+        ("zero", ["--files", "0", "--blocks", "64"]),
+        ("hundred", ["--files", "100", "--blocks", "64"]),
+        ("4096", ["--files", "4096", "--blocks", "8192"]),
+        ("8191", ["--files", "8191", "--blocks", "8192"]),
+        ("too-small-blocks", ["--files", "4095", "--blocks", "64"]),
+    ]
+    for label, extra in cases:
+        path = os.path.join(work, "reject-%s.img" % label)
+        proc = run([mkfs, "--image", path] + extra)
+        check(proc.returncode != 0,
+              "R1-AC3 %s exits nonzero, got %d" % (label, proc.returncode))
+        check(not os.path.exists(path),
+              "R1-AC3 %s creates no image" % label)
 
 
 def build_metadata(capacity):
@@ -261,6 +340,9 @@ def main():
             normal_case(args.mkfs, work)
             existing_case(args.mkfs, work)
             arguments_case(args.mkfs, work)
+            v1_baseline_case(args.mkfs, work)
+            v2_header_case(args.mkfs, work)
+            files_rejection_case(args.mkfs, work)
             for mode in ("short-write", "flush", "close", "seek", "metadata-write"):
                 fault_case(args.mkfs, args.fault_mkfs, work, mode)
             control_case(args.fault_mkfs, work)

@@ -107,48 +107,89 @@ static void store_le32(uint8_t *bytes, uint32_t value)
     bytes[3] = (uint8_t)(value >> 24);
 }
 
-uint32_t yan_fs_metadata_crc(const uint8_t block[4096])
+/* CRC over a whole directory with one block optionally substituted. Block 0
+ * offsets 60..63 always read as zero, which is where the single stored CRC
+ * lives; the other D-1 blocks contribute every byte. */
+static uint32_t directory_crc_with_block(const uint8_t *directory,
+                                         uint32_t directory_blocks,
+                                         uint32_t replaced_block,
+                                         const uint8_t *replacement)
 {
     uint32_t crc = UINT32_C(0xffffffff);
-    for (uint32_t offset = 0; offset < YAN_FS_BLOCK_SIZE; ++offset) {
-        /* The stored CRC is not part of its own input; it reads as zero. */
-        uint32_t byte = block[offset];
-        if (offset >= FS_CRC_OFFSET && offset < FS_CRC_OFFSET + 4u) {
-            byte = 0;
-        }
-        crc ^= byte;
-        for (uint32_t bit = 0; bit < 8; ++bit) {
-            if ((crc & UINT32_C(1)) != 0) {
-                crc = (crc >> 1) ^ FS_CRC_POLYNOMIAL;
-            } else {
-                crc >>= 1;
+    for (uint32_t block = 0; block < directory_blocks; ++block) {
+        const uint8_t *base = block == replaced_block
+                                  ? replacement
+                                  : directory + (size_t)block * YAN_FS_BLOCK_SIZE;
+        for (uint32_t offset = 0; offset < YAN_FS_BLOCK_SIZE; ++offset) {
+            uint32_t byte = base[offset];
+            if (block == 0u && offset >= FS_CRC_OFFSET &&
+                offset < FS_CRC_OFFSET + 4u) {
+                byte = 0;
+            }
+            crc ^= byte;
+            for (uint32_t bit = 0; bit < 8; ++bit) {
+                if ((crc & UINT32_C(1)) != 0) {
+                    crc = (crc >> 1) ^ FS_CRC_POLYNOMIAL;
+                } else {
+                    crc >>= 1;
+                }
             }
         }
     }
     return crc ^ UINT32_C(0xffffffff);
 }
 
-YanFsResult yan_fs_format_metadata(uint8_t out[4096], uint32_t capacity_blocks)
+uint32_t yan_fs_directory_crc(const uint8_t *directory,
+                              uint32_t directory_blocks)
+{
+    return directory_crc_with_block(directory, directory_blocks, UINT32_MAX, NULL);
+}
+
+uint32_t yan_fs_metadata_crc(const uint8_t block[4096])
+{
+    return yan_fs_directory_crc(block, 1u);
+}
+
+YanFsResult yan_fs_format_directory(uint8_t *out, uint32_t directory_blocks,
+                                    uint32_t capacity_blocks)
 {
     static const uint8_t magic[FS_MAGIC_SIZE] = {
         (uint8_t)'Y', (uint8_t)'A', (uint8_t)'N', (uint8_t)'F',
         (uint8_t)'S', (uint8_t)'0', (uint8_t)'1', 0u
     };
-    if (out == NULL || capacity_blocks < 1u) {
+    /* D=1 keeps 0021's capacity >= 1 rule: a one-block v1 image is still a
+     * valid empty file system. A v2 directory needs at least one data block,
+     * so D>1 requires capacity_blocks > D. */
+    if (out == NULL || directory_blocks < 1u ||
+        directory_blocks > YAN_FS_MAX_DIR_BLOCKS ||
+        capacity_blocks < directory_blocks ||
+        (directory_blocks > 1u && capacity_blocks == directory_blocks)) {
         return YAN_FS_INVALID;
     }
-    for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
+    uint32_t bytes = directory_blocks * YAN_FS_BLOCK_SIZE;
+    for (uint32_t i = 0; i < bytes; ++i) {
         out[i] = 0;
     }
     for (uint32_t i = 0; i < FS_MAGIC_SIZE; ++i) {
         out[FS_MAGIC_OFFSET + i] = magic[i];
     }
-    store_le32(out + FS_VERSION_OFFSET, YAN_FS_VERSION);
+    store_le32(out + FS_VERSION_OFFSET,
+               directory_blocks == 1u ? YAN_FS_VERSION : YAN_FS_VERSION_2);
     store_le32(out + FS_BLOCK_SIZE_OFFSET, YAN_FS_BLOCK_SIZE);
     store_le32(out + FS_CAPACITY_OFFSET, capacity_blocks);
-    store_le32(out + FS_ENTRY_CAPACITY_OFFSET, YAN_FS_MAX_FILES);
-    store_le32(out + FS_CRC_OFFSET, yan_fs_metadata_crc(out));
+    store_le32(out + FS_ENTRY_CAPACITY_OFFSET,
+               directory_blocks * (YAN_FS_BLOCK_SIZE / YAN_FS_ENTRY_SIZE) - 1u);
+    if (directory_blocks > 1u) {
+        store_le32(out + FS_RESERVED_OFFSET, directory_blocks);
+    }
+    store_le32(out + FS_CRC_OFFSET,
+               yan_fs_directory_crc(out, directory_blocks));
     return YAN_FS_OK;
+}
+
+YanFsResult yan_fs_format_metadata(uint8_t out[4096], uint32_t capacity_blocks)
+{
+    return yan_fs_format_directory(out, 1u, capacity_blocks);
 }
 
 /* The allowed set is [A-Za-z0-9._-]; comparison is case sensitive, and the two
@@ -192,6 +233,7 @@ static uint32_t entry_name_length(const uint8_t *entry)
 }
 
 static bool context_overlap(const YanFs *fs, const void *pointer, uint64_t length);
+static bool protected_overlap(const YanFs *fs, const void *pointer, uint64_t length);
 
 /* True when the single byte at name[index] may be read. It must not run past the
  * pointer domain and must not overlap the context. The check is per byte on
@@ -204,7 +246,7 @@ static bool name_byte_readable(const YanFs *fs, const char *name, uint32_t index
     if ((uint64_t)index > (uint64_t)(UINTPTR_MAX - begin)) {
         return false;
     }
-    return !context_overlap(fs, (const void *)(begin + (uintptr_t)index), 1u);
+    return !protected_overlap(fs, (const void *)(begin + (uintptr_t)index), 1u);
 }
 
 /* Validates a caller-supplied name and reports its length. Every byte the scan
@@ -267,11 +309,31 @@ static bool context_overlap(const YanFs *fs, const void *pointer, uint64_t lengt
                           (uintptr_t)pointer, length);
 }
 
+/* 0036: a caller-owned directory is live cache, so it gets the same alias
+ * protection the built-in metadata array used to get from being inside the
+ * context. The exact built-in buffer is already covered by context_overlap. */
+static bool directory_overlap(const YanFs *fs, const void *pointer, uint64_t length)
+{
+    if (fs->directory == NULL || fs->directory_blocks == 0u) {
+        return false;
+    }
+    return ranges_overlap((uintptr_t)(const void *)fs->directory,
+                          (uint64_t)fs->directory_blocks * YAN_FS_BLOCK_SIZE,
+                          (uintptr_t)pointer, length);
+}
+
+static bool protected_overlap(const YanFs *fs, const void *pointer, uint64_t length)
+{
+    return context_overlap(fs, pointer, length) ||
+           directory_overlap(fs, pointer, length);
+}
+
 /* A name is read byte by byte up to its terminator; the bytes actually touched
  * are name[0 .. length] inclusive. */
-static bool name_overlaps_context(const YanFs *fs, const char *name, uint32_t length)
+static bool name_overlaps_protected(const YanFs *fs, const char *name,
+                                    uint32_t length)
 {
-    return context_overlap(fs, (const void *)name, (uint64_t)length + 1u);
+    return protected_overlap(fs, (const void *)name, (uint64_t)length + 1u);
 }
 
 static bool entry_is_empty(const uint8_t *entry)
@@ -284,51 +346,56 @@ static bool entry_is_empty(const uint8_t *entry)
     return true;
 }
 
-static const uint8_t *entry_at(const uint8_t *block, uint32_t slot)
+/* The directory is one contiguous buffer, so slot s starts at byte 64+64s.
+ * Slot 63 is the first entry of directory block 1, and so on. */
+static uint32_t entry_offset(uint32_t slot)
 {
-    return block + YAN_FS_HEADER_SIZE + slot * YAN_FS_ENTRY_SIZE;
+    return YAN_FS_HEADER_SIZE + slot * YAN_FS_ENTRY_SIZE;
 }
 
-/* Checks a whole metadata block against the device capacity. A foreign version
- * is not corruption, and neither is a device whose size cannot be described.
- *
- * The pair scan at the end proves duplicate names and overlapping extents
- * without an array of extents, so the function uses a few dozen bytes of stack
- * rather than one kilobyte. */
-static YanFsResult validate_metadata(const uint8_t *block, uint32_t capacity_blocks)
+static uint32_t entry_block(uint32_t slot)
 {
-    static const uint8_t magic[FS_MAGIC_SIZE] = {
-        (uint8_t)'Y', (uint8_t)'A', (uint8_t)'N', (uint8_t)'F',
-        (uint8_t)'S', (uint8_t)'0', (uint8_t)'1', 0u
-    };
-    for (uint32_t i = 0; i < FS_MAGIC_SIZE; ++i) {
-        if (block[FS_MAGIC_OFFSET + i] != magic[i]) {
-            return YAN_FS_CORRUPT;
-        }
+    return entry_offset(slot) / YAN_FS_BLOCK_SIZE;
+}
+
+static const uint8_t *entry_at(const uint8_t *block, uint32_t slot)
+{
+    return block + entry_offset(slot);
+}
+
+/* Entry view inside a single scratch block copied from directory block k. */
+static uint8_t *entry_in_block(uint8_t *block, uint32_t slot)
+{
+    return block + entry_offset(slot) % YAN_FS_BLOCK_SIZE;
+}
+
+/* Copies the block that holds slot into scratch, ready for one entry edit. */
+static void load_entry_block(YanFs *fs, uint32_t slot)
+{
+    const uint8_t *source =
+        fs->directory + (size_t)entry_block(slot) * YAN_FS_BLOCK_SIZE;
+    for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
+        fs->scratch[i] = source[i];
     }
-    if (load_le32(block + FS_VERSION_OFFSET) != YAN_FS_VERSION) {
-        return YAN_FS_UNSUPPORTED;
-    }
-    if (load_le32(block + FS_BLOCK_SIZE_OFFSET) != YAN_FS_BLOCK_SIZE) {
-        return YAN_FS_CORRUPT;
-    }
-    if (load_le32(block + FS_CAPACITY_OFFSET) != capacity_blocks) {
-        return YAN_FS_CORRUPT;
-    }
-    if (load_le32(block + FS_ENTRY_CAPACITY_OFFSET) != YAN_FS_MAX_FILES) {
-        return YAN_FS_CORRUPT;
-    }
-    for (uint32_t i = FS_RESERVED_OFFSET; i < FS_RESERVED_END; ++i) {
-        if (block[i] != 0u) {
-            return YAN_FS_CORRUPT;
-        }
-    }
-    if (load_le32(block + FS_CRC_OFFSET) != yan_fs_metadata_crc(block)) {
+}
+
+/* Checks a whole directory buffer after mount has read all D blocks. The CRC
+ * covers every block; extents must start at or after block D, the first data
+ * block. The pair scan at the end proves duplicate names and overlapping
+ * extents without an array of extents, so the function uses a few dozen bytes
+ * of stack rather than one kilobyte per file. */
+static YanFsResult validate_directory(const uint8_t *directory,
+                                      uint32_t directory_blocks,
+                                      uint32_t entry_capacity,
+                                      uint32_t capacity_blocks)
+{
+    if (load_le32(directory + FS_CRC_OFFSET) !=
+        yan_fs_directory_crc(directory, directory_blocks)) {
         return YAN_FS_CORRUPT;
     }
 
-    for (uint32_t slot = 0; slot < YAN_FS_MAX_FILES; ++slot) {
-        const uint8_t *entry = entry_at(block, slot);
+    for (uint32_t slot = 0; slot < entry_capacity; ++slot) {
+        const uint8_t *entry = entry_at(directory, slot);
         uint32_t length = entry_name_length(entry);
         if (length == FS_ENTRY_NAME_AREA) {
             return YAN_FS_CORRUPT; /* no terminator inside the name area */
@@ -370,8 +437,8 @@ static YanFsResult validate_metadata(const uint8_t *block, uint32_t capacity_blo
         if (block_count != needed) {
             return YAN_FS_CORRUPT;
         }
-        /* 0021: confirm 1 <= start < capacity first, then the count fits. */
-        if (start_block < 1u || start_block >= capacity_blocks) {
+        /* 0036: an extent starts after the whole directory, not at block 1. */
+        if (start_block < directory_blocks || start_block >= capacity_blocks) {
             return YAN_FS_CORRUPT;
         }
         if (block_count > capacity_blocks - start_block) {
@@ -379,15 +446,15 @@ static YanFsResult validate_metadata(const uint8_t *block, uint32_t capacity_blo
         }
     }
 
-    for (uint32_t first_slot = 0; first_slot < YAN_FS_MAX_FILES; ++first_slot) {
-        const uint8_t *first = entry_at(block, first_slot);
+    for (uint32_t first_slot = 0; first_slot < entry_capacity; ++first_slot) {
+        const uint8_t *first = entry_at(directory, first_slot);
         if (first[0] == 0u) {
             continue;
         }
         uint32_t first_length = entry_name_length(first);
         for (uint32_t second_slot = first_slot + 1u;
-             second_slot < YAN_FS_MAX_FILES; ++second_slot) {
-            const uint8_t *second = entry_at(block, second_slot);
+             second_slot < entry_capacity; ++second_slot) {
+            const uint8_t *second = entry_at(directory, second_slot);
             if (second[0] == 0u) {
                 continue;
             }
@@ -430,53 +497,63 @@ static uint32_t blocks_needed(uint32_t length)
     return count;
 }
 
-/* Lowest contiguous free run of `needed` data blocks, starting at block 1.
- *
- * The directory is the only allocation record, so the in-use set is rebuilt
- * from the cache every time. A run can only begin at block 1 or immediately
- * after a used extent, which is why the search visits O(files) candidates and
- * never walks the device: a UINT32_MAX-block device costs the same as a
- * three-block one. Complexity is O(YAN_FS_MAX_FILES^2). */
-static bool allocate_extent(const YanFs *fs, uint32_t needed, uint32_t *start_out)
+/* True when `candidate` is outside every used extent and the run of `needed`
+ * blocks from it reaches the next used start or the end of the device. */
+static bool extent_candidate_fits(const YanFs *fs, uint32_t candidate,
+                                  uint32_t needed)
 {
-    uint32_t used_start[YAN_FS_MAX_FILES];
-    uint32_t used_count[YAN_FS_MAX_FILES];
-    uint32_t used_total = 0u;
-    for (uint32_t slot = 0; slot < YAN_FS_MAX_FILES; ++slot) {
-        const uint8_t *entry = entry_at(fs->metadata, slot);
+    for (uint32_t slot = 0; slot < fs->entry_capacity; ++slot) {
+        const uint8_t *entry = entry_at(fs->directory, slot);
         if (entry[0] == 0u || load_le32(entry + FS_ENTRY_SIZE_OFFSET) == 0u) {
             continue;
         }
-        used_start[used_total] = load_le32(entry + FS_ENTRY_START_OFFSET);
-        used_count[used_total] = load_le32(entry + FS_ENTRY_COUNT_OFFSET);
-        ++used_total;
-    }
-
-    uint32_t best = 0u;
-    for (uint32_t candidate_index = 0u; candidate_index <= used_total;
-         ++candidate_index) {
-        uint32_t candidate = candidate_index == 0u
-                                 ? 1u
-                                 : used_start[candidate_index - 1u] +
-                                       used_count[candidate_index - 1u];
-        bool free_at_candidate = true;
-        for (uint32_t i = 0; i < used_total; ++i) {
-            if (candidate >= used_start[i] &&
-                candidate < used_start[i] + used_count[i]) {
-                free_at_candidate = false;
-                break;
-            }
+        uint32_t start = load_le32(entry + FS_ENTRY_START_OFFSET);
+        uint32_t count = load_le32(entry + FS_ENTRY_COUNT_OFFSET);
+        if (candidate >= start && candidate < start + count) {
+            return false;
         }
-        if (!free_at_candidate) {
+    }
+    uint32_t limit = fs->capacity_blocks;
+    for (uint32_t i = 0; i < fs->entry_capacity; ++i) {
+        const uint8_t *entry = entry_at(fs->directory, i);
+        if (entry[0] == 0u || load_le32(entry + FS_ENTRY_SIZE_OFFSET) == 0u) {
             continue;
         }
-        uint32_t limit = fs->capacity_blocks;
-        for (uint32_t i = 0; i < used_total; ++i) {
-            if (used_start[i] > candidate && used_start[i] < limit) {
-                limit = used_start[i];
-            }
+        uint32_t start = load_le32(entry + FS_ENTRY_START_OFFSET);
+        if (start > candidate && start < limit) {
+            limit = start;
         }
-        if (limit - candidate >= needed && (best == 0u || candidate < best)) {
+    }
+    return limit - candidate >= needed;
+}
+
+/* Lowest contiguous free run of `needed` data blocks, starting at block D.
+ *
+ * The directory is the only allocation record, so the in-use set is rebuilt
+ * from the cache every time. A run can only begin at block D or immediately
+ * after a used extent, which is why the search visits O(files) candidates and
+ * never walks the device: a UINT32_MAX-block device costs the same as a
+ * three-block one. No per-file stack array is built, so the frame does not grow
+ * with N; complexity is O(N^2). */
+static bool allocate_extent(const YanFs *fs, uint32_t needed, uint32_t *start_out)
+{
+    uint32_t best = 0u;
+    if (extent_candidate_fits(fs, fs->directory_blocks, needed)) {
+        best = fs->directory_blocks;
+    }
+    /* Slot order matches the old used_start/used_count array order, so the
+     * chosen start is exactly the same lowest feasible candidate. */
+    for (uint32_t slot = 0; slot < fs->entry_capacity; ++slot) {
+        const uint8_t *entry = entry_at(fs->directory, slot);
+        if (entry[0] == 0u || load_le32(entry + FS_ENTRY_SIZE_OFFSET) == 0u) {
+            continue;
+        }
+        uint32_t candidate = load_le32(entry + FS_ENTRY_START_OFFSET) +
+                             load_le32(entry + FS_ENTRY_COUNT_OFFSET);
+        if (best != 0u && candidate >= best) {
+            continue;
+        }
+        if (extent_candidate_fits(fs, candidate, needed)) {
             best = candidate;
         }
     }
@@ -490,8 +567,8 @@ static bool allocate_extent(const YanFs *fs, uint32_t needed, uint32_t *start_ou
 static bool find_entry(const YanFs *fs, const char *name, uint32_t length,
                        uint32_t *slot_out)
 {
-    for (uint32_t slot = 0; slot < YAN_FS_MAX_FILES; ++slot) {
-        const uint8_t *entry = entry_at(fs->metadata, slot);
+    for (uint32_t slot = 0; slot < fs->entry_capacity; ++slot) {
+        const uint8_t *entry = entry_at(fs->directory, slot);
         if (entry[0] == 0u || entry_name_length(entry) != length) {
             continue;
         }
@@ -511,8 +588,8 @@ static bool find_entry(const YanFs *fs, const char *name, uint32_t length,
 
 static bool find_free_slot(const YanFs *fs, uint32_t *slot_out)
 {
-    for (uint32_t slot = 0; slot < YAN_FS_MAX_FILES; ++slot) {
-        if (entry_is_empty(entry_at(fs->metadata, slot))) {
+    for (uint32_t slot = 0; slot < fs->entry_capacity; ++slot) {
+        if (entry_is_empty(entry_at(fs->directory, slot))) {
             *slot_out = slot;
             return true;
         }
@@ -527,7 +604,7 @@ static void entry_set(uint8_t *block, uint32_t slot, const uint8_t *name,
                       uint32_t length, uint32_t size_bytes, uint32_t start_block,
                       uint32_t block_count)
 {
-    uint8_t *entry = (uint8_t *)entry_at(block, slot);
+    uint8_t *entry = entry_in_block(block, slot);
     for (uint32_t i = 0; i < YAN_FS_ENTRY_SIZE; ++i) {
         entry[i] = 0;
     }
@@ -541,7 +618,7 @@ static void entry_set(uint8_t *block, uint32_t slot, const uint8_t *name,
 
 static void entry_clear(uint8_t *block, uint32_t slot)
 {
-    uint8_t *entry = (uint8_t *)entry_at(block, slot);
+    uint8_t *entry = entry_in_block(block, slot);
     for (uint32_t i = 0; i < YAN_FS_ENTRY_SIZE; ++i) {
         entry[i] = 0;
     }
@@ -581,18 +658,62 @@ static YanFsIoResult write_payload(YanFs *fs, const uint8_t *bytes,
     return YAN_FS_IO_OK;
 }
 
-/* Seals the candidate directory in scratch, writes it to block 0 and only then
- * publishes it to the metadata cache. A failed write leaves the cache showing
- * the previous directory and faults the instance. */
-static YanFsResult commit_metadata(YanFs *fs)
+/* Zeroes the whole live directory cache. A rejected mount and every init or
+ * unmount use this, so no stale entry survives a failed publication. */
+static void clear_directory(YanFs *fs)
 {
-    store_le32(fs->scratch + FS_CRC_OFFSET, yan_fs_metadata_crc(fs->scratch));
-    YanFsIoResult io = fs->io.write_block(fs->io.context, 0, fs->scratch);
-    if (io != YAN_FS_IO_OK) {
-        return fault_io(fs, io);
+    if (fs->directory == NULL) {
+        return;
     }
-    for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
-        fs->metadata[i] = fs->scratch[i];
+    uint32_t bytes = fs->directory_blocks * YAN_FS_BLOCK_SIZE;
+    for (uint32_t i = 0; i < bytes; ++i) {
+        fs->directory[i] = 0;
+    }
+}
+
+/* Publishes the edited scratch block. Block 0 needs one write, exactly as v1
+ * always did. A slot after block 0 first becomes durable, then the CRC block is
+ * rewritten; a failed write faults the instance and never allocates a new
+ * source identity. The cache is updated only after each write succeeds. */
+static YanFsResult commit_entry(YanFs *fs, uint32_t slot)
+{
+    uint32_t block = entry_block(slot);
+    if (block == 0u) {
+        store_le32(fs->scratch + FS_CRC_OFFSET,
+                   directory_crc_with_block(fs->directory,
+                                            fs->directory_blocks, 0u,
+                                            fs->scratch));
+        YanFsIoResult io = fs->io.write_block(fs->io.context, 0, fs->scratch);
+        if (io != YAN_FS_IO_OK) {
+            return fault_io(fs, io);
+        }
+        for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
+            fs->directory[i] = fs->scratch[i];
+        }
+    } else {
+        YanFsIoResult io =
+            fs->io.write_block(fs->io.context, block, fs->scratch);
+        if (io != YAN_FS_IO_OK) {
+            return fault_io(fs, io);
+        }
+        uint8_t *cache = fs->directory + (size_t)block * YAN_FS_BLOCK_SIZE;
+        for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
+            cache[i] = fs->scratch[i];
+        }
+        for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
+            fs->scratch[i] = fs->directory[i];
+        }
+        store_le32(fs->scratch + FS_CRC_OFFSET,
+                   directory_crc_with_block(fs->directory,
+                                            fs->directory_blocks, 0u,
+                                            fs->scratch));
+        io = fs->io.write_block(fs->io.context, 0, fs->scratch);
+        if (io != YAN_FS_IO_OK) {
+            return fault_io(fs, io);
+        }
+        for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
+            fs->directory[i] = fs->scratch[i];
+        }
     }
     /* 0026: a successfully published directory is a source change. Every
      * create/replace/remove/rename/copy reaches this single publish point. */
@@ -600,7 +721,9 @@ static YanFsResult commit_metadata(YanFs *fs)
     return YAN_FS_OK;
 }
 
-YanFsResult yan_fs_init(YanFs *fs, YanFsBlockIo io)
+YanFsResult yan_fs_init_directory(YanFs *fs, YanFsBlockIo io,
+                                  uint8_t *directory,
+                                  uint32_t directory_blocks)
 {
     if (fs == NULL) {
         return YAN_FS_INVALID;
@@ -618,23 +741,51 @@ YanFsResult yan_fs_init(YanFs *fs, YanFsBlockIo io)
     if (io.capacity == NULL || io.read_block == NULL || io.write_block == NULL) {
         return YAN_FS_INVALID;
     }
+    if (directory == NULL || directory_blocks < 1u ||
+        directory_blocks > YAN_FS_MAX_DIR_BLOCKS) {
+        return YAN_FS_INVALID;
+    }
+    /* The built-in D=1 metadata member is the one intentional overlap; every
+     * other directory must be caller-owned memory outside the context. */
+    bool builtin = directory == fs->metadata && directory_blocks == 1u;
+    if (!builtin &&
+        context_overlap(fs, directory,
+                        (uint64_t)directory_blocks * YAN_FS_BLOCK_SIZE)) {
+        return YAN_FS_INVALID;
+    }
     fs->io = io;
     fs->initialized = true;
     fs->state = YAN_FS_UNMOUNTED;
     fs->busy = false;
     fs->capacity_blocks = 0;
-    /* 0026: a successful init is a source change and takes a fresh identity. The
-     * metadata and scratch blocks are cleared to a deterministic zero image. */
+    fs->directory = directory;
+    fs->directory_blocks = directory_blocks;
+    fs->entry_capacity =
+        directory_blocks * (YAN_FS_BLOCK_SIZE / YAN_FS_ENTRY_SIZE) - 1u;
+    /* 0026: a successful init is a source change and takes a fresh identity. */
     source_identity_allocate(fs);
     for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
         fs->metadata[i] = 0;
         fs->scratch[i] = 0;
     }
+    clear_directory(fs);
     return YAN_FS_OK;
+}
+
+YanFsResult yan_fs_init(YanFs *fs, YanFsBlockIo io)
+{
+    if (fs == NULL) {
+        return YAN_FS_INVALID;
+    }
+    return yan_fs_init_directory(fs, io, fs->metadata, 1u);
 }
 
 YanFsResult yan_fs_mount(YanFs *fs)
 {
+    static const uint8_t magic[FS_MAGIC_SIZE] = {
+        (uint8_t)'Y', (uint8_t)'A', (uint8_t)'N', (uint8_t)'F',
+        (uint8_t)'S', (uint8_t)'0', (uint8_t)'1', 0u
+    };
     if (fs == NULL) {
         return YAN_FS_INVALID;
     }
@@ -651,10 +802,11 @@ YanFsResult yan_fs_mount(YanFs *fs)
         return YAN_FS_INVALID; /* no implicit unmount */
     }
 
-    /* busy spans the whole operation, including both callbacks, so a reentrant
+    /* busy spans the whole operation, including every callback, so a reentrant
      * call from inside one of them sees BUSY rather than a half-filled cache. */
     fs->busy = true;
-    YanFsResult result;
+    clear_directory(fs);
+    YanFsResult result = YAN_FS_CORRUPT;
     uint64_t device_blocks = 0;
     YanFsIoResult io_result = fs->io.capacity(fs->io.context, &device_blocks);
     if (io_result != YAN_FS_IO_OK) {
@@ -665,24 +817,106 @@ YanFsResult yan_fs_mount(YanFs *fs)
     } else if (device_blocks < 1u || device_blocks > (uint64_t)UINT32_MAX) {
         result = YAN_FS_UNSUPPORTED;
     } else {
+        uint32_t capacity_blocks = (uint32_t)device_blocks;
         io_result = fs->io.read_block(fs->io.context, 0, fs->scratch);
         if (io_result != YAN_FS_IO_OK) {
             result = io_result == YAN_FS_IO_ERROR ? YAN_FS_IO : YAN_FS_PROTOCOL;
             fs->state = YAN_FS_STATE_FAULTED;
             source_identity_allocate(fs);
         } else {
-            result = validate_metadata(fs->scratch, (uint32_t)device_blocks);
-            if (result == YAN_FS_OK) {
-                /* Publish only now: the cache is unreachable until the whole
-                 * block has been checked. */
-                for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
-                    fs->metadata[i] = fs->scratch[i];
+            for (uint32_t i = 0; i < FS_MAGIC_SIZE; ++i) {
+                if (fs->scratch[FS_MAGIC_OFFSET + i] != magic[i]) {
+                    result = YAN_FS_CORRUPT;
+                    goto done;
                 }
-                fs->capacity_blocks = (uint32_t)device_blocks;
+            }
+            uint32_t version = load_le32(fs->scratch + FS_VERSION_OFFSET);
+            if (version != YAN_FS_VERSION && version != YAN_FS_VERSION_2) {
+                result = YAN_FS_UNSUPPORTED;
+                goto done;
+            }
+            if (load_le32(fs->scratch + FS_BLOCK_SIZE_OFFSET) !=
+                YAN_FS_BLOCK_SIZE) {
+                result = YAN_FS_CORRUPT;
+                goto done;
+            }
+            if (load_le32(fs->scratch + FS_CAPACITY_OFFSET) != capacity_blocks) {
+                result = YAN_FS_CORRUPT;
+                goto done;
+            }
+            uint32_t image_blocks = 1u;
+            uint32_t image_entries = YAN_FS_MAX_FILES;
+            if (version == YAN_FS_VERSION) {
+                if (load_le32(fs->scratch + FS_ENTRY_CAPACITY_OFFSET) !=
+                    YAN_FS_MAX_FILES) {
+                    result = YAN_FS_CORRUPT;
+                    goto done;
+                }
+                for (uint32_t i = FS_RESERVED_OFFSET; i < FS_RESERVED_END; ++i) {
+                    if (fs->scratch[i] != 0u) {
+                        result = YAN_FS_CORRUPT;
+                        goto done;
+                    }
+                }
+            } else {
+                image_blocks = load_le32(fs->scratch + FS_RESERVED_OFFSET);
+                if (image_blocks < 1u ||
+                    image_blocks > YAN_FS_MAX_DIR_BLOCKS) {
+                    result = YAN_FS_CORRUPT;
+                    goto done;
+                }
+                image_entries =
+                    image_blocks * (YAN_FS_BLOCK_SIZE / YAN_FS_ENTRY_SIZE) - 1u;
+                if (load_le32(fs->scratch + FS_ENTRY_CAPACITY_OFFSET) !=
+                    image_entries) {
+                    result = YAN_FS_CORRUPT;
+                    goto done;
+                }
+                for (uint32_t i = FS_RESERVED_OFFSET + 4u; i < FS_RESERVED_END;
+                     ++i) {
+                    if (fs->scratch[i] != 0u) {
+                        result = YAN_FS_CORRUPT;
+                        goto done;
+                    }
+                }
+                if (capacity_blocks <= image_blocks) {
+                    result = YAN_FS_CORRUPT;
+                    goto done;
+                }
+            }
+            if (image_blocks != fs->directory_blocks) {
+                /* 0036-R3's rule arrives early: the mount capacity is fixed at
+                 * init time, so a different D is not a usable image here. */
+                result = YAN_FS_INVALID;
+                goto done;
+            }
+            for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
+                fs->directory[i] = fs->scratch[i];
+            }
+            for (uint32_t block = 1u; block < image_blocks; ++block) {
+                uint8_t *out = fs->directory +
+                               (size_t)block * YAN_FS_BLOCK_SIZE;
+                io_result = fs->io.read_block(fs->io.context, block, out);
+                if (io_result != YAN_FS_IO_OK) {
+                    result = io_result == YAN_FS_IO_ERROR ? YAN_FS_IO
+                                                          : YAN_FS_PROTOCOL;
+                    fs->state = YAN_FS_STATE_FAULTED;
+                    source_identity_allocate(fs);
+                    goto done;
+                }
+            }
+            result = validate_directory(fs->directory, image_blocks,
+                                        image_entries, capacity_blocks);
+            if (result == YAN_FS_OK) {
+                fs->capacity_blocks = capacity_blocks;
                 fs->state = YAN_FS_MOUNTED;
                 source_identity_allocate(fs);
             }
         }
+    }
+done:
+    if (result != YAN_FS_OK) {
+        clear_directory(fs);
     }
     fs->busy = false;
     return result;
@@ -703,6 +937,7 @@ YanFsResult yan_fs_unmount(YanFs *fs)
      * drops the local view. io and initialized survive. */
     fs->state = YAN_FS_UNMOUNTED;
     fs->capacity_blocks = 0;
+    clear_directory(fs);
     for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
         fs->metadata[i] = 0;
         fs->scratch[i] = 0;
@@ -734,7 +969,7 @@ YanFsResult yan_fs_source(const YanFs *fs, YanFsSource *out)
     if (out == NULL) {
         return YAN_FS_INVALID;
     }
-    if (context_overlap(fs, out, (uint64_t)sizeof(YanFsSource))) {
+    if (protected_overlap(fs, out, (uint64_t)sizeof(YanFsSource))) {
         return YAN_FS_INVALID;
     }
     out->state = fs->state;
@@ -772,11 +1007,11 @@ static YanFsResult create_locked(YanFs *fs, const char *name,
 {
     uint32_t name_length = 0;
     if (name == NULL || !caller_name_allowed(fs, name, &name_length) ||
-        name_overlaps_context(fs, name, name_length)) {
+        name_overlaps_protected(fs, name, name_length)) {
         return YAN_FS_INVALID;
     }
     if (length > 0u &&
-        (bytes == NULL || context_overlap(fs, bytes, (uint64_t)length))) {
+        (bytes == NULL || protected_overlap(fs, bytes, (uint64_t)length))) {
         return YAN_FS_INVALID;
     }
     uint32_t existing = 0;
@@ -799,12 +1034,10 @@ static YanFsResult create_locked(YanFs *fs, const char *name,
             return fault_io(fs, io);
         }
     }
-    for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
-        fs->scratch[i] = fs->metadata[i];
-    }
+    load_entry_block(fs, slot);
     entry_set(fs->scratch, slot, (const uint8_t *)name, name_length, length,
               start_block, needed);
-    return commit_metadata(fs);
+    return commit_entry(fs, slot);
 }
 
 YanFsResult yan_fs_create(YanFs *fs, const char *name, const uint8_t *bytes,
@@ -825,18 +1058,18 @@ static YanFsResult replace_locked(YanFs *fs, const char *name,
 {
     uint32_t name_length = 0;
     if (name == NULL || !caller_name_allowed(fs, name, &name_length) ||
-        name_overlaps_context(fs, name, name_length)) {
+        name_overlaps_protected(fs, name, name_length)) {
         return YAN_FS_INVALID;
     }
     if (length > 0u &&
-        (bytes == NULL || context_overlap(fs, bytes, (uint64_t)length))) {
+        (bytes == NULL || protected_overlap(fs, bytes, (uint64_t)length))) {
         return YAN_FS_INVALID;
     }
     uint32_t slot = 0;
     if (!find_entry(fs, name, name_length, &slot)) {
         return YAN_FS_NOT_FOUND;
     }
-    const uint8_t *previous = entry_at(fs->metadata, slot);
+    const uint8_t *previous = entry_at(fs->directory, slot);
     uint32_t previous_name_length = entry_name_length(previous);
     uint32_t needed = blocks_needed(length);
     uint32_t start_block = 0;
@@ -852,13 +1085,11 @@ static YanFsResult replace_locked(YanFs *fs, const char *name,
             return fault_io(fs, io);
         }
     }
-    for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
-        fs->scratch[i] = fs->metadata[i];
-    }
+    load_entry_block(fs, slot);
     /* The slot and the stored name survive; only size and extent change. */
     entry_set(fs->scratch, slot, previous, previous_name_length, length,
               start_block, needed);
-    return commit_metadata(fs);
+    return commit_entry(fs, slot);
 }
 
 YanFsResult yan_fs_replace(YanFs *fs, const char *name, const uint8_t *bytes,
@@ -878,20 +1109,18 @@ static YanFsResult remove_locked(YanFs *fs, const char *name)
 {
     uint32_t name_length = 0;
     if (name == NULL || !caller_name_allowed(fs, name, &name_length) ||
-        name_overlaps_context(fs, name, name_length)) {
+        name_overlaps_protected(fs, name, name_length)) {
         return YAN_FS_INVALID;
     }
     uint32_t slot = 0;
     if (!find_entry(fs, name, name_length, &slot)) {
         return YAN_FS_NOT_FOUND;
     }
-    for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
-        fs->scratch[i] = fs->metadata[i];
-    }
+    load_entry_block(fs, slot);
     entry_clear(fs->scratch, slot);
     /* One metadata write is the whole operation; the data blocks are left as
      * they are and simply stop being referenced. */
-    return commit_metadata(fs);
+    return commit_entry(fs, slot);
 }
 
 YanFsResult yan_fs_remove(YanFs *fs, const char *name)
@@ -921,7 +1150,7 @@ YanFsResult yan_fs_read(YanFs *fs, const char *name, uint32_t offset,
     YanFsResult state = operation_guard(fs);
     const bool count_writable =
         read_bytes != NULL &&
-        !context_overlap(fs, read_bytes, (uint64_t)sizeof(uint32_t));
+        !protected_overlap(fs, read_bytes, (uint64_t)sizeof(uint32_t));
     if (state != YAN_FS_OK) {
         if (count_writable) {
             *read_bytes = 0u;
@@ -945,7 +1174,7 @@ YanFsResult yan_fs_read(YanFs *fs, const char *name, uint32_t offset,
     bool name_valid = false;
     if (name != NULL) {
         name_valid = caller_name_allowed(fs, name, &name_length) &&
-                     !name_overlaps_context(fs, name, name_length);
+                     !name_overlaps_protected(fs, name, name_length);
         if (name_valid) {
             for (uint32_t i = 0; i < name_length; ++i) {
                 name_copy[i] = name[i];
@@ -959,7 +1188,7 @@ YanFsResult yan_fs_read(YanFs *fs, const char *name, uint32_t offset,
     }
 
     if (length > 0u) {
-        if (out == NULL || context_overlap(fs, out, (uint64_t)length)) {
+        if (out == NULL || protected_overlap(fs, out, (uint64_t)length)) {
             return YAN_FS_INVALID;
         }
         /* Approved 2026-10-03 supplement: the file output range and the
@@ -976,7 +1205,7 @@ YanFsResult yan_fs_read(YanFs *fs, const char *name, uint32_t offset,
     if (!find_entry(fs, name_copy, name_length, &slot)) {
         return YAN_FS_NOT_FOUND;
     }
-    const uint8_t *entry = entry_at(fs->metadata, slot);
+    const uint8_t *entry = entry_at(fs->directory, slot);
     uint32_t size_bytes = load_le32(entry + FS_ENTRY_SIZE_OFFSET);
     if (offset >= size_bytes || length == 0u) {
         return YAN_FS_OK;
@@ -1027,8 +1256,8 @@ YanFsResult yan_fs_list(YanFs *fs, uint32_t *cursor, YanFsInfo *out)
     }
     /* The alias test comes before *cursor is read and long before it is
      * written; arithmetic on the addresses is the only thing that happens. */
-    if (context_overlap(fs, cursor, (uint64_t)sizeof(uint32_t)) ||
-        context_overlap(fs, out, (uint64_t)sizeof(YanFsInfo))) {
+    if (protected_overlap(fs, cursor, (uint64_t)sizeof(uint32_t)) ||
+        protected_overlap(fs, out, (uint64_t)sizeof(YanFsInfo))) {
         return YAN_FS_INVALID;
     }
     /* Approved 2026-10-03 supplement: the whole YanFsInfo output and the
@@ -1039,11 +1268,11 @@ YanFsResult yan_fs_list(YanFs *fs, uint32_t *cursor, YanFsInfo *out)
         return YAN_FS_INVALID;
     }
     uint32_t slot = *cursor;
-    if (slot > YAN_FS_MAX_FILES) {
+    if (slot > fs->entry_capacity) {
         return YAN_FS_INVALID;
     }
-    while (slot < YAN_FS_MAX_FILES) {
-        const uint8_t *entry = entry_at(fs->metadata, slot);
+    while (slot < fs->entry_capacity) {
+        const uint8_t *entry = entry_at(fs->directory, slot);
         if (entry[0] != 0u) {
             for (uint32_t i = 0; i < FS_ENTRY_NAME_AREA; ++i) {
                 out->name[i] = (char)entry[i];
@@ -1056,7 +1285,7 @@ YanFsResult yan_fs_list(YanFs *fs, uint32_t *cursor, YanFsInfo *out)
     }
     /* Reaching the end advances the cursor to its final value and leaves the
      * output untouched. */
-    *cursor = YAN_FS_MAX_FILES;
+    *cursor = fs->entry_capacity;
     return YAN_FS_END;
 }
 
@@ -1071,17 +1300,17 @@ YanFsResult yan_fs_stat(YanFs *fs, const char *name, YanFsInfo *out)
     }
     uint32_t name_length = 0;
     if (!caller_name_allowed(fs, name, &name_length) ||
-        name_overlaps_context(fs, name, name_length)) {
+        name_overlaps_protected(fs, name, name_length)) {
         return YAN_FS_INVALID;
     }
-    if (context_overlap(fs, out, (uint64_t)sizeof(YanFsInfo))) {
+    if (protected_overlap(fs, out, (uint64_t)sizeof(YanFsInfo))) {
         return YAN_FS_INVALID;
     }
     uint32_t slot = 0;
     if (!find_entry(fs, name, name_length, &slot)) {
         return YAN_FS_NOT_FOUND;
     }
-    const uint8_t *entry = entry_at(fs->metadata, slot);
+    const uint8_t *entry = entry_at(fs->directory, slot);
     for (uint32_t i = 0; i < FS_ENTRY_NAME_AREA; ++i) {
         out->name[i] = (char)entry[i];
     }
@@ -1095,7 +1324,7 @@ YanFsResult yan_fs_stat(YanFs *fs, const char *name, YanFsInfo *out)
  * than NOT_FOUND. size, start, count, every other slot and every data block
  * survive; only the name field and the block CRC change. A self rename returns
  * before the first callback, and the only callback of a real rename is the
- * single block-0 write inside commit_metadata. */
+ * single block-0 write inside commit_entry. */
 static YanFsResult rename_locked(YanFs *fs, const char *old_name,
                                  const char *new_name)
 {
@@ -1103,10 +1332,10 @@ static YanFsResult rename_locked(YanFs *fs, const char *old_name,
     uint32_t new_length = 0;
     if (old_name == NULL ||
         !caller_name_allowed(fs, old_name, &old_length) ||
-        name_overlaps_context(fs, old_name, old_length) ||
+        name_overlaps_protected(fs, old_name, old_length) ||
         new_name == NULL ||
         !caller_name_allowed(fs, new_name, &new_length) ||
-        name_overlaps_context(fs, new_name, new_length)) {
+        name_overlaps_protected(fs, new_name, new_length)) {
         return YAN_FS_INVALID;
     }
 
@@ -1123,17 +1352,15 @@ static YanFsResult rename_locked(YanFs *fs, const char *old_name,
     }
 
     /* Read the surviving fields from the cache before scratch is reused. */
-    const uint8_t *entry = entry_at(fs->metadata, slot);
+    const uint8_t *entry = entry_at(fs->directory, slot);
     uint32_t size_bytes = load_le32(entry + FS_ENTRY_SIZE_OFFSET);
     uint32_t start_block = load_le32(entry + FS_ENTRY_START_OFFSET);
     uint32_t block_count = load_le32(entry + FS_ENTRY_COUNT_OFFSET);
 
-    for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
-        fs->scratch[i] = fs->metadata[i];
-    }
+    load_entry_block(fs, slot);
     entry_set(fs->scratch, slot, (const uint8_t *)new_name, new_length,
               size_bytes, start_block, block_count);
-    return commit_metadata(fs);
+    return commit_entry(fs, slot);
 }
 
 /* 0024 copy: keep the source slot and its extent, and build an independent file
@@ -1141,7 +1368,7 @@ static YanFsResult rename_locked(YanFs *fs, const char *old_name,
  * description comes from the metadata cache before scratch is used; every
  * source block is read into scratch and written to its target before the next
  * read; only the bytes past the logical end of the final block are cleared.
- * commit_metadata is reached only after every data write succeeded, so the
+ * commit_entry is reached only after every data write succeeded, so the
  * cache is published only once block 0 has been written. An empty source skips
  * the data loop entirely. */
 static YanFsResult copy_locked(YanFs *fs, const char *source_name,
@@ -1151,10 +1378,10 @@ static YanFsResult copy_locked(YanFs *fs, const char *source_name,
     uint32_t destination_length = 0;
     if (source_name == NULL ||
         !caller_name_allowed(fs, source_name, &source_length) ||
-        name_overlaps_context(fs, source_name, source_length) ||
+        name_overlaps_protected(fs, source_name, source_length) ||
         destination_name == NULL ||
         !caller_name_allowed(fs, destination_name, &destination_length) ||
-        name_overlaps_context(fs, destination_name, destination_length)) {
+        name_overlaps_protected(fs, destination_name, destination_length)) {
         return YAN_FS_INVALID;
     }
 
@@ -1170,7 +1397,7 @@ static YanFsResult copy_locked(YanFs *fs, const char *source_name,
     /* Capture the source description from the cache before the data loop
      * overwrites scratch on every block. block_count is the exact extent a
      * mounted, validated directory recorded for this size. */
-    const uint8_t *source_entry = entry_at(fs->metadata, source_slot);
+    const uint8_t *source_entry = entry_at(fs->directory, source_slot);
     uint32_t size_bytes = load_le32(source_entry + FS_ENTRY_SIZE_OFFSET);
     uint32_t start_block = load_le32(source_entry + FS_ENTRY_START_OFFSET);
     uint32_t block_count = load_le32(source_entry + FS_ENTRY_COUNT_OFFSET);
@@ -1210,12 +1437,10 @@ static YanFsResult copy_locked(YanFs *fs, const char *source_name,
         }
     }
 
-    for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
-        fs->scratch[i] = fs->metadata[i];
-    }
+    load_entry_block(fs, slot);
     entry_set(fs->scratch, slot, (const uint8_t *)destination_name,
               destination_length, size_bytes, destination_start, block_count);
-    return commit_metadata(fs);
+    return commit_entry(fs, slot);
 }
 
 /* Both public entry points hold busy across the whole call, so a device

@@ -17,7 +17,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="yan-run-lock-") as directory:
         image = os.path.join(directory, "notes.img")
         made = subprocess.run(
-            [yan_mkfs, "--image", image, "--blocks", "16"],
+            [yan_mkfs, "--image", image, "--blocks", "16", "--files", "63"],
             capture_output=True, timeout=30)
         if made.returncode != 0:
             print(f"yan_mkfs failed: {made.stderr.decode(errors='replace')}",

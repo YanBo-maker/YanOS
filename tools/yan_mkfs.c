@@ -33,9 +33,10 @@
 
 static void usage(FILE *out)
 {
-    fputs("usage: yan_mkfs --image FILE --blocks N\n", out);
+    fputs("usage: yan_mkfs --image FILE --blocks N [--files N]\n", out);
     fputs("  --image FILE   new image path (must not already exist)\n", out);
     fputs("  --blocks N     capacity in 4096-byte blocks, 1..4294967295\n", out);
+    fputs("  --files N      directory capacity, 63..4095 (default 63 until 0036-R3)\n", out);
 }
 
 /* Decimal only: no sign, no whitespace, no base prefix, no fraction. The
@@ -63,6 +64,43 @@ static bool parse_capacity(const char *text, uint32_t *out)
     return true;
 }
 
+/* 0036: decimal directory capacity. Only 64*D-1 for D in 1..64 is accepted,
+ * so the value alone determines the number of directory blocks. */
+static bool parse_files(const char *text, uint32_t *out)
+{
+    if (text == NULL || *text == '\0') {
+        return false;
+    }
+    uint64_t value = 0;
+    for (const char *cursor = text; *cursor != '\0'; ++cursor) {
+        if (*cursor < '0' || *cursor > '9') {
+            return false;
+        }
+        value = value * 10u + (uint64_t)(*cursor - '0');
+        if (value > UINT32_MAX) {
+            return false;
+        }
+    }
+    if (value < 63u || value > 4095u) {
+        return false;
+    }
+    *out = (uint32_t)value;
+    return true;
+}
+
+static bool files_to_directory_blocks(uint32_t files, uint32_t *out)
+{
+    if (files < 63u || files > 4095u || ((files + 1u) % 64u) != 0u) {
+        return false;
+    }
+    uint32_t blocks = (files + 1u) / 64u;
+    if (blocks < 1u || blocks > 64u) {
+        return false;
+    }
+    *out = blocks;
+    return true;
+}
+
 /* The capacity must also fit the Host file size the 0020 backend can express.
  * The format keeps capacity_blocks as u32 either way; 0020/0021 additionally
  * require the byte length to be representable by the Host C long, so the check
@@ -83,6 +121,7 @@ int main(int argc, char **argv)
 {
     const char *image = NULL;
     const char *blocks_text = NULL;
+    const char *files_text = NULL;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--image") == 0) {
@@ -97,6 +136,12 @@ int main(int argc, char **argv)
                 return 2;
             }
             blocks_text = argv[++i];
+        } else if (strcmp(argv[i], "--files") == 0) {
+            if (files_text != NULL || i + 1 >= argc) {
+                usage(stderr);
+                return 2;
+            }
+            files_text = argv[++i];
         } else {
             usage(stderr);
             return 2;
@@ -111,6 +156,32 @@ int main(int argc, char **argv)
         fprintf(stderr, "yan_mkfs: invalid --blocks '%s'\n", blocks_text);
         return 2;
     }
+    uint32_t files = 63u;
+    if (files_text != NULL && !parse_files(files_text, &files)) {
+        fprintf(stderr, "yan_mkfs: invalid --files '%s'\n", files_text);
+        return 2;
+    }
+    uint32_t directory_blocks = 0;
+    if (!files_to_directory_blocks(files, &directory_blocks)) {
+        fprintf(stderr, "yan_mkfs: invalid --files '%s'\n", files_text);
+        return 2;
+    }
+    /* V1 keeps capacity 1; a v2 directory needs at least one data block. */
+    if (blocks < directory_blocks ||
+        (directory_blocks > 1u && blocks == directory_blocks)) {
+        fprintf(stderr, "yan_mkfs: --blocks %" PRIu32
+                        " cannot hold a %" PRIu32 "-block directory\n",
+                blocks, directory_blocks);
+        return 2;
+    }
+
+    /* Allocated before open so a failed allocation creates no path. */
+    uint8_t *directory = calloc(directory_blocks, YAN_FS_BLOCK_SIZE);
+    if (directory == NULL) {
+        fprintf(stderr, "yan_mkfs: cannot allocate the directory for '%s'\n",
+                image);
+        return 5;
+    }
 
     /* O_EXCL refuses an existing regular file and any symlink, including a
      * dangling one, so an existing path is never truncated or followed. */
@@ -124,6 +195,7 @@ int main(int argc, char **argv)
             fprintf(stderr, "yan_mkfs: cannot create '%s': %s\n", image,
                     strerror(errno));
         }
+        free(directory);
         return 5;
     }
     FILE *stream = fdopen(fd, "wb");
@@ -131,11 +203,11 @@ int main(int argc, char **argv)
         fprintf(stderr, "yan_mkfs: cannot open stream for '%s': %s\n", image,
                 strerror(errno));
         (void)close(fd);
+        free(directory);
         return 5;
     }
 
-    /* One 4 KiB buffer, zero-filled by its static initializer, serves the zero
-     * payload first and then the directory block. No sparse optimisation: the
+    /* The zero payload is one static 4 KiB block. No sparse optimisation: the
      * whole capacity really moves through the stream. */
     static uint8_t buffer[YAN_FS_BLOCK_SIZE];
     int status = 0;
@@ -149,7 +221,9 @@ int main(int argc, char **argv)
             break;
         }
     }
-    if (status == 0 && yan_fs_format_metadata(buffer, blocks) != YAN_FS_OK) {
+    if (status == 0 &&
+        yan_fs_format_directory(directory, directory_blocks, blocks) !=
+            YAN_FS_OK) {
         fprintf(stderr, "yan_mkfs: cannot build the empty directory for '%s'\n",
                 image);
         status = 5;
@@ -159,7 +233,10 @@ int main(int argc, char **argv)
                 strerror(errno));
         status = 5;
     }
-    if (status == 0 && fwrite(buffer, 1u, sizeof buffer, stream) != sizeof buffer) {
+    if (status == 0 &&
+        fwrite(directory, 1u, (size_t)directory_blocks * YAN_FS_BLOCK_SIZE,
+               stream) !=
+            (size_t)directory_blocks * YAN_FS_BLOCK_SIZE) {
         fprintf(stderr, "yan_mkfs: short metadata write to '%s'\n", image);
         status = 5;
     }
@@ -173,10 +250,12 @@ int main(int argc, char **argv)
                 strerror(errno));
         status = 5;
     }
+    free(directory);
     if (status != 0) {
         return 5;
     }
 
-    printf("yan_mkfs: wrote %s (%" PRIu32 " blocks)\n", image, blocks);
+    printf("yan_mkfs: wrote %s (%" PRIu32 " blocks, %" PRIu32 " files)\n",
+           image, blocks, files);
     return 0;
 }

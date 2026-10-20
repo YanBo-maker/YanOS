@@ -318,7 +318,7 @@ def require_stderr(result, fragment, owner):
 
 def fresh_image(mkfs, path):
     result = subprocess.run([str(mkfs), "--image", str(path),
-                             "--blocks", str(BLOCKS)],
+                             "--blocks", str(BLOCKS), "--files", "63"],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             timeout=60)
     if result.returncode != 0:
@@ -501,7 +501,7 @@ def case_corrupt_images(case_dir, args):
 
     version = bytearray(base)
     block0 = bytearray(metadata_block(BLOCKS))
-    struct.pack_into("<I", block0, 8, 2)
+    struct.pack_into("<I", block0, 8, 3)
     reseal(block0)
     version[0:BLOCK] = block0
     check_rejected_mount(case_dir, args, "corrupt-version", bytes(version),

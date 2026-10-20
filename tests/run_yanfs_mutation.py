@@ -113,11 +113,13 @@ MUTATIONS = [
     {
         "name": "bad_crc_accepted",
         "file": "os/yanfs.c",
-        "old": """    if (load_le32(block + FS_CRC_OFFSET) != yan_fs_metadata_crc(block)) {
+        "old": """    if (load_le32(directory + FS_CRC_OFFSET) !=
+        yan_fs_directory_crc(directory, directory_blocks)) {
         return YAN_FS_CORRUPT;
     }
 """,
-        "new": """    if ((load_le32(block + FS_CRC_OFFSET) ^ yan_fs_metadata_crc(block)) == 0u) {
+        "new": """    if ((load_le32(directory + FS_CRC_OFFSET) ^
+         yan_fs_directory_crc(directory, directory_blocks)) == 0u) {
         (void)0;
     }
 """,
@@ -146,14 +148,13 @@ MUTATIONS = [
     {
         "name": "cache_published_before_validation",
         "file": "os/yanfs.c",
-        "old": """            result = validate_metadata(fs->scratch, (uint32_t)device_blocks);
-            if (result == YAN_FS_OK) {
+        "old": """    if (result != YAN_FS_OK) {
+        clear_directory(fs);
+    }
 """,
-        "new": """            for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
-                fs->metadata[i] = fs->scratch[i];
-            }
-            result = validate_metadata(fs->scratch, (uint32_t)device_blocks);
-            if (result == YAN_FS_OK) {
+        "new": """    if (result != YAN_FS_OK) {
+        (void)0; /* mutant: a rejected directory stays visible in the cache */
+    }
 """,
     },
     {
@@ -183,16 +184,20 @@ MUTATIONS = [
     {
         "name": "first_fit_ignores_fragmentation",
         "file": "os/yanfs.c",
-        "old": """        uint32_t limit = fs->capacity_blocks;
-        for (uint32_t i = 0; i < used_total; ++i) {
-            if (used_start[i] > candidate && used_start[i] < limit) {
-                limit = used_start[i];
-            }
+        "old": """    uint32_t limit = fs->capacity_blocks;
+    for (uint32_t i = 0; i < fs->entry_capacity; ++i) {
+        const uint8_t *entry = entry_at(fs->directory, i);
+        if (entry[0] == 0u || load_le32(entry + FS_ENTRY_SIZE_OFFSET) == 0u) {
+            continue;
         }
-        if (limit - candidate >= needed && (best == 0u || candidate < best)) {
+        uint32_t start = load_le32(entry + FS_ENTRY_START_OFFSET);
+        if (start > candidate && start < limit) {
+            limit = start;
+        }
+    }
+    return limit - candidate >= needed;
 """,
-        "new": """        uint32_t limit = fs->capacity_blocks;
-        if (limit - candidate >= needed && (best == 0u || candidate < best)) {
+        "new": """    return fs->capacity_blocks - candidate >= needed;
 """,
     },
     {
@@ -223,8 +228,8 @@ MUTATIONS = [
     {
         "name": "extent_start_range_accepted",
         "file": "os/yanfs.c",
-        "old": """        /* 0021: confirm 1 <= start < capacity first, then the count fits. */
-        if (start_block < 1u || start_block >= capacity_blocks) {
+        "old": """        /* 0036: an extent starts after the whole directory, not at block 1. */
+        if (start_block < directory_blocks || start_block >= capacity_blocks) {
             return YAN_FS_CORRUPT;
         }
         if (block_count > capacity_blocks - start_block) {
@@ -267,10 +272,8 @@ MUTATIONS = [
 """,
         "new": """        if (target == slot) {
             /* mutant: rewrite the directory even for a self rename */
-            for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
-                fs->scratch[i] = fs->metadata[i];
-            }
-            return commit_metadata(fs);
+            load_entry_block(fs, slot);
+            return commit_entry(fs, slot);
         }
 """,
     },
@@ -335,16 +338,18 @@ MUTATIONS = [
     {
         "name": "copy_publishes_candidate_before_write",
         "file": "os/yanfs.c",
-        "old": """    entry_set(fs->scratch, slot, (const uint8_t *)destination_name,
+        "old": """    load_entry_block(fs, slot);
+    entry_set(fs->scratch, slot, (const uint8_t *)destination_name,
               destination_length, size_bytes, destination_start, block_count);
-    return commit_metadata(fs);
+    return commit_entry(fs, slot);
 """,
-        "new": """    entry_set(fs->scratch, slot, (const uint8_t *)destination_name,
+        "new": """    load_entry_block(fs, slot);
+    entry_set(fs->scratch, slot, (const uint8_t *)destination_name,
               destination_length, size_bytes, destination_start, block_count);
     for (uint32_t i = 0; i < YAN_FS_BLOCK_SIZE; ++i) {
-        fs->metadata[i] = fs->scratch[i]; /* mutant: candidates published first */
+        fs->directory[i] = fs->scratch[i]; /* mutant: candidates published first */
     }
-    return commit_metadata(fs);
+    return commit_entry(fs, slot);
 """,
     },
     {

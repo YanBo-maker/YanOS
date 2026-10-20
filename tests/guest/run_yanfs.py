@@ -266,7 +266,8 @@ def fail(message):
 
 
 def fresh_image_check(mkfs, path):
-    proc = run_host([str(mkfs), "--image", str(path), "--blocks", str(BLOCKS)])
+    proc = run_host([str(mkfs), "--image", str(path), "--blocks", str(BLOCKS),
+                     "--files", "63"])
     if proc.returncode != 0:
         raise HarnessError("yan_mkfs failed: %s" % proc.stderr.decode(errors="replace"))
     data = path.read_bytes()
@@ -494,7 +495,7 @@ def run_cases(args, source, case, run_exe, mkfs_exe, traces):
     version_image = case / "version.img"
     version = bytearray(base.read_bytes())
     version_block = bytearray(metadata_block(BLOCKS))
-    struct.pack_into("<I", version_block, 8, 2)
+    struct.pack_into("<I", version_block, 8, 3)
     reseal(version_block)
     version[0:BLOCK] = version_block
     version_image.write_bytes(bytes(version))

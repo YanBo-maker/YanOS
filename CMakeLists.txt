@@ -511,6 +511,16 @@ if(BUILD_TESTING)
     add_test(NAME yanfs COMMAND test_yanfs)
     set_tests_properties(yanfs PROPERTIES TIMEOUT 30)
 
+    # 0036-R2: multi-block v2 directory. The suite allocates the memory device
+    # and the external directory with calloc, so it runs the same contract the
+    # Guest will use once 0036-R3 introduces the arena.
+    add_executable(test_yanfs_v2 tests/test_yanfs_v2.c)
+    target_link_libraries(test_yanfs_v2 PRIVATE yan_fs unity::framework)
+    target_compile_options(test_yanfs_v2 PRIVATE ${YAN_WARNINGS})
+    add_test(NAME yanfs_v2 COMMAND test_yanfs_v2)
+    set_tests_properties(yanfs_v2 PROPERTIES TIMEOUT 900
+                         LABELS "0036-R2-AC1;0036-R2-AC2;0036-R2-AC3")
+
     # 0026 source-identity exhaustion: the same os/yanfs.c compiled a second time
     # with a near-UINT64_MAX allocator seed. It builds its own copy of the source
     # instead of linking yan_fs, because linking both would define yanfs.c twice.
@@ -1047,7 +1057,20 @@ if(BUILD_TESTING)
                         --mkfs "$<TARGET_FILE:yan_mkfs>"
                         --fault-mkfs "$<TARGET_FILE:yan_mkfs_fault>"
                         --work "${CMAKE_BINARY_DIR}/yanfs-mkfs")
-            set_tests_properties(yanfs_mkfs PROPERTIES TIMEOUT 120)
+            set_tests_properties(yanfs_mkfs PROPERTIES TIMEOUT 180
+                                 LABELS "0036-R1-AC1;0036-R1-AC2;0036-R1-AC3")
+            # 0036-R2-AC4: fixed v1 write sequence vs the 41b83b5 SHA-256.
+            add_executable(yanfs_write_probe tests/yanfs_write_probe.c)
+            target_link_libraries(yanfs_write_probe PRIVATE yan_fs)
+            target_compile_options(yanfs_write_probe PRIVATE ${YAN_WARNINGS})
+            add_test(NAME yanfs_write_sha
+                COMMAND "${Python3_EXECUTABLE}"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_yanfs_write_sha.py"
+                        --mkfs "$<TARGET_FILE:yan_mkfs>"
+                        --probe "$<TARGET_FILE:yanfs_write_probe>"
+                        --work "${CMAKE_BINARY_DIR}/yanfs-write-sha")
+            set_tests_properties(yanfs_write_sha PROPERTIES TIMEOUT 60
+                                 LABELS "0036-R2-AC4")
         endif()
         add_test(NAME persistent_combined_gate
             COMMAND "${Python3_EXECUTABLE}"

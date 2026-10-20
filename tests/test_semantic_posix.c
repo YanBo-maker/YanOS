@@ -254,7 +254,7 @@ static void test_typed_open_reports_unsupported_and_legacy_mapping(void)
 {
     uint8_t saved[4096];
     memcpy(saved, disk, sizeof saved);
-    disk[8] = 2; disk[9] = disk[10] = disk[11] = 0;
+    disk[8] = 3; disk[9] = disk[10] = disk[11] = 0;
     uint32_t crc = yan_fs_metadata_crc(disk);
     disk[60] = (uint8_t)crc; disk[61] = (uint8_t)(crc >> 8);
     disk[62] = (uint8_t)(crc >> 16); disk[63] = (uint8_t)(crc >> 24);

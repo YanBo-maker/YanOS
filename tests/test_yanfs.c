@@ -740,7 +740,7 @@ static void mount_rejects_zero_and_oversized_device_capacity(void)
 static void mount_rejects_unknown_version_as_unsupported(void)
 {
     fx_device(16u);
-    fx_put_le32(device.blocks[0] + 8u, 2u);
+    fx_put_le32(device.blocks[0] + 8u, 3u);
     fx_seal(device.blocks[0]);
     TEST_ASSERT_EQUAL_INT(YAN_FS_UNSUPPORTED, mount_fresh());
     TEST_ASSERT_EQUAL_INT(YAN_FS_UNMOUNTED, fs.state);
@@ -4055,7 +4055,7 @@ static void source_identity_unchanged_by_normal_mount_rejection(void)
 
     /* UNSUPPORTED (foreign version) is rejected the same way. */
     fx_device(16u);
-    fx_put_le32(device.blocks[0] + 8u, 2u);
+    fx_put_le32(device.blocks[0] + 8u, 3u);
     fx_seal(device.blocks[0]);
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_UNSUPPORTED, yan_fs_mount(&fs),
         "the fixture must be rejected as UNSUPPORTED");

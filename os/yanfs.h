@@ -26,10 +26,12 @@
 
 #define YAN_FS_BLOCK_SIZE UINT32_C(4096)
 #define YAN_FS_MAX_FILES UINT32_C(63)
+#define YAN_FS_MAX_DIR_BLOCKS UINT32_C(64)
 #define YAN_FS_NAME_MAX UINT32_C(31)
 #define YAN_FS_HEADER_SIZE UINT32_C(64)
 #define YAN_FS_ENTRY_SIZE UINT32_C(64)
 #define YAN_FS_VERSION UINT32_C(1)
+#define YAN_FS_VERSION_2 UINT32_C(2)
 
 typedef enum {
     YAN_FS_OK = 0, YAN_FS_END = 1, YAN_FS_INVALID = 2,
@@ -81,12 +83,20 @@ typedef struct {
     bool busy;
     uint32_t capacity_blocks;
     uint8_t metadata[4096];
+    uint8_t *directory;
+    uint32_t directory_blocks;
+    uint32_t entry_capacity;
     uint8_t scratch[4096];
     uint64_t source_token;
     bool source_cacheable;
 } YanFs;
 
 YanFsResult yan_fs_init(YanFs *, YanFsBlockIo);
+/* 0036: use a caller-owned directory cache of directory_blocks * 4096 bytes.
+ * The buffer is long-lived and must not overlap the YanFs object; yan_fs_init
+ * is the built-in D=1 case using the metadata member. */
+YanFsResult yan_fs_init_directory(YanFs *, YanFsBlockIo, uint8_t *directory,
+                                  uint32_t directory_blocks);
 YanFsResult yan_fs_mount(YanFs *);
 YanFsResult yan_fs_unmount(YanFs *);
 YanFsResult yan_fs_list(YanFs *, uint32_t *cursor, YanFsInfo *out);
@@ -128,5 +138,11 @@ YanFsResult yan_fs_source(const YanFs *fs, YanFsSource *out);
  * format an image; neither gives the Guest a way to format a device. */
 YanFsResult yan_fs_format_metadata(uint8_t out[4096], uint32_t capacity_blocks);
 uint32_t yan_fs_metadata_crc(const uint8_t block[4096]);
+/* 0036 pure helpers for the multi-block directory. V1 (D=1) is the original
+ * format; D>1 writes version 2 and a CRC over all D blocks. */
+YanFsResult yan_fs_format_directory(uint8_t *out, uint32_t directory_blocks,
+                                    uint32_t capacity_blocks);
+uint32_t yan_fs_directory_crc(const uint8_t *directory,
+                              uint32_t directory_blocks);
 
 #endif
