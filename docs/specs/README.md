@@ -38,3 +38,4 @@
 | [0032](0032-block-references.md) | 具名块与精确正文引用 | Implemented | 无 | 无 |
 | [0033](0033-block-mcp-navigation.md) | Agent 的只读块导航 | Implemented | 无 | 无 |
 | [0034](0034-ci-guest-tests-and-status-archive.md) | CI 运行 Guest 默认测试与 STATUS 归档 | Approved | 无 | 无 |
+| [0036](0036-yanfs-multi-block-directory.md) | YanFS 多块目录 | Approved | 无 | 无 |

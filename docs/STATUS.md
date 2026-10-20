@@ -2,6 +2,8 @@
 
 ## 当前阶段
 
+[0036](specs/0036-yanfs-multi-block-directory.md) 已批准（2026-10-20），进行中。PR1（R1+R2，[PR #62](https://github.com/YanBo-maker/YanOS/pull/62)）：`yan_mkfs` 新增 `--files N`（N=64·D−1，D=1..64；N=63 写 v1，N>63 写 version 2 多块目录，D>1 时 `--blocks` 必须大于 D），YanFS 核心能挂载并读写 v1 和 v2。过渡状态：R3 合入前 `--files` 缺省仍为 63；终端 Guest、`note_write`、语义工具仍用 `yan_fs_init`（D=1），只能挂载 v1，v2 镜像目前只有 YanFS 库（`yan_fs_init_directory`）能挂载。缺省改为 1023 和各使用方按容量分配随 R3 落地。
+
 [0034](specs/0034-ci-guest-tests-and-status-archive.md) 已批准（2026-10-19）。R1–R5 已随 [PR #43](https://github.com/YanBo-maker/YanOS/pull/43) 合入 main（41b83b5，提交 e483bf9）。两个 ubuntu-22.04 任务用 apt 安装 `gcc-riscv64-linux-gnu`，并以 `-DYAN_BUILD_TOOLS=ON -DYAN_RISCV_PREFIX=riscv64-linux-gnu-` 配置。`YAN_RISCV_GCC` 不是可执行路径，或 `ctest -N -R '^guest_'` 为 0 时，任务在测试前失败。Linux 的 ctest 输出经 `tee` 记入日志，出现 `(Skipped)` 则失败。windows-2022 仍只做 Debug，配置、构建和 `ctest` 命令与 PR #43 之前相同，不安装 RISC-V 工具链。
 
 合入后 main 的 [Actions 39339094819](https://github.com/YanBo-maker/YanOS/actions/runs/39339094819) 三项成功。安装包为 `gcc-11-riscv64-linux-gnu 11.4.0-1ubuntu1~22.04cross1`。该次运行的配置日志写明差分测试未注册（参考模型路径为空）。`YAN_ENABLE_MUTATION_TESTS` 与 `YAN_BUILD_SEMANTIC` 不在这套 CI 里。
@@ -53,7 +55,7 @@
 - `tests/official/run_act4.sh` 在 Sail 与 DUT 都没有签名时把用例记为 skipped；结束条件仍是 differed 为 0 且 matched 大于 0。跳过数大于 0 本身不使脚本失败。
 - CI 不打开 `YAN_ENABLE_MUTATION_TESTS`。默认套件里的 `*_mutation_gate` 纯门禁仍会注册。`guest_console_mutation_gate` 只在变异配置打开时注册（`CMakeLists.txt` 中该门禁与 `YAN_ENABLE_MUTATION_TESTS` 同支）。
 - CI 不打开 `YAN_BUILD_SEMANTIC`。因此 `yan_mcp`、`mcp_*`，以及写在该开关内的 `semantic_cli`、`semantic_json`、`semantic_json_memory`、`semantic_provider` 不注册。`guest_note_blocks_host` 还要求已有 `yan_mcp` 目标（`CMakeLists.txt` 中 `if(TARGET yan_mcp)`），本次 CI 名单里没有它。不依赖该开关的 Host 侧测试仍会注册。Actions 39339094819 的 Linux 名单含 `semantic`、`semantic_corpus`、`semantic_text`、`semantic_text_oracle`、`semantic_rank_oracle`、`semantic_sha256`、`semantic_mutation_gate`、`semantic_posix`；Windows 名单相同，但没有只在 Linux 注册的 `semantic_posix`。
-- 没有 S/U 模式、`medeleg` / `mideleg`、虚拟内存分页和抢占式调度。YanFS 初版仍是单根目录、最多 63 个文件、连续 extent；元数据写失败可能拒挂，不保证断电一致性。
+- 没有 S/U 模式、`medeleg` / `mideleg`、虚拟内存分页和抢占式调度。YanFS 仍是单根目录、连续 extent；v1 最多 63 个文件，v2（0036）最多 4095 个，但 R3 合入前只有库能挂载 v2。元数据写失败可能拒挂，不保证断电一致性：v1 一次目录更新是一次块写入，v2 改动块 0 以外的目录项时是两次（先写该块，再写块 0 的 CRC），两次之间断电会让镜像 CRC 不符而被拒挂。
 
 ## 待定设计
 
