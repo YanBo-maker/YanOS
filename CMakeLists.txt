@@ -1251,6 +1251,20 @@ if(BUILD_TESTING)
         set_tests_properties(guest_note_blocks_api PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
     endif()
 
+    # 0036-R5-AC2: N is a runtime value, so one -fstack-usage build of the RV32
+    # core is enough to prove allocate_extent's frame is static and small.
+    if(YAN_RISCV_GCC)
+        add_test(NAME stack_usage
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_stack_usage.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --work "${CMAKE_BINARY_DIR}/stack-usage"
+                    --gcc "${YAN_RISCV_GCC}")
+        set_tests_properties(stack_usage PROPERTIES SKIP_RETURN_CODE 77
+                                                     TIMEOUT 120
+                                                     LABELS "0036-R5-AC2")
+    endif()
+
     # The console needs the UART terminal backend, which lives on the Host; the
     # Guest program drives the device directly so the test does not depend on
     # the console driver being finished.
