@@ -1,10 +1,12 @@
 /* RV32 public relation API checks using a real FS, without patching its state. */
 #include "guest.h"
+#include "../fs_test_support.h"
 #include "platform.h"
 #include "note_relations.h"
 
 static YanFs fs;
 static YanRelationContext relation;
+static YanRelationRow rows[YAN_FS_MAX_FILES];
 static YanRelationSummary summary;
 static uint8_t disk[8][4096];
 static uint32_t reads, writes, callbacks;
@@ -27,7 +29,7 @@ static bool stop(void *c, const YanRelationRow *row) {
     guest_check(!row->outgoing && !row->incoming && row->shared_tags==0u,32u);
     callback_reads=reads;
     reentry=yan_relation_related(&relation,NULL,NULL,NULL,NULL);
-    reinit=yan_relation_init(&relation,&fs);
+    reinit=yan_relation_init(&relation,&fs,rows);
     guest_check(reads==callback_reads && writes==0u,31u);
     return false;
 }
@@ -37,18 +39,18 @@ static bool accept(void *c, const YanRelationRow *row) {
 
 int main(void) {
     YanFsBlockIo io={NULL,capacity,read_block,write_block};
-    guest_check(yan_fs_init(&fs,io)==YAN_FS_OK,2u);
+    guest_check(test_fs_init(&fs,io)==YAN_FS_OK,2u);
     guest_check(yan_fs_format_metadata(disk[0],8u)==YAN_FS_OK,3u);
     guest_check(yan_fs_mount(&fs)==YAN_FS_OK,4u);
     static const uint8_t content[]="@yan-note 1\nlink: n\ntag: os\n@end\n\000binary";
     guest_check(yan_fs_create(&fs,"n",content,sizeof content-1u)==YAN_FS_OK,5u);
-    guest_check(yan_relation_init(&relation,&fs)==YAN_NOTE_OK,6u);
+    guest_check(yan_relation_init(&relation,&fs,rows)==YAN_NOTE_OK,6u);
     reads=writes=0u;
     summary.total=0xdeadbeefu; summary.shown=0xa5a5u; summary.target_exists=true;
     YanRelationContext *wrap=(YanRelationContext *)(uintptr_t)(UINTPTR_MAX-sizeof relation+1u);
     guest_check(yan_relation_links(wrap,"n",accept,NULL,&summary)==YAN_NOTE_INVALID,7u);
-    guest_check(yan_relation_init(wrap,&fs)==YAN_NOTE_INVALID,8u);
-    guest_check(yan_relation_init(&relation,(YanFs *)(uintptr_t)0xfffffffeu)==YAN_NOTE_INVALID,9u);
+    guest_check(yan_relation_init(wrap,&fs,rows)==YAN_NOTE_INVALID,8u);
+    guest_check(yan_relation_init(&relation,(YanFs *)(uintptr_t)0xfffffffeu,rows)==YAN_NOTE_INVALID,9u);
     guest_check(yan_relation_backlinks(&relation,"n",accept,NULL,(YanRelationSummary *)(uintptr_t)0xfffffffeu)==YAN_NOTE_INVALID,10u);
     guest_check(yan_relation_related(&relation,(const char *)(uintptr_t)UINTPTR_MAX,accept,NULL,&summary)==YAN_NOTE_INVALID,11u);
     guest_check(yan_relation_links(&relation,(const char *)&relation,accept,NULL,&summary)==YAN_NOTE_INVALID,12u);

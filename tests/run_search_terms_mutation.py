@@ -52,7 +52,8 @@ OS_SOURCES = ["yanfs.c", "search.c", "search_linear.c", "search_terms.c", "note_
               "search_terms_core.c", "search_terms_linear.c",
               "search_terms_index.c", "search_text.c", "shell.c", "note_relations.c", "note_blocks.c", "note_blocks_format.c", "note_metadata.c"]
 TEST_FILES = ["test_search_terms.c", "test_search_index.c",
-              "test_shell_terms.c", "test_yanfs_source_exhaustion.c"]
+              "test_shell_terms.c", "test_yanfs_source_exhaustion.c",
+              "fs_test_support.h"]
 REQUIRED_FILES = TEST_FILES + ["run_search_terms_mutation.py"]
 
 TERM_CORE = ["os/search_terms.c", "os/note_metadata_format.c", "os/search_terms_core.c", "os/search_text.c",

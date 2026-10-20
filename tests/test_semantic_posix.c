@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "semantic_posix.h"
+#include "fs_test_support.h"
 #include "unity.h"
 #include <fcntl.h>
 #include <stdlib.h>
@@ -52,7 +53,7 @@ void setUp(void)
     memset(&writer, 0, sizeof writer);
     TEST_ASSERT_EQUAL(YAN_FS_OK, yan_fs_format_metadata(disk, 16));
     YanFsBlockIo io = {NULL, cap, read_block, write_block};
-    TEST_ASSERT_EQUAL(YAN_FS_OK, yan_fs_init(&writer, io));
+    TEST_ASSERT_EQUAL(YAN_FS_OK, test_fs_init(&writer, io));
     TEST_ASSERT_EQUAL(YAN_FS_OK, yan_fs_mount(&writer));
     TEST_ASSERT_EQUAL(YAN_FS_OK, yan_fs_create(&writer, "note", (const uint8_t *)"notes\n", 6));
     write_file(image, disk, sizeof disk);

@@ -39,6 +39,7 @@
  * writes private filesystem or index state to simulate these conditions. */
 
 #include "note_metadata_format.h"
+#include "fs_test_support.h"
 #include "search_terms.h"
 #include "search_terms_index.h"
 #include "search_terms_linear.h"
@@ -125,7 +126,7 @@ static void device_mount(void)
     TEST_ASSERT_EQUAL_INT_MESSAGE(
         YAN_FS_OK, yan_fs_format_metadata(medium[0], FILTER_BLOCKS),
         "filter_fixture_format");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_init(&fs, fs_backend()),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, test_fs_init(&fs, fs_backend()),
                                   "filter_fixture_init");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_mount(&fs),
                                   "filter_fixture_mount");
@@ -150,7 +151,7 @@ static void fs_replace_file(const char *name, const uint8_t *bytes,
 static void facade_init(void)
 {
     TEST_ASSERT_EQUAL_INT_MESSAGE(
-        YAN_SEARCH_TERMS_OK, yan_search_terms_linear_init(&linear, &fs),
+        YAN_SEARCH_TERMS_OK, test_terms_linear_init(&linear, &fs),
         "filter_fixture_linear_init");
     TEST_ASSERT_EQUAL_INT_MESSAGE(
         YAN_SEARCH_TERMS_OK,
@@ -158,7 +159,7 @@ static void facade_init(void)
                               yan_search_terms_linear_backend(&linear)),
         "filter_fixture_facade_init");
     TEST_ASSERT_EQUAL_INT_MESSAGE(
-        YAN_SEARCH_TERMS_OK, yan_search_terms_index_init(&index_terms, &fs),
+        YAN_SEARCH_TERMS_OK, test_terms_index_init(&index_terms, &fs),
         "filter_fixture_index_init");
     TEST_ASSERT_EQUAL_INT_MESSAGE(
         YAN_SEARCH_TERMS_OK,

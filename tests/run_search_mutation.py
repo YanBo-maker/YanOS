@@ -51,7 +51,7 @@ OS_HEADERS = ["search.h", "search_linear.h", "yanfs.h", "shell.h", "note_relatio
 OS_SOURCES = ["search.c", "search_linear.c", "yanfs.c", "shell.c", "note_relations.c", "note_blocks.c", "note_blocks_format.c", "note_metadata.c",
               "search_terms.c", "note_metadata_format.c", "search_terms_linear.c", "search_terms_core.c",
               "search_terms_index.c", "search_text.c"]
-TEST_FILES = ["test_search.c", "test_shell.c"]
+TEST_FILES = ["test_search.c", "test_shell.c", "fs_test_support.h"]
 REQUIRED_FILES = TEST_FILES + ["run_search_mutation.py"]
 
 SUITES = {

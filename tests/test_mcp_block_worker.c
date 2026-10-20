@@ -1,6 +1,7 @@
 /* D: yan_mcp_execute block domain must not need model/index/runner. */
 #define _POSIX_C_SOURCE 200809L
 #include "mcp_worker.h"
+#include "fs_test_support.h"
 #include "unity.h"
 #include <fcntl.h>
 #include <stdio.h>
@@ -32,7 +33,7 @@ static void make_image(char path[64])
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_format_metadata(medium[0], BLOCKS));
     YanFs fs;
     YanFsBlockIo io = {NULL, capacity, read_block, write_block};
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, io));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs, io));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
     static const uint8_t data[] = "@block a\nhello\n";
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_create(&fs, "blocks.txt", data, sizeof data - 1));

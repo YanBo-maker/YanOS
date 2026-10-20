@@ -1,4 +1,5 @@
 #include "search_linear.h"
+#include "fs_test_support.h"
 #include "search_terms_linear.h"
 #include "shell.h"
 #include "unity.h"
@@ -257,7 +258,7 @@ static void fixture(void)
     io.capacity = device_capacity;
     io.read_block = device_read;
     io.write_block = device_write;
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, io));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs, io));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
     memset(&shell, 0, sizeof shell);
     memset(&shell_linear, 0, sizeof shell_linear);
@@ -271,7 +272,7 @@ static void fixture(void)
         yan_search_init(&shell_search, yan_search_linear_backend(&shell_linear)));
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_TERMS_OK,
-        yan_search_terms_linear_init(&shell_terms_linear, &fs));
+        test_terms_linear_init(&shell_terms_linear, &fs));
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_TERMS_OK,
         yan_search_terms_init(&shell_terms,
@@ -1407,9 +1408,9 @@ static void init_rejects_an_alias_region_with_non_boolean_bytes(void)
     static YanFs probe;
     static uint8_t before[sizeof probe];
     memset(&probe, 0, sizeof probe);
-    probe.metadata[offsetof(YanShell, initialized)] = 0x02u;
+    probe.scratch[offsetof(YanShell, initialized)] = 0x02u;
     memcpy(before, &probe, sizeof probe);
-    YanShell *aliased = (YanShell *)(void *)probe.metadata;
+    YanShell *aliased = (YanShell *)(void *)probe.scratch;
     YanShellOutput output;
     output.context = &capture;
     output.putc = capture_putc;

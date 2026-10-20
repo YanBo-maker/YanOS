@@ -3,6 +3,7 @@
  * be binary: CR and Ctrl-Z are legitimate bytes in a source file. All output
  * is ASCII, with snippet bytes encoded as hex while the callback owns them. */
 #include "yanfs.h"
+#include "fs_test_support.h"
 #include "search_terms.h"
 #include "search_terms_linear.h"
 #include "search_terms_index.h"
@@ -142,7 +143,7 @@ int main(int argc, char **argv)
         return 95;
     }
     YanFsBlockIo io = {NULL, capacity, read_block, write_block};
-    if (yan_fs_init(&fs, io) != YAN_FS_OK || yan_fs_mount(&fs) != YAN_FS_OK) {
+    if (test_fs_init(&fs, io) != YAN_FS_OK || yan_fs_mount(&fs) != YAN_FS_OK) {
         return 96;
     }
     uint32_t next_slot = 0u;
@@ -186,12 +187,12 @@ int main(int argc, char **argv)
     }
     YanSearchTermsBackend backend;
     if (indexed) {
-        if (yan_search_terms_index_init(&index_context, &fs) != YAN_SEARCH_TERMS_OK) {
+        if (test_terms_index_init(&index_context, &fs) != YAN_SEARCH_TERMS_OK) {
             return 102;
         }
         backend = yan_search_terms_index_backend(&index_context);
     } else {
-        if (yan_search_terms_linear_init(&linear, &fs) != YAN_SEARCH_TERMS_OK) {
+        if (test_terms_linear_init(&linear, &fs) != YAN_SEARCH_TERMS_OK) {
             return 102;
         }
         backend = yan_search_terms_linear_backend(&linear);

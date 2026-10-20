@@ -1,4 +1,5 @@
 #include "search_linear.h"
+#include "fs_test_support.h"
 #include "search_terms_index.h"
 #include "shell.h"
 #include "unity.h"
@@ -332,7 +333,7 @@ static void fixture_base(void)
     io.capacity = device_capacity;
     io.read_block = device_read;
     io.write_block = device_write;
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, io));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs, io));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_OK, yan_search_linear_init(&literal_linear, &fs));
@@ -346,7 +347,7 @@ static void attach_real_terms(void)
     memset(&term_index, 0, sizeof term_index);
     memset(&term_facade, 0, sizeof term_facade);
     TEST_ASSERT_EQUAL_INT(
-        YAN_SEARCH_TERMS_OK, yan_search_terms_index_init(&term_index, &fs));
+        YAN_SEARCH_TERMS_OK, test_terms_index_init(&term_index, &fs));
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_TERMS_OK,
         yan_search_terms_init(&term_facade,

@@ -33,7 +33,12 @@ def required_inputs(suites):
     """Return only declared dependencies, preserving their deterministic order."""
     inputs = ['tests/run_note_blocks_mutation.py',
               'tests/run_note_metadata_mutation.py', 'tests/run_yanfs_mutation.py',
-              'os/memory.h']
+              'tests/fs_test_support.h', 'os/memory.h',
+              'os/note_metadata_format.h', 'os/note_metadata.h',
+              'os/note_relations.h', 'os/note_blocks_format.h',
+              'os/note_blocks.h', 'os/search_terms.h',
+              'os/search_terms_core.h', 'os/search_terms_linear.h',
+              'os/search_terms_index.h']
     for suite in suites:
         test, sources = GROUPS[suite]
         inputs.append(test)

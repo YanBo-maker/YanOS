@@ -78,10 +78,12 @@ BUILD_TIMEOUT = 180
 # The whole tree the editor suite needs. Every one is a hard repository input.
 EDITOR_SOURCES = ["tests/test_editor.c", "os/editor.c", "os/yanfs.c"]
 EDITOR_OS = ["editor.h", "editor.c", "yanfs.h", "yanfs.c", "shell.h", "note_relations.h", "note_blocks.h", "note_blocks_format.h", "note_metadata.h", "search.h",
-             "search_terms.h", "note_metadata_format.h"]
+             "search_terms.h", "note_metadata_format.h", "search_terms_core.h",
+             "search_terms_linear.h", "search_terms_index.h"]
 REQUIRED_REPO = (
     ["os/" + name for name in EDITOR_OS]
-    + ["tests/test_editor.c", "tests/run_yanfs_mutation.py"]
+    + ["tests/test_editor.c", "tests/fs_test_support.h",
+       "tests/run_yanfs_mutation.py"]
 )
 
 # mutation name -> (owning Unity test function, required assertion marker).
@@ -331,6 +333,8 @@ def copy_tree(source, unity, destination):
         shutil.copy2(source / "os" / name, destination / "os" / name)
     shutil.copy2(source / "tests/test_editor.c",
                  destination / "tests/test_editor.c")
+    shutil.copy2(source / "tests/fs_test_support.h",
+                 destination / "tests/fs_test_support.h")
     for item in sorted((unity / "src").iterdir()):
         if item.is_file():
             shutil.copy2(item, destination / "unity" / item.name)

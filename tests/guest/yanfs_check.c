@@ -22,6 +22,7 @@
  * apart from the runtime panic codes (0x80000000) and the other cases' 0x4... /
  * 0x5... prefixes. The host harness is tests/guest/run_yanfs.py. */
 #include <stddef.h>
+#include "../fs_test_support.h"
 #include <stdint.h>
 
 #include "block.h"
@@ -271,7 +272,7 @@ static void yc_writer(void)
     if (yan_fs_block_init(&adapter) != YAN_FS_OK) {
         yc_fail(YC_ADAPTER_INIT);
     }
-    if (yan_fs_init(&fs, io) != YAN_FS_OK) {
+    if (test_fs_init(&fs, io) != YAN_FS_OK) {
         yc_fail(YC_FS_INIT);
     }
 
@@ -306,7 +307,7 @@ static void yc_writer(void)
     if (yan_fs_copy(&rv32_uninit, "x", rv32_high) != YAN_FS_INVALID) {
         yc_fail(YC_RV32_UNINIT);
     }
-    if (yan_fs_init(&rv32_idle, io) != YAN_FS_OK) {
+    if (test_fs_init(&rv32_idle, io) != YAN_FS_OK) {
         yc_fail(YC_RV32_UNMOUNTED);
     }
     if (yan_fs_stat(&rv32_idle, rv32_high, &rv32_info) != YAN_FS_NOT_MOUNTED) {
@@ -337,7 +338,7 @@ static void yc_writer(void)
     /* Context aliases are rejected before the name bytes are read: the name
      * range must not touch the YanFs object, head or tail, source or
      * destination. */
-    if (yan_fs_rename(&fs, (const char *)(const void *)fs.metadata, "x")
+    if (yan_fs_rename(&fs, (const char *)(const void *)fs.directory, "x")
         != YAN_FS_INVALID) {
         yc_fail(YC_RV32_ALIAS);
     }
@@ -347,7 +348,7 @@ static void yc_writer(void)
         != YAN_FS_INVALID) {
         yc_fail(YC_RV32_ALIAS);
     }
-    if (yan_fs_copy(&fs, (const char *)(const void *)fs.metadata, "x")
+    if (yan_fs_copy(&fs, (const char *)(const void *)fs.directory, "x")
         != YAN_FS_INVALID) {
         yc_fail(YC_RV32_ALIAS);
     }
@@ -397,7 +398,7 @@ static void yc_writer(void)
     if (yan_fs_block_init(&rv32_adjacent_adapter) != YAN_FS_OK) {
         yc_fail(YC_RV32_ADJACENT);
     }
-    if (yan_fs_init(&rv32_adjacent.context, rv32_adjacent_io) != YAN_FS_OK) {
+    if (test_fs_init(&rv32_adjacent.context, rv32_adjacent_io) != YAN_FS_OK) {
         yc_fail(YC_RV32_ADJACENT);
     }
     if (yan_fs_mount(&rv32_adjacent.context) != YAN_FS_OK) {
@@ -569,7 +570,7 @@ static void yc_reader(void)
     if (yan_fs_block_init(&adapter) != YAN_FS_OK) {
         yc_fail(YC_ADAPTER_INIT);
     }
-    if (yan_fs_init(&fs, io) != YAN_FS_OK) {
+    if (test_fs_init(&fs, io) != YAN_FS_OK) {
         yc_fail(YC_FS_INIT);
     }
     yc_phase = 2;
@@ -638,7 +639,7 @@ static void yc_corrupt(void)
     if (yan_fs_block_init(&adapter) != YAN_FS_OK) {
         yc_fail(YC_ADAPTER_INIT);
     }
-    if (yan_fs_init(&fs, io) != YAN_FS_OK) {
+    if (test_fs_init(&fs, io) != YAN_FS_OK) {
         yc_fail(YC_FS_INIT);
     }
     yc_phase = 2;

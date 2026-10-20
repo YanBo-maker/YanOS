@@ -66,7 +66,9 @@ typedef struct {
     uint8_t metadata_prefix[YAN_NOTE_HEADER_MAX];
     YanNoteInfo metadata_info;
     YanNoteParseWorkspace metadata_workspace;
-    uint8_t metadata_eligible[YAN_FS_MAX_FILES];
+    /* 0036-R3: caller-owned, one flag per directory slot. */
+    uint8_t *metadata_eligible;
+    uint32_t capacity;
     uint32_t metadata_skipped;
     /* True only while a filtered query is running: the SCAN and INDEX paths use
      * it to consult the eligibility set instead of searching every slot. It is
@@ -79,7 +81,10 @@ typedef struct {
  * still serving a query, then records the borrowed filesystem. No filesystem
  * I/O. */
 YanSearchTermsResult yan_search_terms_linear_init(YanSearchTermsLinear *,
-                                                  YanFs *);
+                                                  YanFs *,
+                                                  uint8_t *metadata_eligible);
+/* 0036-R3 storage size of the per-slot flag array. */
+uint32_t yan_search_terms_linear_storage_bytes(uint32_t capacity);
 
 /* Backend vtable entry points; `context` is the YanSearchTermsLinear. */
 YanSearchTermsResult yan_search_terms_linear_query(

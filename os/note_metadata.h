@@ -67,9 +67,9 @@ typedef enum {
 typedef bool (*YanNoteListFn)(void *context, const char *name);
 
 /* Caller-owned, long-lived storage. A caller zero-initializes it before
- * yan_note_init and never edits the fields afterwards. The four large areas
- * (prefix, candidate, sort scratch, parse workspace) are why this object is
- * static: no entry point copies them onto the stack. */
+ * yan_note_init and never edits the fields afterwards. The bounded prefix,
+ * candidate and parse workspace are why this object is static; the entry and
+ * sort-name tables are borrowed from the caller and never go on the stack. */
 typedef struct {
     YanFs *fs;
     bool initialized;
@@ -84,9 +84,12 @@ typedef struct {
     YanNoteInfo working;
     /* Caller-provided workspace for the pure parser (never a stack object). */
     YanNoteParseWorkspace parse_workspace;
-    /* Directory snapshot and the ASCII-ordered name table for yan_note_list. */
-    YanNoteEntry entries[YAN_FS_MAX_FILES];
-    char sort_name[YAN_FS_MAX_FILES][32];
+    /* Directory snapshot and the ASCII-ordered name table for yan_note_list.
+     * 0036-R3: caller-owned, `capacity` entries, allocated once from the Guest
+     * arena or the Host heap; the context only borrows them. */
+    YanNoteEntry *entries;
+    char (*sort_name)[32];
+    uint32_t capacity;
     uint32_t entry_count;
 } YanNoteContext;
 
@@ -101,7 +104,13 @@ _Static_assert(sizeof(YanNoteContext) <= 65536u,
  * a faulted filesystem are rejected without writing the object; an initialized,
  * idle context may be re-initialized, which validates the new pair and resets
  * the service to empty, while an active context answers BUSY. */
-YanNoteResult yan_note_init(YanNoteContext *context, YanFs *fs);
+YanNoteResult yan_note_init(YanNoteContext *context, YanFs *fs,
+                            YanNoteEntry *entries, char (*sort_name)[32]);
+/* 0036-R3 storage sizes for one `capacity`-entry directory. The Guest calls
+ * these for its arena allocations and the Host for the matching calloc, so the
+ * two sides cannot drift from sizeof. */
+uint32_t yan_note_entries_storage_bytes(uint32_t capacity);
+uint32_t yan_note_sort_name_storage_bytes(uint32_t capacity);
 
 /* Reads one file's bounded header prefix and publishes the validated info.
  * `info_out` is written only on OK, so an error leaves it byte-identical. A

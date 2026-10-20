@@ -1,6 +1,7 @@
 #include "block_query.h"
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -300,6 +301,15 @@ static YanBlockResult service_show(YanBlockQuery *query,
     return result;
 }
 
+void yan_block_query_destroy(YanBlockQuery *query)
+{
+    if (query == NULL) return;
+    free(query->block_names);
+    query->block_names = NULL;
+    query->initialized = false;
+    query->blocks.initialized = false;
+}
+
 YanBlockQueryResult yan_block_query_init(YanBlockQuery *query,
     YanSemanticPosix *adapter, const volatile sig_atomic_t *cancel)
 {
@@ -308,12 +318,27 @@ YanBlockQueryResult yan_block_query_init(YanBlockQuery *query,
         overlaps(query, sizeof *query, adapter, sizeof *adapter))
         return YAN_BLOCK_QUERY_INVALID;
     if (query->initialized && query->blocks.busy) return YAN_BLOCK_QUERY_BUSY;
+    /* Free a previous table before the struct is cleared; the pointer is owned
+     * by this object and init is the only other reset path. */
+    free(query->block_names);
     memset(query, 0, sizeof *query);
     query->adapter = adapter;
     query->cancel = cancel;
     yan_semantic_posix_bind_source(adapter, &query->source);
-    YanBlockResult result = yan_blocks_init(&query->blocks, &adapter->fs);
-    if (result != YAN_BLOCK_OK) return map_block(result, cancel);
+    if (adapter->fs.state != YAN_FS_MOUNTED) {
+        return YAN_BLOCK_QUERY_NOT_MOUNTED;
+    }
+    uint32_t capacity = adapter->fs.entry_capacity;
+    if (capacity == 0u) return YAN_BLOCK_QUERY_INVALID;
+    query->block_names = calloc(capacity, 32u);
+    if (query->block_names == NULL) return YAN_BLOCK_QUERY_IO;
+    YanBlockResult result =
+        yan_blocks_init(&query->blocks, &adapter->fs, query->block_names);
+    if (result != YAN_BLOCK_OK) {
+        free(query->block_names);
+        query->block_names = NULL;
+        return map_block(result, cancel);
+    }
     query->initialized = true;
     return YAN_BLOCK_QUERY_OK;
 }

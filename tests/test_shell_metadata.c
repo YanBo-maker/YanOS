@@ -40,6 +40,7 @@
  * automatic object and no variable-length array is used. */
 
 #include "note_metadata.h"
+#include "fs_test_support.h"
 #include "note_metadata_format.h"
 #include "search.h"
 #include "search_linear.h"
@@ -175,7 +176,7 @@ static void shell_fixture(void)
     TEST_ASSERT_EQUAL_INT_MESSAGE(
         YAN_FS_OK, yan_fs_format_metadata(medium[0], SHELL_BLOCKS),
         "fixture_format");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_init(&fs, fs_backend()),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, test_fs_init(&fs, fs_backend()),
                                   "fixture_fs_init");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_mount(&fs),
                                   "fixture_mount");
@@ -187,14 +188,14 @@ static void shell_fixture(void)
         yan_search_init(&search, yan_search_linear_backend(&linear)),
         "fixture_literal_facade");
     TEST_ASSERT_EQUAL_INT_MESSAGE(
-        YAN_SEARCH_TERMS_OK, yan_search_terms_linear_init(&terms_linear, &fs),
+        YAN_SEARCH_TERMS_OK, test_terms_linear_init(&terms_linear, &fs),
         "fixture_term_init");
     TEST_ASSERT_EQUAL_INT_MESSAGE(
         YAN_SEARCH_TERMS_OK,
         yan_search_terms_init(&terms,
                               yan_search_terms_linear_backend(&terms_linear)),
         "fixture_term_facade");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK, yan_note_init(&note, &fs),
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_NOTE_OK, test_note_init(&note, &fs),
                                   "fixture_note_init");
     TEST_ASSERT_EQUAL_INT_MESSAGE(
         YAN_SHELL_OK,

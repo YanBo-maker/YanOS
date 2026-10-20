@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "fs_test_support.h"
 #include "search_linear.h"
 #include "search_terms_linear.h"
 #include "unity.h"
@@ -67,12 +68,12 @@ void setUp(void)
     YanFsBlockIo io = {NULL, capacity, read_block, write_block};
     YanShellOutput sink = {NULL, putc_sink};
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_format_metadata(disk[0], 128));
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, io));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs, io));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
-    TEST_ASSERT_EQUAL_INT(YAN_BLOCK_OK, yan_blocks_init(&blocks, &fs));
+    TEST_ASSERT_EQUAL_INT(YAN_BLOCK_OK, test_blocks_init(&blocks, &fs));
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_OK, yan_search_linear_init(&linear, &fs));
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_OK, yan_search_init(&search, yan_search_linear_backend(&linear)));
-    TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK, yan_search_terms_linear_init(&term_linear, &fs));
+    TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK, test_terms_linear_init(&term_linear, &fs));
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK, yan_search_terms_init(&terms, yan_search_terms_linear_backend(&term_linear)));
     TEST_ASSERT_EQUAL_INT(YAN_SHELL_OK, yan_shell_init(&shell, &fs, &search, &terms, sink));
 }

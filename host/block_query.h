@@ -64,6 +64,9 @@ typedef struct {
     YanSemanticPosix *adapter; /* borrowed mounted image-only adapter */
     YanSemanticSource source;  /* bound once; reads the current adapter fs */
     YanBlockContext blocks;    /* 64 KiB service workspace */
+    /* 0036-R3: names table for the block service, calloc'd for the mounted
+     * image's entry_capacity and released by yan_block_query_destroy. */
+    char (*block_names)[32];
     uint8_t page[65536 + 4];   /* bounded stream/page scratch */
     const volatile sig_atomic_t *cancel; /* optional, borrowed */
     /* Set only by a successful operation: the pre/post-verified logical source
@@ -113,6 +116,10 @@ typedef struct {
  * initialized and mounted, binds the read source and calls yan_blocks_init.
  * It copies no name or ID; each operation validates and copies its own name/ID
  * after the context is initialized. */
+/* Releases the 0036-R3 names allocation and clears the owned pointer. Safe on a
+ * zero-initialized object and on a repeated call. */
+void yan_block_query_destroy(YanBlockQuery *);
+
 YanBlockQueryResult yan_block_query_init(YanBlockQuery *,
     YanSemanticPosix *, const volatile sig_atomic_t *cancel);
 YanBlockQueryResult yan_block_query_list(YanBlockQuery *, const char *name,

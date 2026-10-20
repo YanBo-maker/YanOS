@@ -1,4 +1,5 @@
 #include "yanfs.h"
+#include "fs_test_support.h"
 #include "unity.h"
 
 #include <string.h>
@@ -126,7 +127,7 @@ static void trace_reset(void)
 static void trace_begin(void)
 {
     trace_count = 0u;
-    memcpy(trace_old_metadata, fs.metadata, YAN_FS_BLOCK_SIZE);
+    memcpy(trace_old_metadata, fs.directory, YAN_FS_BLOCK_SIZE);
     trace_enabled = true;
 }
 
@@ -138,7 +139,7 @@ static void trace_record(char kind, uint32_t lba)
     trace_kind[trace_count] = kind;
     trace_lba[trace_count] = lba;
     trace_cache_old[trace_count] =
-        memcmp(fs.metadata, trace_old_metadata, YAN_FS_BLOCK_SIZE) == 0;
+        memcmp(fs.directory, trace_old_metadata, YAN_FS_BLOCK_SIZE) == 0;
     ++trace_count;
 }
 
@@ -307,7 +308,7 @@ static void run_callback_probe(void)
     probe_stat_result = yan_fs_stat(probe_fs, "hello.txt", &info);
     probe_mount_result = yan_fs_mount(probe_fs);
     probe_unmount_result = yan_fs_unmount(probe_fs);
-    probe_init_result = yan_fs_init(probe_fs, probe_fs->io);
+    probe_init_result = test_fs_init(probe_fs, probe_fs->io);
     probe_read_result = yan_fs_read(probe_fs, "hello.txt", 0u, &byte, 1u, &read_bytes);
     /* 0021 state priority: while the instance is busy, an invalid count pointer
      * (NULL, or one aliasing the context) is still a later check, so both must
@@ -326,7 +327,7 @@ static void run_callback_probe(void)
     io_before = device.reads + device.writes;
     probe_read_alias_result =
         yan_fs_read(probe_fs, "hello.txt", 0u, &byte, 1u,
-                    (uint32_t *)(void *)probe_fs->metadata);
+                    (uint32_t *)(void *)probe_fs->directory);
     probe_read_alias_fs_unchanged =
         memcmp(fs_snapshot, probe_fs, sizeof fs_snapshot) == 0;
     probe_read_alias_io = (device.reads + device.writes) - io_before;
@@ -369,15 +370,15 @@ static void run_callback_probe(void)
         memcmp(source_snapshot, &source, sizeof source) == 0;
     probe_source_null_result = yan_fs_source(probe_fs, NULL);
     probe_source_alias_result = yan_fs_source(
-        probe_fs, (YanFsSource *)(void *)probe_fs->metadata);
+        probe_fs, (YanFsSource *)(void *)probe_fs->directory);
     probe_source_fs_unchanged =
         memcmp(fs_snapshot, probe_fs, sizeof fs_snapshot) == 0;
     probe_source_io = (device.reads + device.writes) - io_before;
 
-    probe_cache_crc = yan_fs_metadata_crc(probe_fs->metadata);
+    probe_cache_crc = yan_fs_metadata_crc(probe_fs->directory);
     probe_cache_unpublished = probe_fs->state == YAN_FS_UNMOUNTED &&
                               probe_fs->capacity_blocks == 0u &&
-                              region_is_zero(probe_fs->metadata, YAN_FS_BLOCK_SIZE);
+                              region_is_zero(probe_fs->directory, YAN_FS_BLOCK_SIZE);
 }
 
 static YanFsIoResult device_capacity(void *context, uint64_t *blocks)
@@ -459,7 +460,7 @@ static YanFsBlockIo fx_backend(void)
 
 static void init_fs(void)
 {
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, fx_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs, fx_backend()));
 }
 
 static YanFsResult mount_fresh(void)
@@ -482,14 +483,14 @@ static void create_ok(const char *name, const uint8_t *bytes, uint32_t length)
 
 static const uint8_t *cache_entry(uint32_t slot)
 {
-    return fs.metadata + YAN_FS_HEADER_SIZE + slot * YAN_FS_ENTRY_SIZE;
+    return fs.directory + YAN_FS_HEADER_SIZE + slot * YAN_FS_ENTRY_SIZE;
 }
 
 /* Entry view for a second, independently mounted context (the context-boundary
  * fixture does not use the global fs). */
 static const uint8_t *context_entry(const YanFs *context, uint32_t slot)
 {
-    return context->metadata + YAN_FS_HEADER_SIZE + slot * YAN_FS_ENTRY_SIZE;
+    return context->directory + YAN_FS_HEADER_SIZE + slot * YAN_FS_ENTRY_SIZE;
 }
 
 static uint32_t cache_size(uint32_t slot)
@@ -521,7 +522,7 @@ static void assert_disk_directory_sealed(void)
         fx_block_crc(device.blocks[0]), fx_get_le32(device.blocks[0] + 60u),
         "the directory on the medium must carry its independently computed CRC");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(
-        fx_get_le32(device.blocks[0] + 60u), fx_get_le32(fs.metadata + 60u),
+        fx_get_le32(device.blocks[0] + 60u), fx_get_le32(fs.directory + 60u),
         "the published cache must hold the same sealed directory as the medium");
 }
 
@@ -692,7 +693,7 @@ static void mount_publishes_validated_cache_and_stat_reads_it(void)
     TEST_ASSERT_EQUAL_UINT32(16u, fs.capacity_blocks);
     TEST_ASSERT_EQUAL_UINT32(1u, device.reads);
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
-    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(device.blocks[0], fs.metadata,
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(device.blocks[0], fs.directory,
                                      YAN_FS_BLOCK_SIZE,
                                      "mount must publish the validated block");
 
@@ -733,7 +734,7 @@ static void mount_rejects_zero_and_oversized_device_capacity(void)
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(
         0u, device.reads,
         "capacity is checked before block 0 is read");
-    TEST_ASSERT_TRUE(region_is_zero(fs.metadata, YAN_FS_BLOCK_SIZE));
+    TEST_ASSERT_TRUE(region_is_zero(fs.directory, YAN_FS_BLOCK_SIZE));
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
 }
 
@@ -744,7 +745,7 @@ static void mount_rejects_unknown_version_as_unsupported(void)
     fx_seal(device.blocks[0]);
     TEST_ASSERT_EQUAL_INT(YAN_FS_UNSUPPORTED, mount_fresh());
     TEST_ASSERT_EQUAL_INT(YAN_FS_UNMOUNTED, fs.state);
-    TEST_ASSERT_TRUE(region_is_zero(fs.metadata, YAN_FS_BLOCK_SIZE));
+    TEST_ASSERT_TRUE(region_is_zero(fs.directory, YAN_FS_BLOCK_SIZE));
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
 
     fx_device(16u);
@@ -1036,7 +1037,7 @@ static void mount_never_writes_and_publishes_cache_only_after_validation(void)
     TEST_ASSERT_TRUE_MESSAGE(probe_cache_unpublished,
                              "no cache may be visible while mount reads");
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
-    TEST_ASSERT_EQUAL_MEMORY(device.blocks[0], fs.metadata, YAN_FS_BLOCK_SIZE);
+    TEST_ASSERT_EQUAL_MEMORY(device.blocks[0], fs.directory, YAN_FS_BLOCK_SIZE);
 
     /* A corrupt image is read into scratch, rejected, and never published. */
     fx_device(16u);
@@ -1047,7 +1048,7 @@ static void mount_never_writes_and_publishes_cache_only_after_validation(void)
     TEST_ASSERT_TRUE(probe_ran);
     TEST_ASSERT_TRUE(probe_cache_unpublished);
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
-    TEST_ASSERT_TRUE_MESSAGE(region_is_zero(fs.metadata, YAN_FS_BLOCK_SIZE),
+    TEST_ASSERT_TRUE_MESSAGE(region_is_zero(fs.directory, YAN_FS_BLOCK_SIZE),
                              "YFS cache published early");
 }
 
@@ -1187,14 +1188,14 @@ static void list_rejects_cursor_and_out_aliasing_context(void)
     mount_empty(16u);
     uint32_t cursor = 0u;
     YanFsInfo info = {0};
-    uint32_t before = yan_fs_metadata_crc(fs.metadata);
+    uint32_t before = yan_fs_metadata_crc(fs.directory);
     uint32_t scratch_before = yan_fs_metadata_crc(fs.scratch);
 
     /* The exact regression the independent probe reported: a cursor inside the
      * reserved header bytes used to be written, corrupting the cache. */
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
-        yan_fs_list(&fs, (uint32_t *)(void *)(fs.metadata + 24u), &info));
+        yan_fs_list(&fs, (uint32_t *)(void *)(fs.directory + 24u), &info));
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID, yan_fs_list(&fs, (uint32_t *)(void *)&fs, &info));
     TEST_ASSERT_EQUAL_INT(
@@ -1206,7 +1207,7 @@ static void list_rejects_cursor_and_out_aliasing_context(void)
         yan_fs_list(&fs, (uint32_t *)(uintptr_t)(UINTPTR_MAX - 1u), &info));
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
-        yan_fs_list(&fs, &cursor, (YanFsInfo *)(void *)fs.metadata));
+        yan_fs_list(&fs, &cursor, (YanFsInfo *)(void *)fs.directory));
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
         yan_fs_list(&fs, &cursor, (YanFsInfo *)(void *)(fs.scratch + 4080u)));
@@ -1214,7 +1215,7 @@ static void list_rejects_cursor_and_out_aliasing_context(void)
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(
         0u, cursor, "an aliasing list call must not update the caller cursor");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(
-        before, yan_fs_metadata_crc(fs.metadata),
+        before, yan_fs_metadata_crc(fs.directory),
         "an aliasing list cursor must not touch the metadata cache");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(
         scratch_before, yan_fs_metadata_crc(fs.scratch),
@@ -1225,23 +1226,23 @@ static void stat_rejects_name_and_out_aliasing_context(void)
 {
     mount_empty(16u);
     create_ok("hello", NULL, 0u);
-    uint32_t before = yan_fs_metadata_crc(fs.metadata);
+    uint32_t before = yan_fs_metadata_crc(fs.directory);
     YanFsInfo info = {0};
 
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
-        yan_fs_stat(&fs, (const char *)(const void *)fs.metadata, &info));
+        yan_fs_stat(&fs, (const char *)(const void *)fs.directory, &info));
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
-        yan_fs_stat(&fs, (const char *)(const void *)(fs.metadata + 64u), &info));
+        yan_fs_stat(&fs, (const char *)(const void *)(fs.directory + 64u), &info));
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
-        yan_fs_stat(&fs, "hello", (YanFsInfo *)(void *)fs.metadata));
+        yan_fs_stat(&fs, "hello", (YanFsInfo *)(void *)fs.directory));
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
         yan_fs_stat(&fs, "hello", (YanFsInfo *)(void *)(fs.scratch + 4080u)));
 
-    TEST_ASSERT_EQUAL_UINT32(before, yan_fs_metadata_crc(fs.metadata));
+    TEST_ASSERT_EQUAL_UINT32(before, yan_fs_metadata_crc(fs.directory));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_stat(&fs, "hello", &info));
 }
 
@@ -1324,13 +1325,13 @@ static void read_rejects_read_bytes_and_out_aliasing_context(void)
     mount_empty(16u);
     fill_payload(5u, 0x30);
     create_ok("hello", payload, 5u);
-    uint32_t before = yan_fs_metadata_crc(fs.metadata);
+    uint32_t before = yan_fs_metadata_crc(fs.directory);
     uint32_t got = 0xffffffffu;
 
     /* An invalid read_bytes returns INVALID and must not be written. */
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
-        yan_fs_read(&fs, "hello", 0u, readback, 5u, (uint32_t *)(void *)fs.metadata));
+        yan_fs_read(&fs, "hello", 0u, readback, 5u, (uint32_t *)(void *)fs.directory));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(
         0xffffffffu, got, "read_bytes itself is not written by an earlier alias");
     TEST_ASSERT_EQUAL_INT(
@@ -1339,41 +1340,41 @@ static void read_rejects_read_bytes_and_out_aliasing_context(void)
                     (uint32_t *)(uintptr_t)(UINTPTR_MAX - 1u)));
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
-        yan_fs_read(&fs, "hello", 0u, (uint8_t *)(void *)fs.metadata, 5u, &got));
+        yan_fs_read(&fs, "hello", 0u, (uint8_t *)(void *)fs.directory, 5u, &got));
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID, yan_fs_read(&fs, "hello", 0u, readback, 5u, NULL));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(
-        before, yan_fs_metadata_crc(fs.metadata),
+        before, yan_fs_metadata_crc(fs.directory),
         "an aliasing read must not touch the metadata cache");
 }
 
 static void create_replace_remove_reject_name_and_bytes_aliasing_context(void)
 {
     mount_empty(16u);
-    uint32_t before = yan_fs_metadata_crc(fs.metadata);
+    uint32_t before = yan_fs_metadata_crc(fs.directory);
     uint32_t writes = device.writes;
 
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
-        yan_fs_create(&fs, (const char *)(const void *)fs.metadata, payload, 1u));
+        yan_fs_create(&fs, (const char *)(const void *)fs.directory, payload, 1u));
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
         yan_fs_create(&fs, "x", (const uint8_t *)(const void *)fs.scratch, 4u));
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
-        yan_fs_create(&fs, "x", (const uint8_t *)(const void *)(fs.metadata + 10u), 4u));
+        yan_fs_create(&fs, "x", (const uint8_t *)(const void *)(fs.directory + 10u), 4u));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(
         writes, device.writes, "an aliasing create must perform no medium write");
-    TEST_ASSERT_EQUAL_UINT32(before, yan_fs_metadata_crc(fs.metadata));
+    TEST_ASSERT_EQUAL_UINT32(before, yan_fs_metadata_crc(fs.directory));
 
     create_ok("x", payload, 4u);
-    before = yan_fs_metadata_crc(fs.metadata);
+    before = yan_fs_metadata_crc(fs.directory);
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
-        yan_fs_replace(&fs, "x", (const uint8_t *)(const void *)fs.metadata, 4u));
+        yan_fs_replace(&fs, "x", (const uint8_t *)(const void *)fs.directory, 4u));
     TEST_ASSERT_EQUAL_INT(
-        YAN_FS_INVALID, yan_fs_remove(&fs, (const char *)(const void *)fs.metadata));
-    TEST_ASSERT_EQUAL_UINT32(before, yan_fs_metadata_crc(fs.metadata));
+        YAN_FS_INVALID, yan_fs_remove(&fs, (const char *)(const void *)fs.directory));
+    TEST_ASSERT_EQUAL_UINT32(before, yan_fs_metadata_crc(fs.directory));
     TEST_ASSERT_EQUAL_UINT32(4u, cache_size(0u));
 }
 
@@ -1389,7 +1390,7 @@ static void name_inside_scratch_is_rejected_without_reading_past_it(void)
         fs.scratch[i] = (uint8_t)'a';
     }
     const char *bad = (const char *)(const void *)(fs.scratch + YAN_FS_BLOCK_SIZE - 16u);
-    uint32_t before = yan_fs_metadata_crc(fs.metadata);
+    uint32_t before = yan_fs_metadata_crc(fs.directory);
     uint32_t writes = device.writes;
     YanFsInfo info = {0};
     uint32_t got = 123u;
@@ -1403,7 +1404,7 @@ static void name_inside_scratch_is_rejected_without_reading_past_it(void)
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(
         0u, got, "a rejected name still clears a valid read_bytes");
     TEST_ASSERT_EQUAL_UINT32(writes, device.writes);
-    TEST_ASSERT_EQUAL_UINT32(before, yan_fs_metadata_crc(fs.metadata));
+    TEST_ASSERT_EQUAL_UINT32(before, yan_fs_metadata_crc(fs.directory));
     TEST_ASSERT_EQUAL_INT(YAN_FS_MOUNTED, fs.state);
 
     /* The opposite direction: a legal short name whose terminator is the byte
@@ -1423,7 +1424,7 @@ static void name_inside_scratch_is_rejected_without_reading_past_it(void)
     }
     TEST_ASSERT_EQUAL_UINT32(
         1u, (uint32_t)((uintptr_t)&adjacent.context - (uintptr_t)&adjacent.name[7]));
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&adjacent.context, fx_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&adjacent.context, fx_backend()));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&adjacent.context));
     YanFsInfo adjacent_info = {0};
     TEST_ASSERT_EQUAL_INT(
@@ -1483,7 +1484,7 @@ static void read_state_priority_precedes_an_invalid_count(void)
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
         yan_fs_read(&virgin, "f", 0u, out, 4u,
-                    (uint32_t *)(void *)virgin.metadata));
+                    (uint32_t *)(void *)virgin.directory));
     TEST_ASSERT_TRUE(region_is_byte(out, sizeof out, 0xa5u));
 
     /* Initialised and UNMOUNTED: NOT_MOUNTED wins over either invalid count,
@@ -1501,7 +1502,7 @@ static void read_state_priority_precedes_an_invalid_count(void)
                                      "a NULL count must not change the fs");
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_NOT_MOUNTED,
-        yan_fs_read(&fs, "f", 0u, out, 4u, (uint32_t *)(void *)fs.metadata));
+        yan_fs_read(&fs, "f", 0u, out, 4u, (uint32_t *)(void *)fs.directory));
     TEST_ASSERT_EQUAL_MEMORY_MESSAGE(
         fs_before, &fs, sizeof fs_before,
         "a context-aliasing count must not change the fs");
@@ -1535,7 +1536,7 @@ static void read_state_priority_precedes_an_invalid_count(void)
                                      "a NULL count must not change the faulted fs");
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_FAULTED,
-        yan_fs_read(&fs, "f", 0u, out, 4u, (uint32_t *)(void *)fs.metadata));
+        yan_fs_read(&fs, "f", 0u, out, 4u, (uint32_t *)(void *)fs.directory));
     TEST_ASSERT_EQUAL_MEMORY_MESSAGE(
         fs_before, &fs, sizeof fs_before,
         "an aliasing count must not change the faulted fs");
@@ -1951,13 +1952,11 @@ static void create_huge_length_reports_nospace_without_writing(void)
     snapshot_medium();
     uint32_t writes = device.writes;
     /* The ceiling for UINT32_MAX is 1048576 blocks and must not wrap; the
-     * allocation fails before bytes are read. The declared range starts exactly
-     * one past the context object, so the context guard accepts it; the fixture
-     * does not reuse a small payload whose declared range would cover the
-     * context (that would be a caller error the guard correctly rejects). The
-     * bytes are never dereferenced: a 16-block device cannot hold the extent. */
-    const uint8_t *declared =
-        (const uint8_t *)(uintptr_t)((uintptr_t)&fs + sizeof fs);
+     * allocation fails before bytes are read. The declared range starts at a
+     * low address whose 4 GiB span stays below the context and the 0036-R3
+     * directory on a 64-bit Host, so the alias guard accepts it; the bytes are
+     * never dereferenced because a 16-block device cannot hold the extent. */
+    const uint8_t *declared = (const uint8_t *)(uintptr_t)16u;
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_NOSPACE, yan_fs_create(&fs, "huge", declared, UINT32_MAX));
     TEST_ASSERT_EQUAL_UINT32(writes, device.writes);
@@ -2337,7 +2336,7 @@ static void list_and_stat_honor_busy_guard_from_callback(void)
     create_ok("hello.txt", payload, 5u);
     probe_fs = &fs;
     probe_ran = false;
-    uint32_t before = yan_fs_metadata_crc(fs.metadata);
+    uint32_t before = yan_fs_metadata_crc(fs.directory);
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_replace(&fs, "hello.txt", payload, 5u));
     TEST_ASSERT_TRUE_MESSAGE(probe_ran, "the write callback must run the probe");
     TEST_ASSERT_EQUAL_INT(YAN_FS_BUSY, probe_list_result);
@@ -2364,7 +2363,7 @@ static void create_honors_busy_guard_and_does_not_publish_early(void)
     fill_payload(5000u, 0x1e);
     probe_fs = &fs;
     probe_ran = false;
-    uint32_t before = yan_fs_metadata_crc(fs.metadata);
+    uint32_t before = yan_fs_metadata_crc(fs.directory);
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_create(&fs, "f", payload, 5000u));
     TEST_ASSERT_TRUE(probe_ran);
     TEST_ASSERT_EQUAL_INT(YAN_FS_BUSY, probe_list_result);
@@ -2392,7 +2391,7 @@ static void unmount_clears_cache_and_keeps_instance_usable(void)
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_unmount(&fs));
     TEST_ASSERT_EQUAL_INT(YAN_FS_UNMOUNTED, fs.state);
     TEST_ASSERT_EQUAL_UINT32(0u, fs.capacity_blocks);
-    TEST_ASSERT_TRUE(region_is_zero(fs.metadata, YAN_FS_BLOCK_SIZE));
+    TEST_ASSERT_TRUE(region_is_zero(fs.directory, YAN_FS_BLOCK_SIZE));
     TEST_ASSERT_TRUE(region_is_zero(fs.scratch, YAN_FS_BLOCK_SIZE));
     TEST_ASSERT_TRUE(fs.initialized);
 
@@ -2422,27 +2421,27 @@ static void init_rules_reject_incomplete_active_and_faulted_instances(void)
 {
     YanFsBlockIo incomplete = fx_backend();
     incomplete.write_block = NULL;
-    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID, yan_fs_init(&fs, incomplete));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID, test_fs_init(&fs, incomplete));
     TEST_ASSERT_FALSE(fs.initialized);
-    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID, yan_fs_init(NULL, fx_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID, test_fs_init(NULL, fx_backend()));
 
     init_fs();
     TEST_ASSERT_TRUE(fs.initialized);
     TEST_ASSERT_EQUAL_INT(YAN_FS_UNMOUNTED, fs.state);
 
     /* Re-init of an idle, unmounted instance is allowed. */
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, fx_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs, fx_backend()));
 
     fx_device(16u);
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
-    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID, yan_fs_init(&fs, fx_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID, test_fs_init(&fs, fx_backend()));
     TEST_ASSERT_EQUAL_INT(YAN_FS_MOUNTED, fs.state);
 
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_unmount(&fs));
     device.capacity_status = YAN_FS_IO_ERROR;
     TEST_ASSERT_EQUAL_INT(YAN_FS_IO, yan_fs_mount(&fs));
     TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
-    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID, yan_fs_init(&fs, fx_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID, test_fs_init(&fs, fx_backend()));
     TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
 }
 
@@ -2584,7 +2583,7 @@ static void rename_same_name_is_zero_io_even_with_full_directory_and_disk(void)
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(YAN_FS_MAX_FILES, used,
         "the fixture must fill every directory slot");
     snapshot_medium();
-    uint32_t cache_crc = yan_fs_metadata_crc(fs.metadata);
+    uint32_t cache_crc = yan_fs_metadata_crc(fs.directory);
     uint32_t reads = device.reads;
     uint32_t writes = device.writes;
 
@@ -2596,7 +2595,7 @@ static void rename_same_name_is_zero_io_even_with_full_directory_and_disk(void)
         "a same-name rename must not write the device, even with a full directory");
     TEST_ASSERT_TRUE_MESSAGE(medium_equal_snapshot(),
         "a same-name rename must leave every medium byte unchanged");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.metadata),
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.directory),
         "a same-name rename must not touch the metadata cache");
 
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_OK, yan_fs_rename(&fs, "f62", "f62"),
@@ -2686,11 +2685,11 @@ static void rename_and_copy_reject_name_aliasing_context(void)
 {
     mount_empty(16u);
     create_ok("hello", NULL, 0u);
-    uint32_t before = yan_fs_metadata_crc(fs.metadata);
+    uint32_t before = yan_fs_metadata_crc(fs.directory);
     uint32_t writes = device.writes;
 
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID,
-        yan_fs_rename(&fs, (const char *)(const void *)fs.metadata, "x"),
+        yan_fs_rename(&fs, (const char *)(const void *)fs.directory, "x"),
         "a rename source name inside the context must be rejected");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID,
         yan_fs_rename(&fs, "hello", (const char *)(const void *)fs.scratch),
@@ -2703,7 +2702,7 @@ static void rename_and_copy_reject_name_aliasing_context(void)
                       (const char *)(const void *)(fs.scratch + YAN_FS_BLOCK_SIZE - 1u)),
         "a rename destination name at the context tail must be rejected");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID,
-        yan_fs_copy(&fs, (const char *)(const void *)(fs.metadata + 63u), "x"),
+        yan_fs_copy(&fs, (const char *)(const void *)(fs.directory + 63u), "x"),
         "a copy source name inside the context header tail must be rejected");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID,
         yan_fs_copy(&fs, "hello", (const char *)(const void *)(fs.scratch + 4080u)),
@@ -2714,7 +2713,7 @@ static void rename_and_copy_reject_name_aliasing_context(void)
         "a copy destination name at the context tail must be rejected");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(writes, device.writes,
         "an aliasing name must perform no medium write");
-    TEST_ASSERT_EQUAL_UINT32(before, yan_fs_metadata_crc(fs.metadata));
+    TEST_ASSERT_EQUAL_UINT32(before, yan_fs_metadata_crc(fs.directory));
 }
 
 static void rename_and_copy_name_ranges_may_overlap_each_other(void)
@@ -2758,10 +2757,10 @@ static void rename_and_copy_state_order_precedes_name_validation(void)
         "an uninitialized context must answer INVALID before the names");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID,
         yan_fs_rename(&virgin, (const char *)(uintptr_t)(UINTPTR_MAX - 1u),
-                      (const char *)(void *)virgin.metadata),
+                      (const char *)(void *)virgin.directory),
         "an uninitialized context must answer INVALID before an unreadable name");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID,
-        yan_fs_copy(&virgin, (const char *)(void *)virgin.metadata,
+        yan_fs_copy(&virgin, (const char *)(void *)virgin.directory,
                     (const char *)(uintptr_t)(UINTPTR_MAX - 1u)),
         "an uninitialized context must answer INVALID before an unreadable name");
 
@@ -2774,10 +2773,10 @@ static void rename_and_copy_state_order_precedes_name_validation(void)
         "an unmounted instance must answer NOT_MOUNTED before the names");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_NOT_MOUNTED,
         yan_fs_rename(&fs, (const char *)(uintptr_t)(UINTPTR_MAX - 1u),
-                      (const char *)(void *)fs.metadata),
+                      (const char *)(void *)fs.directory),
         "an unmounted instance must answer NOT_MOUNTED before an unreadable name");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_NOT_MOUNTED,
-        yan_fs_copy(&fs, (const char *)(void *)fs.metadata,
+        yan_fs_copy(&fs, (const char *)(void *)fs.directory,
                     (const char *)(uintptr_t)(UINTPTR_MAX - 1u)),
         "an unmounted instance must answer NOT_MOUNTED before an unreadable name");
 
@@ -2790,10 +2789,10 @@ static void rename_and_copy_state_order_precedes_name_validation(void)
         "a faulted instance must answer FAULTED before the names");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_FAULTED,
         yan_fs_rename(&fs, (const char *)(uintptr_t)(UINTPTR_MAX - 1u),
-                      (const char *)(void *)fs.metadata),
+                      (const char *)(void *)fs.directory),
         "a faulted instance must answer FAULTED before an unreadable name");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_FAULTED,
-        yan_fs_copy(&fs, (const char *)(void *)fs.metadata,
+        yan_fs_copy(&fs, (const char *)(void *)fs.directory,
                     (const char *)(uintptr_t)(UINTPTR_MAX - 1u)),
         "a faulted instance must answer FAULTED before an unreadable name");
 }
@@ -2805,7 +2804,7 @@ static void rename_and_copy_honor_busy_guard_from_callback(void)
     create_ok("hello.txt", payload, 5u);
     probe_fs = &fs;
     probe_ran = false;
-    uint32_t before = yan_fs_metadata_crc(fs.metadata);
+    uint32_t before = yan_fs_metadata_crc(fs.directory);
 
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_create(&fs, "second", payload, 5u));
     TEST_ASSERT_TRUE_MESSAGE(probe_ran, "the write callback must run the probe");
@@ -3112,7 +3111,7 @@ static void copy_read_failure_faults_without_writing_metadata(void)
         fill_payload(5000u, 0x87);
         create_ok("src", payload, 5000u);
         snapshot_medium();
-        uint32_t cache_crc = yan_fs_metadata_crc(fs.metadata);
+        uint32_t cache_crc = yan_fs_metadata_crc(fs.directory);
         device.reads = 0u;
         device.writes = 0u;
         device.read_fail_at = fail_at;
@@ -3121,7 +3120,7 @@ static void copy_read_failure_faults_without_writing_metadata(void)
         TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_IO, yan_fs_copy(&fs, "src", "dup"),
             "a source read error must surface as YAN_FS_IO");
         TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.metadata),
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.directory),
             "a failed copy must keep the last successful directory in the cache");
         TEST_ASSERT_TRUE_MESSAGE(cache_slot_empty(1u),
             "a failed copy must not add a directory entry to the cache");
@@ -3156,7 +3155,7 @@ static void copy_write_failure_faults_and_leaves_no_entry(void)
         fill_payload(5000u, 0x88);
         create_ok("src", payload, 5000u);
         snapshot_medium();
-        uint32_t cache_crc = yan_fs_metadata_crc(fs.metadata);
+        uint32_t cache_crc = yan_fs_metadata_crc(fs.directory);
         device.reads = 0u;
         device.writes = 0u;
         device.write_fail_at = fail_at;
@@ -3174,7 +3173,7 @@ static void copy_write_failure_faults_and_leaves_no_entry(void)
         TEST_ASSERT_EQUAL_UINT32_MESSAGE(fail_at, device.writes,
             "a failed target write must stop the block loop");
         TEST_ASSERT_FALSE_MESSAGE(fs.busy, "a failed copy must clear busy");
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.metadata),
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.directory),
             "a failed copy must keep the last successful directory in the cache");
         TEST_ASSERT_TRUE_MESSAGE(cache_slot_empty(1u),
             "a failed copy must not publish a directory entry");
@@ -3213,7 +3212,7 @@ static void copy_metadata_write_failure_keeps_old_cache(void)
         fill_payload(5000u, 0x8a);
         create_ok("src", payload, 5000u);
         snapshot_medium();
-        uint32_t cache_crc = yan_fs_metadata_crc(fs.metadata);
+        uint32_t cache_crc = yan_fs_metadata_crc(fs.directory);
         device.reads = 0u;
         device.writes = 0u;
         device.write_fail_at = 3u;
@@ -3228,7 +3227,7 @@ static void copy_metadata_write_failure_keeps_old_cache(void)
             "copy must attempt the directory write only after both data writes");
         TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
         TEST_ASSERT_FALSE_MESSAGE(fs.busy, "a failed copy must clear busy");
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.metadata),
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.directory),
             "a failed directory write must keep the previous directory in the cache");
         TEST_ASSERT_EQUAL_UINT32_MESSAGE(5000u, cache_size(0u),
             "the source must still be visible in the cache");
@@ -3316,7 +3315,7 @@ static void copy_never_publishes_cache_before_metadata_write(void)
     mount_empty(16u);
     fill_payload(5000u, 0x8b);
     create_ok("src", payload, 5000u);
-    uint32_t before = yan_fs_metadata_crc(fs.metadata);
+    uint32_t before = yan_fs_metadata_crc(fs.directory);
     probe_fs = &fs;
     probe_ran = false;
 
@@ -3482,7 +3481,7 @@ static void rename_metadata_failure_keeps_cache_without_rollback_promise(void)
             fill_payload(5000u, 0x81);
             create_ok("old", payload, 5000u);
             snapshot_medium();
-            uint32_t cache_crc = yan_fs_metadata_crc(fs.metadata);
+            uint32_t cache_crc = yan_fs_metadata_crc(fs.directory);
             device.writes = 0u;
             device.write_fail_at = 1u;
             device.write_partial = partials[p];
@@ -3493,7 +3492,7 @@ static void rename_metadata_failure_keeps_cache_without_rollback_promise(void)
                 "a failed rename directory write must keep its ERROR/PROTOCOL mapping");
             TEST_ASSERT_EQUAL_INT(YAN_FS_STATE_FAULTED, fs.state);
             TEST_ASSERT_FALSE_MESSAGE(fs.busy, "a failed rename must clear busy");
-            TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.metadata),
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.directory),
                 "a failed rename must keep the previous directory in the cache");
             TEST_ASSERT_EQUAL_STRING_MESSAGE("old", (const char *)cache_entry(0u),
                 "the cache must still hold the old name after a failed rename");
@@ -3592,7 +3591,7 @@ static void rename_and_copy_accept_name_terminating_before_context(void)
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(
         1u, (uint32_t)((uintptr_t)&adjacent.context - (uintptr_t)&adjacent.name[7]),
         "the fixture must place the context right after the name terminator");
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&adjacent.context, fx_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&adjacent.context, fx_backend()));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&adjacent.context));
     YanFsInfo info = {0};
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_stat(&adjacent.context, adjacent.name, &info));
@@ -3712,11 +3711,11 @@ static void source_getter_rejects_bad_holders_and_preserves_them(void)
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID, yan_fs_source(&fs, NULL),
         "a NULL holder is an ordinary parameter error on a healthy instance");
 
-    uint32_t cache_crc = yan_fs_metadata_crc(fs.metadata);
+    uint32_t cache_crc = yan_fs_metadata_crc(fs.directory);
     memset(&source, 0x5a, sizeof source);
     memcpy(&before, &source, sizeof source);
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID,
-        yan_fs_source(&fs, (YanFsSource *)(void *)fs.metadata),
+        yan_fs_source(&fs, (YanFsSource *)(void *)fs.directory),
         "a holder aliasing the context must be rejected");
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID,
         yan_fs_source(&fs, (YanFsSource *)(void *)(fs.scratch + 4080u)),
@@ -3726,7 +3725,7 @@ static void source_getter_rejects_bad_holders_and_preserves_them(void)
         "a holder whose range leaves uintptr must be rejected");
     TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&before, &source, sizeof source,
         "an aliasing observation must not write the caller holder");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.metadata),
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.directory),
         "an aliasing observation must not touch the metadata cache");
 }
 
@@ -3834,14 +3833,14 @@ static void source_identity_address_reuse_after_legal_unmount_is_distinct(void)
 
     YanFs reused;
     memset(&reused, 0, sizeof reused);
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&reused, fx_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&reused, fx_backend()));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&reused));
     uint64_t first = source_live_token(&reused,
         "the first mount of a reused address must yield a live identity");
 
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_unmount(&reused));
     memset(&reused, 0, sizeof reused);
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&reused, fx_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&reused, fx_backend()));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&reused));
     uint64_t second = source_live_token(&reused,
         "the second mount at the reused address must yield a live identity");
@@ -3868,10 +3867,10 @@ static void source_identity_unchanged_by_rejections_same_name_and_read_only(void
     TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID, yan_fs_rename(&fs, "note", "bad/name"));
     /* 0024: a same-name rename is a zero-I/O success, not a source change. */
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_rename(&fs, "note", "note"));
-    /* A declared range one past the context passes the alias guard, and a
-     * 16-block device cannot hold the resulting extent: NOSPACE, no publish. */
-    const uint8_t *huge =
-        (const uint8_t *)(uintptr_t)((uintptr_t)&fs + sizeof fs);
+    /* A low declared range that stays below the context and the directory
+     * passes the alias guard, and a 16-block device cannot hold the resulting
+     * extent: NOSPACE, no publish. */
+    const uint8_t *huge = (const uint8_t *)(uintptr_t)16u;
     TEST_ASSERT_EQUAL_INT(YAN_FS_NOSPACE,
         yan_fs_create(&fs, "huge", huge, UINT32_MAX));
 
@@ -3899,7 +3898,7 @@ static void source_identity_unchanged_by_pure_format_helper(void)
     mount_empty(16u);
     uint64_t before =
         fs_live_token("a successful mount must yield a live source identity");
-    uint32_t cache_crc = yan_fs_metadata_crc(fs.metadata);
+    uint32_t cache_crc = yan_fs_metadata_crc(fs.directory);
     uint32_t writes = device.writes;
 
     memset(block, 0xa5, sizeof block);
@@ -3909,7 +3908,7 @@ static void source_identity_unchanged_by_pure_format_helper(void)
     TEST_ASSERT_EQUAL_UINT64_MESSAGE(before, fs_live_token(
         "the pure format helper must leave the source identity live"),
         "the pure format helper must not change any source identity");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.metadata),
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(cache_crc, yan_fs_metadata_crc(fs.directory),
         "the pure format helper must not touch a mounted instance");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(writes, device.writes,
         "the pure format helper must not write the device");

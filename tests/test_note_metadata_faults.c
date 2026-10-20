@@ -1,4 +1,5 @@
 #include "note_metadata.h"
+#include "fs_test_support.h"
 #include "unity.h"
 #include <string.h>
 
@@ -53,11 +54,11 @@ void setUp(void)
     watch_cache = cache_early = false;
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_format_metadata(disk[0], 8u));
     YanFsBlockIo io = {NULL, capacity, read_block, write_block};
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, io));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs, io));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
         yan_fs_create(&fs, "n", (const uint8_t *)"body\n", 5u));
-    TEST_ASSERT_EQUAL_INT(YAN_NOTE_OK, yan_note_init(&note, &fs));
+    TEST_ASSERT_EQUAL_INT(YAN_NOTE_OK, test_note_init(&note, &fs));
     reads = writes = directory_writes = 0u;
     memcpy(before, disk, sizeof disk);
     memset(&info, 0x5a, sizeof info);

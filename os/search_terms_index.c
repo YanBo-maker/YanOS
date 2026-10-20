@@ -389,7 +389,7 @@ static YanSearchTermsResult index_build_locked(YanSearchTermsIndex *index)
     YanFsResult listed;
     while ((listed = yan_fs_list(index->fs, &cursor, &info)) == YAN_FS_OK) {
         uint32_t slot = cursor - 1u;
-        if (slot < YAN_FS_MAX_FILES) {
+        if (slot < index->entry_capacity) {
             index->entries[slot] = info;
         }
         IndexReader reader;
@@ -551,7 +551,7 @@ static YanSearchTermsResult index_eval_line(YanSearchTermsIndex *index,
             anchor = earliest;
         }
     }
-    if (slot >= YAN_FS_MAX_FILES) {
+    if (slot >= index->entry_capacity) {
         return YAN_SEARCH_TERMS_PROTOCOL;
     }
     yan_search_terms_rank_add(rank, index->entries[slot].name, slot, line,
@@ -671,7 +671,7 @@ static YanSearchTermsResult index_search_locked(
          * check happens before the line's keyword work, which is what keeps the
          * "filter first, then rank" contract true for the READY path. */
         if (index->linear.metadata_filtered &&
-            (slot >= YAN_FS_MAX_FILES ||
+            (slot >= index->entry_capacity ||
              index->linear.metadata_eligible[slot] != YAN_NOTE_META_ELIGIBLE)) {
             posting = index->postings[posting].next;
             continue;
@@ -936,10 +936,18 @@ static YanSearchTermsResult index_rebuild(void *context)
     return result;
 }
 
-YanSearchTermsResult yan_search_terms_index_init(YanSearchTermsIndex *index,
-                                                 YanFs *fs)
+uint32_t yan_search_terms_index_entries_storage_bytes(uint32_t capacity)
 {
-    if (index == NULL || fs == NULL) {
+    return capacity * (uint32_t)sizeof(YanFsInfo);
+}
+
+YanSearchTermsResult yan_search_terms_index_init(YanSearchTermsIndex *index,
+                                                 YanFs *fs,
+                                                 YanFsInfo *entries,
+                                                 uint8_t *metadata_eligible)
+{
+    if (index == NULL || fs == NULL || entries == NULL ||
+        metadata_eligible == NULL) {
         return YAN_SEARCH_TERMS_INVALID;
     }
     if (index_ranges_overlap(index, sizeof *index, fs, sizeof *fs)) {
@@ -949,11 +957,13 @@ YanSearchTermsResult yan_search_terms_index_init(YanSearchTermsIndex *index,
         return YAN_SEARCH_TERMS_BUSY;
     }
     YanSearchTermsResult result =
-        yan_search_terms_linear_init(&index->linear, fs);
+        yan_search_terms_linear_init(&index->linear, fs, metadata_eligible);
     if (result != YAN_SEARCH_TERMS_OK) {
         return result;
     }
     index->fs = fs;
+    index->entries = entries;
+    index->entry_capacity = fs->initialized ? fs->entry_capacity : 0u;
     index->initialized = true;
     index->busy = false;
     index_clear_cache(index);

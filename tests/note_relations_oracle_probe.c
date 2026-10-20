@@ -1,5 +1,6 @@
 /* Binary Host driver for the independent relation reference; real public FS. */
 #include "note_relations.h"
+#include "fs_test_support.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,14 +43,14 @@ int main(int argc,char **argv)
     uint32_t count=get32();if(count>63)return 90;
     if(yan_fs_format_metadata(medium[0],BLOCKS)!=YAN_FS_OK)return 91;
     YanFsBlockIo io={NULL,capacity,read_block,write_block};
-    if(yan_fs_init(&fs,io)!=YAN_FS_OK||yan_fs_mount(&fs)!=YAN_FS_OK)return 91;
+    if(test_fs_init(&fs,io)!=YAN_FS_OK||yan_fs_mount(&fs)!=YAN_FS_OK)return 91;
     for(uint32_t i=0;i<count;++i){
         char name[32]={0};uint32_t nl=get32(),size=get32();
         if(nl>31||size>sizeof data)return 90;
         get_bytes(name,nl);get_bytes(data,size);
         if(yan_fs_create(&fs,name,data,size)!=YAN_FS_OK)return 91;
     }
-    if(yan_relation_init(&relation,&fs)!=YAN_NOTE_OK)return 91;
+    if(test_relation_init(&relation,&fs)!=YAN_NOTE_OK)return 91;
     reads=writes=0;
     YanRelationSummary summary={UINT32_C(0xdeadbeef),UINT32_C(0xa5a5),true};
     YanNoteResult result;

@@ -1,5 +1,6 @@
 /* Compile YanFS with an exhausted identity source; relation queries need no cache token. */
 #include "note_relations.h"
+#include "fs_test_support.h"
 #include "unity.h"
 #include <string.h>
 static YanFs fs;
@@ -19,14 +20,14 @@ void tearDown(void) {}
 static void exhausted_identity_still_allows_all_relation_queries(void) {
     YanFsBlockIo io={NULL,capacity,read_block,write_block};
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK,yan_fs_format_metadata(disk[0],4u));
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK,yan_fs_init(&fs,io));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK,test_fs_init(&fs,io));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK,yan_fs_mount(&fs));
     static const uint8_t content[]="@yan-note 1\nlink: n\n@end\n";
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK,yan_fs_create(&fs,"n",content,sizeof content-1u));
     YanFsSource token;
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK,yan_fs_source(&fs,&token));
     TEST_ASSERT_FALSE_MESSAGE(token.cacheable,"identity_really_exhausted");
-    TEST_ASSERT_EQUAL_INT(YAN_NOTE_OK,yan_relation_init(&relation,&fs));
+    TEST_ASSERT_EQUAL_INT(YAN_NOTE_OK,test_relation_init(&relation,&fs));
     writes=0u;
     YanRelationSummary summary;
     TEST_ASSERT_EQUAL_INT(YAN_NOTE_OK,yan_relation_links(&relation,"n",row,NULL,&summary));

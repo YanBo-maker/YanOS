@@ -259,6 +259,7 @@ static YanBlockQueryResult execute_block(const YanMcpOptions *options,
     YanSemanticResult closed=yan_semantic_posix_cleanup(adapter);
     if (result==YAN_BLOCK_QUERY_OK && closed!=YAN_SEMANTIC_OK)
         result=YAN_BLOCK_QUERY_IO;
+    if (query) yan_block_query_destroy(query);
     free(results); free(query); free(adapter);
     if (result!=YAN_BLOCK_QUERY_OK) { free(*payload); *payload=NULL; *length=0; }
     return result;

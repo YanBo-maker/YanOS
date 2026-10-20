@@ -111,11 +111,10 @@ TOHOST_LINE_UNAVAILABLE = 0x71000009
 TOHOST_SHELL_FATAL = 0x7100000C
 TOHOST_OUTPUT = 0x71000011
 APP_FAIL_TOP = 0x71000000
-# Highest reason defined by apps/yanfs_terminal/main.c (25 is
-# APP_REASON_CAPACITY / CAPACITY, the temporary 0036 PR2a guard). A reason at
-# or below it is a named owner failure; an unassigned code above it is a
-# harness error.
-APP_REASON_LAST = 25
+# Highest reason defined by apps/yanfs_terminal/main.c (24 is
+# APP_REASON_ARENA / ARENA). A reason at or below it is a named
+# owner failure; an unassigned code above it is a harness error.
+APP_REASON_LAST = 24
 
 # tests/guest/terminal_wait_check.c: TW_FAIL(reason) = 0x72000000 | reason.
 FIXTURE_FAIL_TOP = 0x72000000
@@ -460,7 +459,7 @@ def run_fixture(driver, elf, work, scenario):
 
 def run_production(driver, args, work, image, stdin_bytes, label, fault,
                    corrupt_response, tx_fault_at, baseline=None,
-                   expect_tohost=None):
+                   expect_tohost=None, max_steps=PRODUCTION_STEPS):
     case_dir = work / ("production-" + label)
     disk = case_dir / (label + ".img")
     stdin_path = case_dir / (label + ".stdin")
@@ -472,7 +471,7 @@ def run_production(driver, args, work, image, stdin_bytes, label, fault,
     argv = [str(driver), "--image", str(args.guest), "--mode", "production",
             "--disk-image", str(disk), "--stdin", str(stdin_path),
             "--capture", str(capture), "--status", str(status),
-            "--max-steps", PRODUCTION_STEPS, "--fault", fault,
+            "--max-steps", str(max_steps), "--fault", fault,
             "--corrupt-response", str(corrupt_response),
             "--tx-fault-at", str(tx_fault_at)]
     if baseline is not None:

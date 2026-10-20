@@ -116,8 +116,6 @@ uint32_t yan_arena_used_bytes;
 #define APP_REASON_RELATION_INIT 22u
 #define APP_REASON_BLOCK_INIT 23u
 #define APP_REASON_ARENA 24u
-/* 0036 PR2a temporary guard; PR2b removes it with the service pointers. */
-#define APP_REASON_CAPACITY 25u
 
 /* ---------------------------------------------------------- static storage */
 
@@ -140,9 +138,8 @@ static YanSearchTerms term_terms;
  * backends. The shell binds it after its own init; an unbound shell would keep
  * the pre-0027 command set. */
 static YanNoteContext note_context;
-/* 0028: the relation service owns the bounded prefix, parser workspace and the
- * 63-row table, so it is static for the whole session exactly like the note
- * service above. */
+/* 0028: the relation service owns the bounded prefix and parser workspace; its
+ * row table is arena-allocated with the image's capacity and borrowed here. */
 static YanRelationContext relation_context;
 /* 0032 bounded workspace; no whole-library body or graph cache. */
 static YanBlockContext block_context;
@@ -398,14 +395,30 @@ _Noreturn static void app_session(void)
     if (probed != YAN_FS_OK) {
         app_mount_fail(probed);
     }
-    /* 0036 PR2a allocates only the directory cache: the note, relation, block
-     * and search contexts still own their static arrays until PR2b moves them
-     * into this arena. The directory is the one buffer the boot path uses. */
+    const uint32_t capacity =
+        directory_blocks * (YAN_FS_BLOCK_SIZE / YAN_FS_ENTRY_SIZE) - 1u;
     YanArena arena;
     yan_arena_init(&arena, __yan_arena_start, __yan_arena_end);
     uint8_t *directory =
         yan_arena_alloc(&arena, directory_blocks * YAN_FS_BLOCK_SIZE);
-    if (directory == NULL) {
+    YanNoteEntry *note_entries =
+        yan_arena_alloc(&arena, yan_note_entries_storage_bytes(capacity));
+    char (*note_sort_name)[32] = yan_arena_alloc(
+        &arena, yan_note_sort_name_storage_bytes(capacity));
+    YanRelationRow *relation_rows =
+        yan_arena_alloc(&arena, yan_relation_rows_storage_bytes(capacity));
+    /* 0036 implementation clarification: only the index_eligible copy of #4 is
+     * allocated. The literal search backend has no filtered qualification and
+     * does not need a second table. */
+    uint8_t *index_eligible = yan_arena_alloc(
+        &arena, yan_search_terms_linear_storage_bytes(capacity));
+    YanFsInfo *index_entries = yan_arena_alloc(
+        &arena, yan_search_terms_index_entries_storage_bytes(capacity));
+    char (*block_names)[32] =
+        yan_arena_alloc(&arena, yan_blocks_names_storage_bytes(capacity));
+    if (directory == NULL || note_entries == NULL || note_sort_name == NULL ||
+        relation_rows == NULL || index_eligible == NULL ||
+        index_entries == NULL || block_names == NULL) {
         app_fail(APP_REASON_ARENA, "ARENA");
     }
     yan_arena_used_bytes =
@@ -414,18 +427,12 @@ _Noreturn static void app_session(void)
         YAN_FS_OK) {
         app_fail(APP_REASON_FS_INIT, "FS_INIT");
     }
-    const YanFsResult mounted = yan_fs_mount(&fs);
-    if (mounted != YAN_FS_OK) {
-        app_mount_fail(mounted);
-    }
-    /* 0036 PR2a: the services still hold 63-entry static arrays, so a
-     * larger directory is refused until PR2b moves them into the arena. */
-    if (fs.entry_capacity > YAN_FS_MAX_FILES) {
-        app_fail(APP_REASON_CAPACITY, "CAPACITY");
-    }
     YanShellOutput output;
     output.context = NULL;
     output.putc = app_putc;
+    /* The search backends and the three filesystem services only need an
+     * initialized directory; they are ready before mount, so a mount failure
+     * cannot leave a half-initialized shell. */
     if (yan_search_linear_init(&search_linear, &fs) != YAN_SEARCH_OK) {
         app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
     }
@@ -434,13 +441,30 @@ _Noreturn static void app_session(void)
         YAN_SEARCH_OK) {
         app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
     }
-    if (yan_search_terms_index_init(&term_index, &fs) != YAN_SEARCH_TERMS_OK) {
+    if (yan_search_terms_index_init(&term_index, &fs, index_entries,
+                                    index_eligible) != YAN_SEARCH_TERMS_OK) {
         app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
     }
     if (yan_search_terms_init(&term_terms,
                               yan_search_terms_index_backend(&term_index)) !=
         YAN_SEARCH_TERMS_OK) {
         app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
+    }
+    if (yan_note_init(&note_context, &fs, note_entries, note_sort_name) !=
+        YAN_NOTE_OK) {
+        app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
+    }
+    if (yan_relation_init(&relation_context, &fs, relation_rows) !=
+        YAN_NOTE_OK) {
+        app_fail(APP_REASON_RELATION_INIT, "RELATION_INIT");
+    }
+    if (yan_blocks_init(&block_context, &fs, block_names) != YAN_BLOCK_OK) {
+        app_fail(APP_REASON_BLOCK_INIT, "BLOCK_INIT");
+    }
+    /* The directory and the services are allocated; nothing below allocates. */
+    const YanFsResult mounted = yan_fs_mount(&fs);
+    if (mounted != YAN_FS_OK) {
+        app_mount_fail(mounted);
     }
     if (yan_shell_init(&shell, &fs, &search, &term_terms, output) !=
         YAN_SHELL_OK) {
@@ -450,9 +474,6 @@ _Noreturn static void app_session(void)
      * shell enables `meta` and the tag operator only after this binding. A
      * failure here is an initialization failure on the same path as the other
      * injected objects, so it reports the existing SHELL_INIT reason. */
-    if (yan_note_init(&note_context, &fs) != YAN_NOTE_OK) {
-        app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
-    }
     if (yan_shell_bind_metadata(&shell, &note_context) != YAN_SHELL_OK) {
         app_fail(APP_REASON_SHELL_INIT, "SHELL_INIT");
     }
@@ -460,14 +481,10 @@ _Noreturn static void app_session(void)
      * enables `links`, `backlinks` and `related` only after this binding. Both
      * steps are startup failures with their own stable reason and token, so a
      * host can tell a relation initialization failure from the metadata one. */
-    if (yan_relation_init(&relation_context, &fs) != YAN_NOTE_OK) {
-        app_fail(APP_REASON_RELATION_INIT, "RELATION_INIT");
-    }
     if (yan_shell_bind_relations(&shell, &relation_context) != YAN_SHELL_OK) {
         app_fail(APP_REASON_RELATION_INIT, "RELATION_INIT");
     }
-    if (yan_blocks_init(&block_context, &fs) != YAN_BLOCK_OK ||
-        yan_shell_bind_blocks(&shell, &block_context) != YAN_SHELL_OK) {
+    if (yan_shell_bind_blocks(&shell, &block_context) != YAN_SHELL_OK) {
         app_fail(APP_REASON_BLOCK_INIT, "BLOCK_INIT");
     }
     if (yan_editor_init(&editor, &fs, output) != YAN_EDITOR_OK) {

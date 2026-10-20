@@ -53,7 +53,9 @@ typedef struct {
     YanBlockTextValidator text;
     YanBlockParser parser;
     YanBlockRow rows[YAN_BLOCK_MAX_COUNT];
-    char names[YAN_FS_MAX_FILES][32];
+    /* 0036-R3: caller-owned, `name_capacity` names, one per directory slot. */
+    char (*names)[32];
+    uint32_t name_capacity;
     uint32_t name_count;
     char current_file[32];
     YanBlockAddress filter;
@@ -72,7 +74,9 @@ _Static_assert(sizeof(YanBlockContext) <= 65536u,
  * optional summary is left byte-identical on every non-OK return. Opaque sink
  * objects have no declared extent: only their pointer byte can be checked.
  * Reentry, including init, is BUSY. init itself performs no I/O. */
-YanBlockResult yan_blocks_init(YanBlockContext *, YanFs *);
+YanBlockResult yan_blocks_init(YanBlockContext *, YanFs *, char (*names)[32]);
+/* 0036-R3 storage size for one `capacity`-name table. */
+uint32_t yan_blocks_names_storage_bytes(uint32_t capacity);
 YanBlockResult yan_blocks_list(YanBlockContext *, const char *name,
                                YanBlockRowFn, void *, YanBlockSummary *);
 YanBlockResult yan_blocks_refs(YanBlockContext *, const char *name,

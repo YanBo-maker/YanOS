@@ -1,4 +1,5 @@
 #include "search_terms.h"
+#include "fs_test_support.h"
 #include "search_terms_linear.h"
 #include "search_text.h"
 #include "yanfs.h"
@@ -125,7 +126,7 @@ static void fixture_use(uint8_t (*blocks)[YAN_FS_BLOCK_SIZE], uint32_t capacity)
 
 static void fixture_mount(void)
 {
-    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_init(&fs, fs_backend()));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&fs, fs_backend()));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
 }
 
@@ -884,7 +885,7 @@ static void setup_linear_terms(void)
     fixture_mount();
     memset(&linear, 0, sizeof linear);
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK,
-                          yan_search_terms_linear_init(&linear, &fs));
+                          test_terms_linear_init(&linear, &fs));
     memset(&terms, 0, sizeof terms);
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_TERMS_OK,
@@ -897,15 +898,15 @@ static void linear_init_rejects_invalid_and_overlapping_pairs(void)
     YanSearchTermsLinear context;
     memset(&context, 0, sizeof context);
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_INVALID,
-                          yan_search_terms_linear_init(NULL, &fs));
+                          test_terms_linear_init(NULL, &fs));
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_INVALID,
-                          yan_search_terms_linear_init(&context, NULL));
+                          test_terms_linear_init(&context, NULL));
     /* The context placed over the filesystem overlaps its own source span. */
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_TERMS_INVALID,
-        yan_search_terms_linear_init((YanSearchTermsLinear *)(void *)&fs, &fs));
+        test_terms_linear_init((YanSearchTermsLinear *)(void *)&fs, &fs));
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK,
-                          yan_search_terms_linear_init(&context, &fs));
+                          test_terms_linear_init(&context, &fs));
 }
 
 static void linear_status_reports_empty_and_the_real_source(void)
@@ -914,7 +915,7 @@ static void linear_status_reports_empty_and_the_real_source(void)
     fixture_mount();
     memset(&linear, 0, sizeof linear);
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK,
-                          yan_search_terms_linear_init(&linear, &fs));
+                          test_terms_linear_init(&linear, &fs));
     memset(&terms, 0, sizeof terms);
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_TERMS_OK,
@@ -950,7 +951,7 @@ static void linear_status_reports_empty_and_the_real_source(void)
     YanSearchTermsLinear virgin_linear;
     memset(&virgin_linear, 0, sizeof virgin_linear);
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK,
-                          yan_search_terms_linear_init(&virgin_linear, &virgin));
+                          test_terms_linear_init(&virgin_linear, &virgin));
     memset(&terms, 0, sizeof terms);
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_TERMS_OK,
@@ -968,7 +969,7 @@ static void linear_clear_is_a_noop_and_rebuild_is_unsupported(void)
     fixture_mount();
     memset(&linear, 0, sizeof linear);
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_TERMS_OK,
-                          yan_search_terms_linear_init(&linear, &fs));
+                          test_terms_linear_init(&linear, &fs));
     memset(&terms, 0, sizeof terms);
     TEST_ASSERT_EQUAL_INT(
         YAN_SEARCH_TERMS_OK,
