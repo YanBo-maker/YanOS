@@ -150,13 +150,13 @@ search（线性与索引）、带标签的 search、`links`、`backlinks`、`rel
 改动（设计沿用 0040 原方案，0040 对应条目已标「移至 0036」）：
 1. Guest 块传输（ring 拷贝）和 `memcpy`/`memmove` 按 32 位字拷贝，非对齐头尾逐字节。
 2. 挂载校验：非空 slot 下标按名字排序后比相邻（重名），`start≠0` 的 extent 按 start 排序后比相邻（重叠），仍只返回 CORRUPT（0040 原 R1）。
-3. `find_entry` 改为在 `name_order[N]`（uint16，arena）上二分；挂载成功和 `commit_metadata` 发布时整体重建（0040 原 R4）。
+3. `find_entry` 改为在 `name_order[N]`（uint16，arena）上二分；挂载成功和 `commit_entry` 发布时整体重建（0040 原 R4）。
 4. 公共下标堆排序 `yan_sort_index`（迭代 sift-down），供第 2、3 项使用，并替换 metadata、relations、blocks 三处插入排序（0040 原 R3）。
 5. block backlinks 若在 1–4 之后仍超标：同一次查询内对 `target()` 的重复读做去重（按目标 slot 记一位，arena N 位），不建持久链接索引。
 - 0036-R8-AC1：Given N=63、1023、2047 的同一组镜像（含 related 同分只能靠名字区分的行、重名/重叠/首尾相接的挂载夹具），When 分别用基线（本 PR 前的 main，PR 中写 SHA）和新实现执行 mount、create、`ls`、`meta list`、`backlinks`、`related`、`block backlinks`、`search`，以及 MCP `yanos_block_backlinks`，Then 终端输出、返回码、MCP JSON 和镜像 SHA-256 逐字节相同。
 - 0036-R8-AC2：Given 随机 create/delete/rename/copy 序列（固定种子，10⁴ 步，N=2047），Then 每步后 `find_entry` 与线性 oracle 结果相同，`name_order` 严格递增且恰好覆盖非空 slot；注入写失败后不变量仍成立。
 - 0036-R8-AC3：Given 0..2047 个随机名字及已排序、逆序输入，Then `yan_sort_index` 与插入排序参考实现逐项相同；源码中不再有 `while (j > 0` 形式的插入排序。
-- 0036-R8-AC4：R5-AC1 在 N=1023、2047 全部通过（PR 中记录改前、改后步数）；`validate_metadata` 栈帧在 N=63 与 4095 时相同。
+- 0036-R8-AC4：R5-AC1 在 N=1023、2047 全部通过（PR 中记录改前、改后步数）；`validate_directory` 栈帧在 N=63 与 4095 时相同。
 - 落位：PR2b 之后新开 **PR3（R8）**，原 R4+R6、R7 顺延为 PR4、PR5。非测试代码约 200 行【估算】（字拷贝约 40、sort 约 45、挂载约 50、name_order 约 45、三处排序调用约 20；第 5 项若需要再加约 20），测试约 350 行。
 
 #### 数据结构结论
