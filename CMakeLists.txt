@@ -866,6 +866,14 @@ if(BUILD_TESTING)
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_blocks_guest_gate.py")
         set_tests_properties(note_blocks_guest_gate PROPERTIES TIMEOUT 180)
+        # 0035-R8 negative controls: wrong expected bytes, a mutated MCP
+        # response, and a missing fixture/binary must all fail before any
+        # cross toolchain check. Pure Python, so it stays in the default suite.
+        add_test(NAME learning_note_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_learning_note_gate.py")
+        set_tests_properties(learning_note_gate PROPERTIES TIMEOUT 60
+                             LABELS "0035-R10-AC2")
         add_test(NAME note_blocks_mutation_gate
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_blocks_mutation_gate.py")
@@ -942,6 +950,19 @@ if(BUILD_TESTING)
                                 --guest "${YAN_TERMINAL_ELF}"
                                 --server "$<TARGET_FILE:yan_mcp>")
                     set_tests_properties(guest_note_blocks_host PROPERTIES TIMEOUT 600)
+                    # 0035-R8: real learning + ordinary MCP instances and the
+                    # same production Guest ELF. No skip code: the enclosing
+                    # targets already prove the toolchain exists.
+                    add_test(NAME guest_learning_note
+                        COMMAND "${Python3_EXECUTABLE}" -B
+                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_learning_note.py"
+                                --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                                --work "${CMAKE_BINARY_DIR}/guest-learning-note"
+                                --run "$<TARGET_FILE:yan_run>"
+                                --guest "${YAN_TERMINAL_ELF}"
+                                --server "$<TARGET_FILE:yan_mcp>")
+                    set_tests_properties(guest_learning_note PROPERTIES TIMEOUT 600
+                                         LABELS "0035-R8-AC1;0035-R8-AC2;0035-R10-AC3;0035-R11-AC4")
                 endif()
             endif()
             if(TARGET yanfs_terminal)

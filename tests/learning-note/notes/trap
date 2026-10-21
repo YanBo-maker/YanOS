@@ -1,0 +1,5 @@
+@yan-note 1
+title: trap（普通笔记夹具）
+@end
+@block handler
+处理器保存现场，进入 trap handler，读取原因并分派给设备驱动。
