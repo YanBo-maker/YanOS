@@ -175,6 +175,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_include_directories(yan_note_write PUBLIC host)
     target_link_libraries(yan_note_write PUBLIC yan_fs yan_note_format yan_blocks_format)
     target_compile_options(yan_note_write PRIVATE ${YAN_WARNINGS})
+    add_library(yan_image_migrate STATIC host/image_migrate.c)
+    target_link_libraries(yan_image_migrate PUBLIC yan_note_write yan_semantic_posix)
+    target_compile_options(yan_image_migrate PRIVATE ${YAN_WARNINGS})
 endif()
 
 if(YAN_BUILD_TOOLS)
@@ -182,6 +185,9 @@ if(YAN_BUILD_TOOLS)
         add_executable(yan_mkfs tools/yan_mkfs.c)
         target_link_libraries(yan_mkfs PRIVATE yan_fs)
         target_compile_options(yan_mkfs PRIVATE ${YAN_WARNINGS})
+        add_executable(yan_migrate tools/yan_migrate.c)
+        target_link_libraries(yan_migrate PRIVATE yan_image_migrate)
+        target_compile_options(yan_migrate PRIVATE ${YAN_WARNINGS})
     endif()
     add_executable(yan_run tools/yan_run.c tools/host_file.c tools/host_terminal.c
                             tools/host_block.c tools/host_disk.c)
@@ -469,6 +475,54 @@ if(BUILD_TESTING)
         add_test(NAME note_write_faults COMMAND test_note_write_faults)
         set_tests_properties(note_write_faults PROPERTIES TIMEOUT 120 LABELS
             "0035-R6-AC1;0035-R6-AC3")
+
+        if(Python3_Interpreter_FOUND AND TARGET yan_migrate)
+            add_executable(yanfs_migrate_fault tests/yanfs_migrate_fault.c)
+            target_link_libraries(yanfs_migrate_fault PRIVATE yan_image_migrate)
+            target_compile_options(yanfs_migrate_fault PRIVATE ${YAN_WARNINGS})
+            target_link_options(yanfs_migrate_fault PRIVATE
+                -Wl,--wrap=open -Wl,--wrap=openat -Wl,--wrap=pwrite
+                -Wl,--wrap=pread -Wl,--wrap=write -Wl,--wrap=fsync
+                -Wl,--wrap=close -Wl,--wrap=mkdirat -Wl,--wrap=unlinkat
+                -Wl,--wrap=readdir)
+            add_executable(yanfs_migrate_terms_probe tests/yanfs_migrate_terms_probe.c)
+            target_link_libraries(yanfs_migrate_terms_probe PRIVATE
+                                  yan_semantic_posix yan_search_terms)
+            target_compile_options(yanfs_migrate_terms_probe PRIVATE ${YAN_WARNINGS})
+
+            # The full Linux configuration verifies on-disk index reuse with the
+            # repository fake runner; no local model or prebuilt bad candidate is
+            # needed. The tools-only configuration explicitly skips that one case.
+            set(_yan_migrate_semantic_args)
+            if(TARGET yan_semantic)
+                list(APPEND _yan_migrate_semantic_args
+                    --semantic $<TARGET_FILE:yan_semantic>
+                    --runner "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_fake_runner.py"
+                    --require-semantic)
+            endif()
+            add_test(NAME yanfs_migrate_acceptance
+                COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_yanfs_migrate.py"
+                    --migrate $<TARGET_FILE:yan_migrate>
+                    --terms-probe $<TARGET_FILE:yanfs_migrate_terms_probe>
+                    --fault $<TARGET_FILE:yanfs_migrate_fault>
+                    --source-root "${CMAKE_CURRENT_SOURCE_DIR}"
+                    --cc "${CMAKE_C_COMPILER}"
+                    --require-detection --require-cli-fault
+                    ${_yan_migrate_semantic_args}
+                    --work "${CMAKE_BINARY_DIR}/yanfs-migrate")
+            set_tests_properties(yanfs_migrate_acceptance PROPERTIES TIMEOUT 600
+                SKIP_RETURN_CODE 77 LABELS "0036-R7-AC1;0036-R7-AC2")
+            add_test(NAME yanfs_migrate_work_gate
+                COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_yanfs_migrate_gate.py"
+                    --migrate $<TARGET_FILE:yan_migrate>
+                    --terms-probe $<TARGET_FILE:yanfs_migrate_terms_probe>
+                    --fault $<TARGET_FILE:yanfs_migrate_fault>
+                    --work "${CMAKE_BINARY_DIR}/yanfs-migrate-gate")
+            set_tests_properties(yanfs_migrate_work_gate PROPERTIES TIMEOUT 300
+                LABELS "0036-R7-AC2")
+        endif()
 
         if(Python3_Interpreter_FOUND AND TARGET yan_run AND TARGET yan_mkfs
            AND TARGET yanfs_terminal)
