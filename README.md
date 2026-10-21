@@ -12,7 +12,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [YanFS](docs/specs/0021-yanfs.md) 已实现并验证格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收。初版采用单根目录、最多 63 文件和连续 extent；覆盖需要新旧内容同时容纳，碎片可能导致 NOSPACE。元数据写失败可能拒挂，不保证断电一致性，不自动修复。实现与验证已完成。
 
-[多块目录](docs/specs/0036-yanfs-multi-block-directory.md)已支持旧 v1 镜像和最多 4095 文件的 v2 镜像，新镜像默认容量为 1023。终端按镜像容量分配服务表；R8 的挂载、名称查找和查询传输优化已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 合入 main。本分支的 R4/R6 已将 Host 语义语料及 MCP 检索改为按镜像容量处理，正在完成验收；旧索引格式与来源身份保持，离线迁移留待 R7。
+[多块目录](docs/specs/0036-yanfs-multi-block-directory.md)已支持旧 v1 镜像和最多 4095 文件的 v2 镜像，新镜像默认容量为 1023。终端按镜像容量分配服务表；R8 的挂载、名称查找和查询传输优化已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 合入 main。R4/R6 的 Host 语义语料及 MCP 大容量检索已完成验收，见待合入的 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81)；旧索引格式与来源身份保持。R7 离线迁移已实现并完成本机验证，可复制旧镜像与附件、保留槽号和来源身份；最终冻结对齐及总审核已完成，发布待完成，尚未交付。
 
 [Guest 终端文件操作](docs/specs/0022-terminal-file-operations.md) 已实现并验证：独立应用提供 help、ls、stat、cat、create、write、rm 和 exit，使用 UART 中断等待输入，接入已有 YanFS 镜像。create 创建新文件，write 整文件覆盖；单行最多 1023 字节，超长或非法控制字节整行拒绝。cat 保留合法 UTF-8，并转义指定控制字节和非法编码。实现与验证完成。
 
@@ -88,6 +88,17 @@ python3 tools/yan_shell.py --run build/terminal/yan_run \
 ```
 
 已有镜像可直接传给启动器；上面的 mkfs 仅用于创建新镜像。输入 `create hello.txt hello`、`cat hello.txt`、`write hello.txt world`、`rm hello.txt`，最后用 `exit` 结束。TEXT 不隐式添加换行，退格按字节处理。启动器临时调整 Unix TTY 并恢复完整属性；stdin EOF 不传给 Guest，必须显式 exit。默认使用很大的有限步数上限，可通过 `--max-steps` 缩小；空闲仍消耗 CPU。文件发布后输出失败不回滚，不自动修复或重新挂载。
+
+Linux/WSL 的离线迁移工具可把已有镜像复制为另一容量，并保留文件槽号、名称、原文和来源身份。先退出 Guest，并在迁移期间保持源镜像及附件稳定，再运行：
+
+```sh
+cmake --build build/terminal --target yan_migrate --parallel
+build/terminal/yan_migrate --from terminal.img --to expanded.img --files 2047
+```
+
+目标镜像和 `expanded.img.assets` 都须不存在。工具只读源镜像，递归复制源真实路径旁的 `.assets` 普通文件和目录；遇到符号链接或特殊文件会失败。刷新后重新挂载并比较文件及来源身份，失败时清理本次创建的目标；清理也失败时明确报告残留路径，旁锁 `.lock` 保留。它不提供原地升级或断电恢复。
+
+`--files` 接受 63 至 4095 之间满足 `64*D-1` 的容量。默认镜像块数为旧块数加目录块数的差，可用 `--blocks B` 指定；新容量须容纳最高已用槽及全部内容。只有 1 块的空 v1 镜像迁移到 1023 文件容量时，须显式提供至少 `--blocks 17`。原盘上语义索引可继续使用原路径，模型、runner 和配置保持时无需重建；RAM 词项索引须在新镜像重建。接口见 [迁移模块](host/image_migrate.h)，契约见 [0036-R7](docs/specs/0036-yanfs-multi-block-directory.md)。
 
 多行笔记使用同一应用和启动器：
 

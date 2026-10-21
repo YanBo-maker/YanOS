@@ -187,8 +187,12 @@ R8 实施记录：块扫描和线性词项扫描对不超过既有 4 KiB 缓冲�
 5. fsync 后重新挂载 NEW，逐项比对 slot、名称和内容，并核对 0033 `source_sha256` 与 OLD 相等。
 
 任何一步失败都只删除本次运行创建的路径（NEW，以及本次创建的 NEW.assets），然后以非 0 退出。OLD 始终只读。N 小于 OLD 中最大的已用 slot 号加 1 时报错。
-- 0036-R7-AC1：Given 一个 v1 镜像，slot 0..62 中有若干空 slot，并带有 `OLD.assets/img/x.png`，When 迁移到 `--files 1023`，Then 退出码为 0；NEW 中每个文件的 slot、名称、内容与 OLD 相同，空 slot 仍为空；0033 `source_sha256` 相等；用 OLD 建的词项索引和语义索引在 NEW 上状态不是 STALE；`NEW.assets/img/x.png` 与原文件逐字节相同；OLD 和 OLD.assets 都不变。
+- 0036-R7-AC1：Given 一个 v1 镜像，slot 0..62 中有若干空 slot，并带有 `OLD.assets/img/x.png`，When 迁移到 `--files 1023`，Then 退出码为 0；NEW 中每个文件的 slot、名称、内容与 OLD 相同，空 slot 仍为空；0033 `source_sha256` 相等；用 OLD 建的盘上语义索引在 NEW 上无需重建且仍为 READY；内存词项索引在 NEW 上正常重建为 READY，搜索内容、分数和排序与 OLD 一致；`NEW.assets/img/x.png` 与原文件逐字节相同；OLD 和 OLD.assets 都不变。
 - 0036-R7-AC2：Given 分别出现：NEW 已存在、NEW.assets 已存在、OLD 的旁锁被别人以排他方式持有、B 放不下全部文件、`--files` 小于最大已用 slot 号加 1，Then 都以非 0 退出；事先已存在的 NEW 或 NEW.assets 不被改动或删除，其余情况结束后不留下本次创建的路径；OLD 的 SHA-256 不变。
+
+2026-10-21 所有者澄清：R7-AC1 原写「用 OLD 建的词项索引和语义索引在 NEW 上状态不是 STALE」。0026 词项索引只保存在 RAM，来源编号随重新挂载改变，不能随镜像跨进程携带；因此改为上面的重建与结果等价验收。盘上语义索引仍直接复用，0033 来源身份格式保持。
+
+2026-10-21 所有者批准的附件与失败边界：附件源为 `realpath(OLD) + ".assets"`，递归复制普通文件和目录；符号链接或特殊文件使迁移失败，并清理本次创建的目标。目标落在源附件树内时，在创建前拒绝，避免自包含复制。沿用 0035 保留旁锁 `.lock`，不把锁文件作为迁移产物删除。迁移期间源镜像与附件须保持稳定，不新增快照或重试机制。前述失败清理规则针对清理操作本身可完成的情况；若磁盘或权限错误使清理也失败，工具必须非 0 退出并明确列出残留路径，不得声称已清理完毕。断电恢复仍为非目标。
 
 ## 非目标
 
@@ -300,3 +304,58 @@ PR 已于 2026-10-21 合入 main，merge 为 `abbb1514e3dd5af9ffedc3bd6504c59657
 本机证据根 `E:/YanOS/build/20261021-r4-r6/`：`code-freeze.json`（27 个非文档输入）、`closure-release-ctest.log`、`closure-asan-ctest.log`、`closure-windows-ctest.log`、`actual-mutations.log`、`real-highslot/report.json`、`v1-parity/compare.json`、`integration-red.log`、`integration-green.log`、`late-io24.log`。默认大容量的完整 AC 记录在前一阶段共用构建目录 `E:/YanOS/build/20261020-development-audit/release/yanfs-large-capacity/large-capacity-evidence.json`；该目录复用构建配置，不复用旧测试结果。dsh 的首轮实施报告及原始定向证据在隔离 worktree 的 `build/20261021-r4-r6/`，首轮报告已复制到本机证据根。
 
 独立 dsh 的第二轮冻结复核已完成，首轮阻塞均已消除；提交前九项总审核已核对。R8 合入后监控通道已原样归档并核对 SHA-256；当前 R4/R6 未合入，不归档新通道。旧当前阶段原样追加到 STATUS-history，0036 规格与索引保持 Approved，R7 迁移仍未实现。远端 CI、推送和维护者意图验收另记，不由本机验证推定。
+
+
+### R4＋R6 远端记录（2026-10-21）
+
+项目所有者批准推送后，代码 `0839ab7` 和相邻文档 `131a39b` 已发布为 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81)。精确 head `131a39b4c881598f0e8e11b363ba71c9124dde91` 的 [Actions 39537301229](https://github.com/YanBo-maker/YanOS/actions/runs/39537301229) 已通过：Linux Release 141/141（419.52 s）、Debug ASan/UBSan 141/141（996.35 s）、Windows Debug 77/77（317.40 s），零失败零跳过。两个 Linux 任务实际执行 `yanfs_large_capacity`、`large_capacity_gate` 和 `semantic_digest_alloc`，并另行复验 MCP 四项；Windows 执行分配失败用例。实际变异和真实模型仍是上节的本机证据。
+
+完整证据为 Actions 三项任务日志，工作流未配置 artifact 上传；核实副本为 `E:/YanOS/build/20261021-r4-r6/ci/` 的三份 `job-*.log` 与 `verified.json`，不将本机日志冒充 CI artifact。由 `gh pr view 81` 核实，PR 当前仍 OPEN，尚未合入；上节「尚未推送」保留为当时本机收口记录。
+
+### R7 实施记录（2026-10-21，进行中）
+
+项目所有者要求规划并继续下一项，沿已批准的 R7 推进。依赖基线为 PR #81 的 `131a39b`，分支 `codex/0036-r7-offline-migration`。本阶段只增加独立 Host 离线迁移模块、薄 CLI 与实际验收；索引验收和附件/失败边界的两项补充已获所有者批准并写入 R7 与决策 0003。实现交由 dsh 编码和独立验收，总审核负责集成、文档及最终核对；本阶段尚无完成的实现或回归结论，不推定已交付或已合入。
+
+
+### R7 本机验证与待审事项（2026-10-21）
+
+上条为阶段启动记录。迁移模块 `host/image_migrate.c/.h`、薄 CLI `tools/yan_migrate.c` 和独立验收已实现，CMake 已注册 `yanfs_migrate_acceptance`、`yanfs_migrate_work_gate`，故障目标包含 `readdir` wrap。已有生产模块未改动。实现与本机验证完成；最终冻结对齐及提交前总审核已完成；本次冻结审核时 R7 尚未提交、推送、进入远端 CI 或合入，0036 保持 Approved。
+
+| 配置 | 本次默认 CTest | CTest 实测耗时 |
+| --- | --- | --- |
+| Linux Release，tools/semantic ON | 143/143 | 247.84 s |
+| Linux Debug ASan/UBSan，tools/semantic ON | 143/143 | 668.32 s |
+| Windows MSVC Debug，tools/semantic OFF | 77/77 | 201.77 s |
+
+默认回归均零失败、零跳过；Windows 不编译或运行 Linux 迁移工具。变异配置实际注册 161 项，显式选 `_mutation$` 的 17 个实际组为 17/17，536.23 s，零失败零跳过；未把该配置所有注册项说成一次完整回归。默认门禁和实际变异负控均实际执行，断言/owner 判据保持，timeout、信号和 sanitizer 错误不计为发现缺陷。
+
+默认回归启动前冻结 355 个非文档输入。总审核随后仅修订迁移验收及工作目录门禁两份测试脚本：真实失败优先于外部依赖 77，显式传入但缺失的 CLI 故障程序在工作目录初始化前硬失败，并补齐单块空 v1 边界；其余输入包括全部生产代码保持。修后两项测试在 Release 2/2（19.71 s）及 ASan/UBSan 2/2（20.11 s）通过，完整迁移矩阵均为 74 PASS / 0 FAIL / 0 SKIP。全套回归与这两项修后复验分别记录，不能把早期 72 项日志当成最新 74 项结果。
+
+- R7-AC1：独立 Python 解码器核对 v1 稀疏槽、空文件、UTF-8、跨块二进制、空槽、尾零和来源摘要；覆盖默认/显式块数、v2 高槽扩容与允许的缩容、63/4095 容量。单块空 v1 按默认公式扩到 1023 时 B=16，不满足 v2 的 B>D，明确 NOSPACE；显式 `--blocks 17` 成功。工具不偷偷增加容量。
+- R7-AC2：目标镜像或附件已存在（包括悬空链接）、排他旁锁、容量或槽范围不足、坏源、附件特殊文件及目标位于源附件树内均被拒绝；核对旧镜像及附件保持、预存目标不被删除。写入、刷新、重新挂载、比较、关闭和清理故障分别验证，清理失败诊断保留完整残留路径。
+- 词项索引在 OLD/NEW 的独立新进程分别 rebuild 为 READY，非空查询的原文、分数、顺序及摘要相等。盘上语义索引采用仓库 fake runner、自造 model/index 验证无重建复用，NEW 为 READY 且有实际命中；fake runner 不代表真实模型质量。
+- 真实索引复用另行验证：既有 1023 容量、64 块镜像迁移到 4095 容量、112 块，slot 1022 的 irq.txt 保持；直接使用旧盘上索引，未 rebuild，`STATUS READY segments=21 skipped=0`。两条固定问题的完整 JSON（分数、原文、行号和字节范围）与 OLD 结果相同；旧镜像、索引、Qwen 模型和 runner 的 SHA-256 均不变。仅验这份固定语料的迁移兼容，不扩展通用检索质量结论。
+- `YAN_BUILD_SEMANTIC=OFF`、`BUILD_TESTING=OFF` 的独立 tools 配置可构建 `yan_migrate`，迁移本身不需要模型、HTTP 或 JSON 依赖。开启语义工具的默认 Linux 验收从当前源码生成受控坏候选和实际 CLI 故障副本，不依赖本机预建程序或模型路径。tools-only 验收显式跳过语义索引项；工作目录门禁的基础子集也显式跳过可选项，均不冒充完整 AC1。
+
+总审核真实 RED → GREEN 与永久回归：
+
+| 发现 | 原问题 | 修复与当前依据 |
+| --- | --- | --- |
+| ROOT-F1 | 最终父目录 close 失败后留下 NEW，未报告残留 | 重开父目录清理；失败则列出可能残留。`FAULT.parent-close` 与实际 CLI 双残留测试通过 |
+| ROOT-F2 | CLI 512 字节缓冲截断合法长残留路径 | 实际生产 CLI 保留两条完整路径；731 字节目标及 738 字节附件路径测试通过 |
+| ROOT-F3 | 缺工具前删除调用者整个工作目录 | 先核显式输入，仅创建本次 `run-*`；marker 在错误和正常运行后保持，工作目录门禁通过 |
+| ROOT-F4 | 成功 write 遗留 errno=EINTR 被当成目录读取失败 | 每次 readdir 前清 errno，只在该次 NULL 返回时判断；成功写保留 errno 及 copy/verify/remove 真实 EIO 测试通过 |
+| ROOT-F5 | 断言失败与缺外部编译器并存时返回 77，掩盖失败 | 有 FAIL 先返回 1；门禁同时核对纯外部依赖缺失仍为 77 |
+| ROOT-F3 补核 | 显式 `--cli-fault` 缺失未在输入预检检查，退出 0 | 缺输入退出 1，零工作子目录；永久门禁核对 marker 和初始化顺序 |
+
+证据根 `E:/YanOS/build/20261021-r7/`：`frozen-inputs.json`、`final-inputs.json`、`final-test-only-changes.json`、四份 `*-registered.json` / `*-ctest.log` / `*-verification.json`、`release-r7-final.log` / `asan-r7-final.log`、`verification-summary.json`、`real-index-reuse/report.json`，以及 `root-close-dir-*`、`root-long-residual-*`、`root-input-gate-*`、`root-success-errno-*`、`root-skip-priority-red/green.json`、`root-cli-input-red/green.json`。早期 RED 与旧专项日志保留为诊断。所有者原目录 `E:/YanOS-36` 的 26 个输入逐项 SHA-256 保持，见 `owner-worktree-preservation.json`。
+
+dsh 本阶段复用同一协调会话及原编码/独立验收两个子任务，子任务均已停止。报告如实记录两轮技术审核与修后核验；第二轮仍有 CMake 接入阻塞，现由总审核完成并验证；独立只读冻结对齐已完成，不把实现报告当成文档 PASS。生产 C/头文件共 1459 行，另有 CMake 接入 54 行，超过约 400 行暂定 PR 范围；重复盘上解码已删除，附件 copy/verify/remove 已合并。提交范围与额外一轮冻结核验已由所有者批准（见下条），本轮为批准的额外审核，不自动增加审核轮次或放宽后续范围。
+
+未覆盖断电恢复、源/附件并发变化和目标父目录被并发替换；沿用已批准的离线稳定前提。附件末尾 EOF 探测遇 EINTR 可保守失败，故障 wrapper 与当前系统调用形状相关；这些低优先级审查意见留在报告，待最终审核分类，不声称已解决。复现入口：Linux tools/semantic 配置后运行 `ctest --test-dir BUILD -R '^yanfs_migrate_' --output-on-failure -V`；源码/产物缺失必须硬失败，外部编译器缺失可返回 77。
+
+2026-10-21 所有者随后批准：本次保留 R7 整组（生产 C/头文件 1459 行，另有 CMake 54 行），并复用原 dsh 会话增加一轮只读冻结审核。此为本阶段范围和审核轮次的例外，不修改全局约 400 行与两轮规则；尚未授权 R7 推送或创建 PR。
+
+2026-10-21 独立只读冻结审核完成：当前源码、测试、CMake、正式文档及 355 个非文档输入与上述证据逐项核对，未发现阻塞；状态词按 `E:/YanOS/build/20261021-r7/dsh-final-audit-report.md` 机械替换。该轮由所有者明确批准，原两个子任务保持停止，协调 headless 已正常结束；本次冻结审核时 R7 仍未提交、推送、进入远端 CI 或合入，0036 保持 Approved。本机回归及提交前九项总审核已完成，代码与文档按相邻提交准备。
+
+2026-10-21 本地提交准备完成：实现与配套测试提交为 `86d77156435f135937cc75d9dc6358e3afebb6e5`，文档与其同批相邻提交。提交前九项总审核逐条核实，状态词修正和提交事实均为总审核按本轮命令落笔；正式文档的实质内容已由同一 dsh 会话冻结核对。R7 尚未推送、创建 PR、进入远端 CI 或合入；0036 保持 Approved。低优先级 EOF/EINTR 和故障测试符号覆盖留作发布后 follow-up，源/目标的并发干扰与断电仍不在离线迁移验收内。

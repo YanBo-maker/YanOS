@@ -735,3 +735,16 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 
 规格 0035-R8 要求放在 `tests/` 的示例学习笔记夹具，2921fed 的树里还没有。各阶段验证明细仍只写在对应规格的 VERIFY 执行记录。
 
+
+## 2026-10-21 R4/R6 本机审核完成时的当前阶段（原文追加）
+
+[0036](specs/0036-yanfs-multi-block-directory.md) 进行中。多块目录、按容量分配服务表及默认 1023 文件镜像已随 [PR #62](https://github.com/YanBo-maker/YanOS/pull/62)、[PR #70](https://github.com/YanBo-maker/YanOS/pull/70)、[PR #76](https://github.com/YanBo-maker/YanOS/pull/76) 合入 main。R8 的排序、名称索引、传输与小文件读取优化已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 合入（`abbb151`）；命令、出处和磁盘格式保持。
+
+当前推进已批准的 R4＋R6，基线为 `abbb151`。本分支已将 Host 语义语料和 MCP 检索改为按镜像容量工作，普通 backlinks 改为前 20 项及完整 total；完整回归、实际变异和固定真实模型高槽位验证已通过，独立对齐与总审核已完成，尚未合入 main。终端、Host CLI 和 MCP 的大容量验收按 R4/R6 执行；R7 离线迁移留在后续阶段。0036 整体仍为 Approved。
+
+[0035](specs/0035-agent-writable-knowledge.md) 的规格头仍是 Approved（2026-10-20）。Host 侧镜像旁锁与原子写已随 [PR #52](https://github.com/YanBo-maker/YanOS/pull/52) 合入 main（4af3cfd）。`yanos_note_create`、`yanos_note_replace` 与 `--allow-write` 已随 [PR #55](https://github.com/YanBo-maker/YanOS/pull/55) 合入 main（2921fed）。`serverInfo.version` 为 `0035`（`tools/mcp_protocol.c` 的 `SERVER_INFO`）。
+
+Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `YAN_BUILD_SEMANTIC`，安装 curl、yyjson 和 `mcp==2.3.0`，并在测试前检查 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk` 的注册数为 4。windows-2022 仍只做 Debug，配置步骤不打开 `YAN_BUILD_SEMANTIC`，也不安装 RISC-V 工具链。
+
+规格 0035-R8 要求放在 `tests/` 的示例学习笔记夹具，2921fed 的树里还没有。各阶段验证明细仍只写在对应规格的 VERIFY 执行记录。
+
