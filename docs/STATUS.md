@@ -6,7 +6,7 @@
 
 R4/R6 已完成实现、独立 dsh 与总审核，并发布 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81)（`131a39b`）。精确 head 的三项远端 CI 已通过，新增大容量验收实际执行；PR 仍待合入。验证明细见 0036 的 VERIFY 执行记录。
 
-当前推进已批准的 R7 离线迁移：把旧镜像和附件复制为新容量镜像，保留目录槽号、原文及来源身份，失败按所有权清理目标。已明确盘上语义索引直接复用、内存词项索引重建并比较结果，以及附件类型、目标重叠和清理失败边界。迁移工具已实现并完成本机回归、故障清理及真实索引复用验证；独立 dsh 技术审核后的修复已落实，整组范围已获所有者批准，独立冻结对齐及总审核已完成。R7 基于 PR #81 的提交开发，本地实现提交为 `86d7715`，尚未推送或交付，0036 整体保持 Approved。
+当前推进已批准的 R7 离线迁移：把旧镜像和附件复制为新容量镜像，保留目录槽号、原文及来源身份，失败按所有权清理目标。已明确盘上语义索引直接复用、内存词项索引重建并比较结果，以及附件类型、目标重叠和清理失败边界。迁移工具已实现并完成本机回归、故障清理及真实索引复用验证；独立 dsh 技术审核后的修复已落实，整组范围已获所有者批准，独立冻结对齐及总审核已完成。R7 的实现 `86d7715` 与相邻文档 `df63004` 已发布为 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82)，以尚未合入的 PR #81 分支为临时 base；当前精确 head 的远端 CI 见该 PR 的检查与任务日志。R7 尚未合入，0036 整体保持 Approved。
 
 [0035](specs/0035-agent-writable-knowledge.md) 的规格头仍是 Approved（2026-10-20）。Host 侧镜像旁锁与原子写已随 [PR #52](https://github.com/YanBo-maker/YanOS/pull/52) 合入 main（4af3cfd）。`yanos_note_create`、`yanos_note_replace` 与 `--allow-write` 已随 [PR #55](https://github.com/YanBo-maker/YanOS/pull/55) 合入 main（2921fed）。`serverInfo.version` 为 `0035`（`tools/mcp_protocol.c` 的 `SERVER_INFO`）。
 
@@ -51,7 +51,7 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 - 0034 Linux CI 编译并运行 Guest 默认测试。[0034](specs/0034-ci-guest-tests-and-status-archive.md)，[PR #43](https://github.com/YanBo-maker/YanOS/pull/43)（41b83b5）
 - 0035 镜像旁锁、原子写，以及 MCP 写工具 `yanos_note_create` / `yanos_note_replace`。[0035](specs/0035-agent-writable-knowledge.md)，[PR #52](https://github.com/YanBo-maker/YanOS/pull/52)（4af3cfd）、[PR #55](https://github.com/YanBo-maker/YanOS/pull/55)（2921fed）
 
-- 0036 多块目录与容量分配（R1–R3）、查询性能优化（R8）。[0036](specs/0036-yanfs-multi-block-directory.md)，[PR #62](https://github.com/YanBo-maker/YanOS/pull/62)、[PR #70](https://github.com/YanBo-maker/YanOS/pull/70)、[PR #76](https://github.com/YanBo-maker/YanOS/pull/76)、[PR #80](https://github.com/YanBo-maker/YanOS/pull/80)（`abbb151`）；R4/R6 待合入；R7 已完成本机实现与验证，最终冻结对齐及总审核已完成，发布待完成。
+- 0036 多块目录与容量分配（R1–R3）、查询性能优化（R8）。[0036](specs/0036-yanfs-multi-block-directory.md)，[PR #62](https://github.com/YanBo-maker/YanOS/pull/62)、[PR #70](https://github.com/YanBo-maker/YanOS/pull/70)、[PR #76](https://github.com/YanBo-maker/YanOS/pull/76)、[PR #80](https://github.com/YanBo-maker/YanOS/pull/80)（`abbb151`）；R4/R6 待合入；R7 已完成本机实现、验证与审核，见待合入的 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82)。
 
 ## 覆盖边界与已知限制
 

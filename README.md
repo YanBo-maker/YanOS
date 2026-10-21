@@ -12,7 +12,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [YanFS](docs/specs/0021-yanfs.md) 已实现并验证格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收。初版采用单根目录、最多 63 文件和连续 extent；覆盖需要新旧内容同时容纳，碎片可能导致 NOSPACE。元数据写失败可能拒挂，不保证断电一致性，不自动修复。实现与验证已完成。
 
-[多块目录](docs/specs/0036-yanfs-multi-block-directory.md)已支持旧 v1 镜像和最多 4095 文件的 v2 镜像，新镜像默认容量为 1023。终端按镜像容量分配服务表；R8 的挂载、名称查找和查询传输优化已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 合入 main。R4/R6 的 Host 语义语料及 MCP 大容量检索已完成验收，见待合入的 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81)；旧索引格式与来源身份保持。R7 离线迁移已实现并完成本机验证，可复制旧镜像与附件、保留槽号和来源身份；最终冻结对齐及总审核已完成，发布待完成，尚未交付。
+[多块目录](docs/specs/0036-yanfs-multi-block-directory.md)已支持旧 v1 镜像和最多 4095 文件的 v2 镜像，新镜像默认容量为 1023。终端按镜像容量分配服务表；R8 的挂载、名称查找和查询传输优化已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 合入 main。R4/R6 的 Host 语义语料及 MCP 大容量检索已完成验收，见待合入的 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81)；旧索引格式与来源身份保持。R7 离线迁移已实现并完成本机验证，可复制旧镜像与附件、保留槽号和来源身份；最终冻结对齐及总审核已完成，已发布为 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82)，待合入。
 
 [Guest 终端文件操作](docs/specs/0022-terminal-file-operations.md) 已实现并验证：独立应用提供 help、ls、stat、cat、create、write、rm 和 exit，使用 UART 中断等待输入，接入已有 YanFS 镜像。create 创建新文件，write 整文件覆盖；单行最多 1023 字节，超长或非法控制字节整行拒绝。cat 保留合法 UTF-8，并转义指定控制字节和非法编码。实现与验证完成。
 
