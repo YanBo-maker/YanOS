@@ -12,7 +12,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [YanFS](docs/specs/0021-yanfs.md) 已实现并验证格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收。初版采用单根目录、最多 63 文件和连续 extent；覆盖需要新旧内容同时容纳，碎片可能导致 NOSPACE。元数据写失败可能拒挂，不保证断电一致性，不自动修复。实现与验证已完成。
 
-[多块目录](docs/specs/0036-yanfs-multi-block-directory.md)已支持旧 v1 镜像和最多 4095 文件的 v2 镜像，新镜像默认容量为 1023。终端按镜像容量分配服务表；本分支的 R8 优化挂载、名称查找和查询传输，命令与盘上格式保持。Host 语义及 MCP 检索遇到 slot ≥ 63 的已用目录项仍返回 CORRUPT，完整 v2 检索与离线迁移尚待后续阶段。
+[多块目录](docs/specs/0036-yanfs-multi-block-directory.md)已支持旧 v1 镜像和最多 4095 文件的 v2 镜像，新镜像默认容量为 1023。终端按镜像容量分配服务表；R8 的挂载、名称查找和查询传输优化已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 合入 main。本分支的 R4/R6 已将 Host 语义语料及 MCP 检索改为按镜像容量处理，正在完成验收；旧索引格式与来源身份保持，离线迁移留待 R7。
 
 [Guest 终端文件操作](docs/specs/0022-terminal-file-operations.md) 已实现并验证：独立应用提供 help、ls、stat、cat、create、write、rm 和 exit，使用 UART 中断等待输入，接入已有 YanFS 镜像。create 创建新文件，write 整文件覆盖；单行最多 1023 字节，超长或非法控制字节整行拒绝。cat 保留合法 UTF-8，并转义指定控制字节和非法编码。实现与验证完成。
 
@@ -73,7 +73,7 @@ build/yanfs/yan_run --image guest.elf --disk-image new.img
 
 `--files` 写了两次，或后面没有取值时，程序把用法打到 stderr，以退出码 2 结束，此时还没有创建镜像。取值含有非数字字符、是空串、小于 63、大于 4095，或者落在 63 到 4095 之间但不是某个 `64·D − 1` 时，stderr 为 `yan_mkfs: invalid --files '<原文>'`，同样以退出码 2 结束，并且不创建镜像。N 合法而 `--blocks` 放不下这块目录时，stderr 为 `yan_mkfs: --blocks <块数> cannot hold a <D>-block directory`，退出码也是 2，镜像仍不创建。成功时 stdout 为 `yan_mkfs: wrote <路径> (<块数> blocks, <文件数> files)`。
 
-终端 Guest、`note_write` 和 `semantic_posix` 按镜像的目录块数分配缓冲，v1 与 N 最大 4095 的 v2 都可挂载；PR2a 的 `ERROR CAPACITY` 已移除。但语义检索和 MCP 检索工具（经 `host/semantic_corpus.c`）仍只接受 slot < 63 的文件，遇到 slot ≥ 63 的文件返回 CORRUPT，完整支持 v2 要等 0036-R6（PR4）。
+终端 Guest、`note_write` 和 `semantic_posix` 按镜像的目录块数分配缓冲，v1 与 N 最大 4095 的 v2 都可挂载；PR2a 的 `ERROR CAPACITY` 已移除。本分支的 Host 语义语料与 MCP 检索也按实际 N 校验目录槽和分配文件表，不再将 slot ≥ 63 的合法文件误报 CORRUPT。语义索引仍最多 8192 段，超出报 LIMIT，不发布部分索引；普通 `backlinks` 按 ASCII 文件名显示前 20 项，并报告完整 total 和实际 shown，v1、v2 均适用。R4/R6 的合入状态见 [STATUS](docs/STATUS.md)。
 
 `guest.elf` 是调用文件系统接口的 Guest 程序；公开接口见 [os/yanfs.h](os/yanfs.h)，Guest 块适配见 [os/yanfs_block.h](os/yanfs_block.h)，可运行的整体例子见 [Guest 验收程序](tests/guest/yanfs_check.c) 与 [验收脚本](tests/guest/run_yanfs.py)。mkfs 与当前工具验证使用 Linux/WSL 路径；Guest 不自动格式化镜像。
 

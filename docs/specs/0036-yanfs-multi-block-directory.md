@@ -2,7 +2,7 @@
 
 - **意图**：一个镜像能存放远多于 63 篇笔记。目录从 1 块扩展为 mkfs 时确定的 D 块：默认 1023 个文件（D=16），最多 4095 个（D=64）。Guest 按镜像的实际容量分配内存，不按硬上限。文件名、引用语法、MCP 工具都不变；旧镜像继续可用，离线迁移后库身份不变。依据：[0003 决策记录](../decisions/0003-file-limit-and-images.md)（闫博 2026-10-20 裁定）。
 - **状态**：Approved（闫博 2026-10-20）
-- **supersedes**：无。扩展 [0021](0021-yanfs.md) 的盘上格式（新增 version 2），v1 定义不变。0035-R3-AC3 中「目录已满 63 项」按本规格理解为「目录已满（达到该镜像的容量）」。
+- **supersedes**：无整份替代。扩展 [0021](0021-yanfs.md) 的盘上格式（新增 version 2），v1 盘上定义不变；扩展 0029/0033 的文件容量，R4 按 2026-10-21 裁定取代 0028 的普通 backlinks 全量输出约束。0035-R3-AC3 中「目录已满 63 项」按本规格理解为「目录已满（达到该镜像的容量）」。
 - **成功标准**（从闫博的角度看）：
   1. 新建镜像默认就能放 1023 篇笔记；需要时可以在 mkfs 时调大或调小，最多 4095 篇。
   2. 笔记多了以后，终端、搜索、关系、块引用、MCP 照常可用，结果正确；超出索引容量时自动退回全量扫描，不会静默漏结果。
@@ -133,7 +133,9 @@ Guest 增加一次性 bump arena：
 - 0036-R3-AC3：Given 把 `__yan_arena_end` 链接到环形缓冲区基址之上的测试 ELF，Then `yan_run` 以非 0 退出且不执行 Guest；Given arena 被人为缩小到放不下 N=4095 的测试 ELF，Then 启动报告初始化失败，镜像 SHA-256 不变。
 
 ### 0036-R4：上层服务在大容量下行为正确
-search（线性与索引）、带标签的 search、`links`、`backlinks`、`related`、`block refs/backlinks`、0033 MCP 块工具，都按 N 工作，不再有写死的 63。显示上限（20）和 total 计数的语义保持不变。
+search（线性与索引）、带标签的 search、`links`、`backlinks`、`related`、`block refs/backlinks`、0033 MCP 块工具，都按 N 工作，不再有写死的 63。搜索、related 和块反链保留原显示上限及 total 语义。
+
+实施核对发现 0028 的普通 `backlinks` 原来输出全部来源，只有 shown，没有 total；此前“显示上限保持不变”不适用于它。项目所有者于 2026-10-21 明确批准：普通 `backlinks` 统一按来源文件名 ASCII 顺序只显示前 20 项，结尾为 `OK backlinks total=N shown=M target=OK|DANGLING`，M=min(N,20)。v1、v2 均适用；summary 的 total 是完整来源数，shown 是实际交付数。仍预检全库头，晚坏头和读取错误不得被显示上限遮住。此条取代 0028 的 backlinks 全量输出和 total=shown 约束，其余行为保持。
 - 0036-R4-AC1：Given N=1023 的镜像装满 1023 篇笔记，最后一篇（slot 1022）有唯一的词、标签、一条 `link:` 和一个具名块，When 分别执行 `search`、带标签的 search、`links`、`backlinks`、`related`（以一篇与它共享标签的笔记为源）、`block refs`，以及 MCP 的 `yanos_block_read`，Then 都能找到 slot 1022 上的这篇笔记。
 - 0036-R4-AC2：Given 在同一个镜像上构造夹具，使建索引时 posting_count 恰好达到 65536 后还有下一个词次（夹具记录实际词次数），When 执行同一组查询，Then 索引状态为 LIMIT，查询结果（行、分数、顺序）与强制 SCAN 时逐字节相同。
 - 0036-R4-AC3：Given 有 1000 篇笔记都含有 `[[a.txt#x]]`，并且都声明了 `link: a.txt`，When 执行 `block backlinks a.txt#x` 和 `backlinks a.txt`，Then 都只显示前 20 条，total 分别等于 1000。
@@ -168,6 +170,10 @@ R8 实施记录：块扫描和线性词项扫描对不超过既有 4 KiB 缓冲�
 
 ### 0036-R6：Host 语义语料
 `YAN_SEMANTIC_FILE_MAX` 改为运行时容量：`files` 数组和两个栈上数组都按 N 用 calloc 分配；加载索引时，索引头里 skipped 的检查改为「≤ 当前镜像的 N」。SEGMENT_MAX 保持 8192，超出时按现有逻辑返回 LIMIT，并且 CLI 和 MCP 都要明确报出。
+
+工程接口由 `YanSemanticSource.file_capacity` 携带 N，POSIX 适配器在成功挂载后绑定；corpus 与摘要入口拒绝容量 0 或大于 4095，不用 0 隐式表示旧容量。`YanSemanticCorpus` 首次使用前清零，scan 按 N 分配文件表；反复 scan 会先释放上次表，成功或失败后均由调用者执行 `yan_semantic_corpus_release`。facade 的 rebuild/status/search 全部退出路径均释放它。纯来源摘要的临时表在每条退出路径释放；这条块读取路径的分配失败按 0033 映射为 IO，语义 facade 原有 NOSPACE 类保持。
+
+容量不进入来源身份或索引字节编码。默认 CI 使用从 `41b83b5` 实测捕获的 v1 固定来源身份和索引兼容样本；样本比较只归零模型/runner/配置身份的头字节 [64,160)，其余头、payload 校验及全部记录字节保持精确比较。本机再显式传入旧工具，对相同模型/runner/配置下的完整索引逐字节对照。Guest 输出不含分数，因此 R4-AC2 另由原生 API probe 在同一 LIMIT 镜像比较分数、顺序和摘要，不能仅凭终端输出宣称分数相同。
 - 0036-R6-AC1：Given N=1023 的镜像，slot 1022 上有一篇笔记，When 运行 `yan_semantic` 建索引并查询，Then 能命中这篇笔记；同一个 v1 镜像的语义索引与 `41b83b5` 生成的逐字节相同。
 - 0036-R6-AC2：Given 文本切出的段数超过 8192，Then 建索引返回 LIMIT，CLI 以非 0 退出，MCP 返回带 LIMIT 的错误，不生成部分索引。
 
@@ -268,4 +274,29 @@ R3-AC1（含 R8 的四张下标表）arena 实测/独立求和：N=63 为 15,518
 
 证据根目录 `E:/YanOS/build/20261020-development-audit/`：`closure-release-ctest.log`、`closure-asan-ctest.log`、`closure-windows-ctest.log`、`release/yanfs-r8-performance/measurements.json`、`terminal-parity.json`、`mount-parity.json`、`mcp-parity.json`。基线 Guest、命令、状态与捕获见相邻 `20261020-performance-audit/`。`r8-snapshot-inputs.json` 的对照对象是所有者原目录 `E:/YanOS-36/`：该目录的 26 个输入均未改动，另有原始副本保存在 `input-copy/`。当前隔离分支在这份输入之上修复了其中的文件；它们不应与输入快照保持相同哈希。
 
-独立只读 dsh 首轮审核已完成，指出冻结证据过期、完成口径、输入路径歧义和工作区保护的规格缺口；已重新冻结并复验，原目录路径已明确，工作区补充已获所有者批准。证据另见 `code-freeze.json`、`original-input-verification.json`、`frozen-device-snapshot.json`、`frozen-actual-mutations.log`。同一只读dsh会话两轮对齐已完成；提交前九项总审核已核对。远端CI与项目所有者合入审查未发生，尚未合入main。
+独立只读 dsh 首轮审核已完成，指出冻结证据过期、完成口径、输入路径歧义和工作区保护的规格缺口；已重新冻结并复验，原目录路径已明确，工作区补充已获所有者批准。证据另见 `code-freeze.json`、`original-input-verification.json`、`frozen-device-snapshot.json`、`frozen-actual-mutations.log`。同一只读dsh会话两轮对齐已完成；提交前九项总审核已核对。本机收口时尚未推送或合入；后续远端与合入事实见下条记录。
+
+
+### R8 远端与合入记录（2026-10-21）
+
+[PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 的精确 head `2b82d17065bbd5b83e2d5e2f201f37f5308dedf5` 经 [Actions 39515061452](https://github.com/YanBo-maker/YanOS/actions/runs/39515061452) 验证：Linux Release 138/138（268.55 s）、Debug ASan/UBSan 138/138（638.03 s）、Windows Debug 76/76（203.63 s），默认测试零失败零跳过。两个 Linux 任务另行复验 MCP 四项并通过；实际变异仍为上节的本机证据。本次工作流未配置 artifact 上传，使用 Actions 任务原始日志，不将本机文件冒充 CI artifact。
+
+PR 已于 2026-10-21 合入 main，merge 为 `abbb1514e3dd5af9ffedc3bd6504c5965730a876`，由 `gh pr view 80 --json state,mergeCommit,mergedAt` 核实。R8 不等于 0036 整体完成，R4/R6/R7 继续按已批准范围推进。
+
+### R4＋R6 实施记录（2026-10-21）
+
+项目所有者批准推进 R4＋R6。基线为 `abbb151`；语料表已按挂载容量分配，大容量终端、Host CLI 与 MCP 按 R4/R6 验收。普通 backlinks 的新显示规则由所有者另行批准，原分段上限、索引字节格式及来源身份保持。实现与本机验证已完成，独立冻结对齐与提交前总审核已完成；本地提交准备完成，尚未推送或有本阶段远端 CI，不把 0036 整体改为 Implemented。
+
+- 最终默认 CTest：Linux Release 141/141，211.39 s；Debug ASan/UBSan 141/141，745.57 s；Windows MSVC Debug 77/77，192.97 s。零失败、零跳过。新增 `semantic_digest_alloc`、Linux `large_capacity_gate` 与 Linux/Guest/semantic 配置下的 `yanfs_large_capacity`；Windows 不运行后两项。
+- 实际变异配置共 159 个注册；选 `_mutation$` 的实际检查 17/17，584.79 s，零失败零跳过。默认纯门禁不冒充实际缺陷检测。设备组只排除原生纯 FS 的 `yanfs_name_order`，其余策略沿 R8；27 个非文档输入在运行前已冻结，测后哈希全部保持。设备组的临时树退出后按脚本清理，`device-snapshot.json` 记录冻结前后核对及此范围，不声称读取已删除的副本。
+- R4-AC1：真实生产 FS API 创建并重新挂载 1023 个文件，独立解码确认全目录与最后 slot 1022 的字节；Guest 普通/标签 search、links、backlinks、related、block refs 及 MCP block_read 均访问到最后一篇。索引 READY 的初始 posting 实测为 10,144。
+- R4-AC2：把最后一个额外 posting 放入夹具，产品先报告 READY/65,536，再因第 65,537 条进入 LIMIT；7 组 Guest 输出与强制 SCAN 逐字节一致。独立原生 API probe 另比较 3 组查询的行号、分数、顺序、截断标记和原始摘要；唯一词的分数为 1，防止只比较终端上没有分数的文本。
+- R4-AC3：整文件和块反链均 total=1000、shown=20，实际只交付 ASCII 名称顺序的前 20 项；完整计数未截断。原生默认用例还预检了第 20 项之后的坏头。另将原生读失败注入延后到第 24 篇，独立实验 40/40：零回调、summary 未发布、busy 已释放，后续调用保持 FAULTED 且零新增读取；该实验是 `late-io24.log`，不计入 CTest 注册数。
+- R4-AC4/R6-AC1：MCP 与 CLI 的 v1 来源身份匹配 `41b83b5`；带旧工具路径的本机验收实际比较完整索引字节，v1 索引未变。默认 Linux CI 的固定样本保留来源、计数、payload 校验和记录字节，只规范化外部依赖身份字段；这与本机完整字节比较分别记录。额外的稀疏/满 v1 两档对照也保持来源、索引、CLI JSON 和块操作内容；旧 MCP 外层 serverInfo 的 0033→0035 是本阶段前已存在的版本变化，不把它当 R6 回归。
+- R6-AC2：v1 与高槽位 v2 的超过 8192 段夹具，rebuild/search/status 均明确 LIMIT，CLI 非零退出，MCP 错误码保留；原有索引字节不变，fresh 路径不留下部分索引。语义超限时，独立原文身份路径仍允许 MCP block_read 读取 slot 1022。
+- 错误边界：摘要分配失败先实测返回 NOSPACE（映射成 LIMIT），修后直接注入失败为 IO，容量 63/1023/4095 均零来源回调、输出保持。普通 backlinks 的 v1 完整目录和 shell/Guest/oracle 已按所有者新规则同步；首轮旧 oracle 和测试驱动的聚合返回值错误保留为诊断，不作为最终回归结论。缺输入门禁 4 项实测通过：源码/被测产物缺失硬失败，只有外部编译器缺失 77，校验不枚举无关目录。
+- 真实模型为既有 Qwen3-Embedding-0.6B Q8_0，模型 SHA-256 `06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439`，runner SHA-256 `be637d0423071dfe307c0ab5579ceeff7252f7395ddf65d8cbf40da98e637b5b`。在 1023 个具名文件中放入原固定质量语料（其余为空文件），把 irq.txt 放在 slot 1022；21 个真实分段建索引成功，“设备如何叫醒处理器”和“修改笔记以后检索缓存怎么办”各自目标均排第一。20 项原文、物理行号和字节范围已核对，镜像与索引只读。这里只验高槽位真实路径和两条固定问题，不扩大 0029 的通用质量结论；fake runner 只验证协议。
+
+本机证据根 `E:/YanOS/build/20261021-r4-r6/`：`code-freeze.json`（27 个非文档输入）、`closure-release-ctest.log`、`closure-asan-ctest.log`、`closure-windows-ctest.log`、`actual-mutations.log`、`real-highslot/report.json`、`v1-parity/compare.json`、`integration-red.log`、`integration-green.log`、`late-io24.log`。默认大容量的完整 AC 记录在前一阶段共用构建目录 `E:/YanOS/build/20261020-development-audit/release/yanfs-large-capacity/large-capacity-evidence.json`；该目录复用构建配置，不复用旧测试结果。dsh 的首轮实施报告及原始定向证据在隔离 worktree 的 `build/20261021-r4-r6/`，首轮报告已复制到本机证据根。
+
+独立 dsh 的第二轮冻结复核已完成，首轮阻塞均已消除；提交前九项总审核已核对。R8 合入后监控通道已原样归档并核对 SHA-256；当前 R4/R6 未合入，不归档新通道。旧当前阶段原样追加到 STATUS-history，0036 规格与索引保持 Approved，R7 迁移仍未实现。远端 CI、推送和维护者意图验收另记，不由本机验证推定。

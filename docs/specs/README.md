@@ -31,12 +31,12 @@
 | [0025](0025-knowledge-search.md) | 知识检索基础设施 | Implemented | 无 | 无 |
 | [0026](0026-term-search-index.md) | 词项搜索与可重建索引 | Implemented | 无 | 无 |
 | [0027](0027-note-metadata.md) | 笔记元数据与标签筛选 | Implemented | 无 | 无 |
-| [0028](0028-knowledge-relations.md) | 知识关系导航 | Implemented | 无 | 无 |
-| [0029](0029-host-semantic-search.md) | Host侧语义检索 | Implemented | 无 | 无 |
+| [0028](0028-knowledge-relations.md) | 知识关系导航 | Implemented | 无 | [0036-R4](0036-yanfs-multi-block-directory.md#0036-r4上层服务在大容量下行为正确)（仅容量与 backlinks 输出） |
+| [0029](0029-host-semantic-search.md) | Host侧语义检索 | Implemented | 无 | [0036-R6](0036-yanfs-multi-block-directory.md#0036-r6host-语义语料)（仅文件容量与 skipped 边界） |
 | [0030](0030-retrieval-context-json.md) | 可核验的检索上下文包 | Implemented | 无 | 无 |
 | [0031](0031-mcp-retrieval-tools.md) | 面向Agent的只读MCP检索工具 | Implemented | 无 | 无 |
 | [0032](0032-block-references.md) | 具名块与精确正文引用 | Implemented | 无 | 无 |
-| [0033](0033-block-mcp-navigation.md) | Agent 的只读块导航 | Implemented | 无 | 无 |
+| [0033](0033-block-mcp-navigation.md) | Agent 的只读块导航 | Implemented | 无 | [0036-R4/R6](0036-yanfs-multi-block-directory.md#0036-r4上层服务在大容量下行为正确)（仅文件容量） |
 | [0034](0034-ci-guest-tests-and-status-archive.md) | CI 运行 Guest 默认测试与 STATUS 归档 | Approved | 无 | 无 |
 | [0035](0035-agent-writable-knowledge.md) | Agent 可写的知识工具 | Approved | 无 | 无 |
-| [0036](0036-yanfs-multi-block-directory.md) | YanFS 多块目录 | Approved | 无 | 无 |
+| [0036](0036-yanfs-multi-block-directory.md) | YanFS 多块目录 | Approved | 无整份替代；局部扩展见规格头 | 无 |

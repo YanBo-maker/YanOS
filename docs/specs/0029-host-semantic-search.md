@@ -4,6 +4,8 @@
 
 ## INTENTION
 
+> 后续扩展：[0036-R6](0036-yanfs-multi-block-directory.md#0036-r6host-语义语料) 将文件容量和 skipped 的 0–63 边界扩展为镜像实际容量 N；8192 段上限、索引字节格式及其余语义保持。本文件的原阶段定义保留，交付状态见 [STATUS](../STATUS.md)。
+
 输入“设备怎样通知CPU”，寻找讨论中断、PLIC或UART的原文段落，即使笔记没有查询中的原词。结果是可回读的候选出处，不生成答案、不操作笔记。原始YanFS文件仍是事实来源。
 
 新增可选Linux/WSL Host工具`yan_semantic`与独立API。Host核心采用C17；模型推理在独立本地进程。Guest的grep/search/related、ISA、设备、Host块协议和YanFS v1均不变，不把模型或向量装进Guest。

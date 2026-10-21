@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-[0036](specs/0036-yanfs-multi-block-directory.md) 已批准（2026-10-20），进行中。PR1（R1+R2，[PR #62](https://github.com/YanBo-maker/YanOS/pull/62)）：`yan_mkfs` 新增 `--files N`（N=64·D−1，D=1..64；N=63 写 v1，N>63 写 version 2 多块目录，D>1 时 `--blocks` 必须大于 D），YanFS 核心能挂载并读写 v1 和 v2。PR2a（[PR #70](https://github.com/YanBo-maker/YanOS/pull/70)）：终端 Guest 改为 probe + arena + `yan_fs_init_directory` 启动；`yan_run` 缺省 RAM 改为 64 MiB，ring 基址 0x83FFC000。PR2b：`--files` 缺省改为 1023；终端与 `note_write`、`semantic_posix` 按镜像的 D/N 从 arena 或 calloc 分配服务表，v1 和任意 N 的 v2 都可挂载，临时 `ERROR CAPACITY` 守卫已删除；语义检索和 MCP 检索工具（经 `host/semantic_corpus.c`）仍只接受 slot < 63 的文件，遇到 slot ≥ 63 的文件返回 CORRUPT，完整支持 v2 要等 0036-R6（PR4）；R3-AC1 的 arena 实测和 R3-AC2 的 32 MiB 预算由 CI 测试覆盖。`yan_run` 的「加载段多于 16 个」拒绝只对导出 arena 符号的 ELF 生效；两个符号都不导出的 ELF 不做该检查，照常运行。R5-AC1 的 5×10⁷ 步数上限保留在 0036（#70 裁定），由 PR2b 之后的 PR3（0036-R8）达标；PR #70 记录的 N=1023 实测步数是 R8 的改动前基线。
+[0036](specs/0036-yanfs-multi-block-directory.md) 进行中。多块目录、按容量分配服务表及默认 1023 文件镜像已随 [PR #62](https://github.com/YanBo-maker/YanOS/pull/62)、[PR #70](https://github.com/YanBo-maker/YanOS/pull/70)、[PR #76](https://github.com/YanBo-maker/YanOS/pull/76) 合入 main。R8 的排序、名称索引、传输与小文件读取优化已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 合入（`abbb151`）；命令、出处和磁盘格式保持。
 
-0036-R8 的排序、名称索引和传输优化已在本分支实现，新增小文件读取复用；默认回归、sanitizer、Windows、性能及实际变异验证已完成，独立文档对齐和总审核已完成，未合入 main。命令、出处和磁盘格式保持；名称索引工作区的别名拒绝规则已于 2026-10-21 获项目所有者批准。完整 v2 Host 检索仍由 R6（PR4）交付，迁移工具由 R7（PR5）交付。
+当前推进已批准的 R4＋R6，基线为 `abbb151`。本分支已将 Host 语义语料和 MCP 检索改为按镜像容量工作，普通 backlinks 改为前 20 项及完整 total；完整回归、实际变异和固定真实模型高槽位验证已通过，独立对齐与总审核已完成，尚未合入 main。终端、Host CLI 和 MCP 的大容量验收按 R4/R6 执行；R7 离线迁移留在后续阶段。0036 整体仍为 Approved。
 
 [0035](specs/0035-agent-writable-knowledge.md) 的规格头仍是 Approved（2026-10-20）。Host 侧镜像旁锁与原子写已随 [PR #52](https://github.com/YanBo-maker/YanOS/pull/52) 合入 main（4af3cfd）。`yanos_note_create`、`yanos_note_replace` 与 `--allow-write` 已随 [PR #55](https://github.com/YanBo-maker/YanOS/pull/55) 合入 main（2921fed）。`serverInfo.version` 为 `0035`（`tools/mcp_protocol.c` 的 `SERVER_INFO`）。
 
@@ -49,6 +49,8 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 - 0034 Linux CI 编译并运行 Guest 默认测试。[0034](specs/0034-ci-guest-tests-and-status-archive.md)，[PR #43](https://github.com/YanBo-maker/YanOS/pull/43)（41b83b5）
 - 0035 镜像旁锁、原子写，以及 MCP 写工具 `yanos_note_create` / `yanos_note_replace`。[0035](specs/0035-agent-writable-knowledge.md)，[PR #52](https://github.com/YanBo-maker/YanOS/pull/52)（4af3cfd）、[PR #55](https://github.com/YanBo-maker/YanOS/pull/55)（2921fed）
 
+- 0036 多块目录与容量分配（R1–R3）、查询性能优化（R8）。[0036](specs/0036-yanfs-multi-block-directory.md)，[PR #62](https://github.com/YanBo-maker/YanOS/pull/62)、[PR #70](https://github.com/YanBo-maker/YanOS/pull/70)、[PR #76](https://github.com/YanBo-maker/YanOS/pull/76)、[PR #80](https://github.com/YanBo-maker/YanOS/pull/80)（`abbb151`）；R4/R6 待合入，迁移待 R7。
+
 ## 覆盖边界与已知限制
 
 - CI 矩阵与失败条件见 `.github/workflows/build.yml`：ubuntu-22.04 Debug+ASan、ubuntu-22.04 Release 安装 `gcc-riscv64-linux-gnu` 并打开 `YAN_BUILD_TOOLS`；工具链缺失、Guest 测试未注册、或日志中有 `(Skipped)` 时 Linux 任务失败。windows-2022 Debug 不装该工具链，也不跑 Guest 测试。
@@ -58,7 +60,7 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 - `tests/official/run_act4.sh` 在 Sail 与 DUT 都没有签名时把用例记为 skipped；结束条件仍是 differed 为 0 且 matched 大于 0。跳过数大于 0 本身不使脚本失败。
 - CI 不打开 `YAN_ENABLE_MUTATION_TESTS`。默认套件里的 `*_mutation_gate` 纯门禁仍会注册。`guest_console_mutation_gate` 只在变异配置打开时注册（`CMakeLists.txt` 中该门禁与 `YAN_ENABLE_MUTATION_TESTS` 同支）。
 - Linux CI（`.github/workflows/build.yml`，2921fed）打开 `YAN_BUILD_SEMANTIC`，因此会构建 `yan_mcp`。`CMakeLists.txt` 在该开关下注册 `mcp_protocol`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk`、`mcp_faults` 等测试；`mcp_note` 还要求已有 `yan_mcp`、`yan_run`、`yanfs_terminal` 和 `note_read_probe`。workflow 在配置后检查 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk` 四项都已注册。`guest_note_blocks_host` 写在 `if(TARGET yan_mcp)` 里，Linux 打开该开关后满足条件。windows-2022 的配置不传 `YAN_BUILD_SEMANTIC`（默认 OFF），不构建 `yan_mcp`。不依赖该开关的 Host 侧测试仍会注册。`YAN_ENABLE_MUTATION_TESTS` 仍然不打开。
-- 没有 S/U 模式、`medeleg` / `mideleg`、虚拟内存分页和抢占式调度。YanFS 仍是单根目录、连续 extent；v1 最多 63 个文件，v2（0036）最多 4095 个，终端和 Host 工具按容量分配后都可挂载，但语义/MCP 检索在 R6（PR4）之前对 slot ≥ 63 的文件返回 CORRUPT。元数据写失败可能拒挂，不保证断电一致性：v1 一次目录更新是一次块写入，v2 改动块 0 以外的目录项时是两次（先写该块，再写块 0 的 CRC），两次之间断电会让镜像 CRC 不符而被拒挂。
+- 没有 S/U 模式、`medeleg` / `mideleg`、虚拟内存分页和抢占式调度。YanFS 仍是单根目录、连续 extent；v1 最多 63 个文件，v2（0036）最多 4095 个。本分支的终端与 Host/MCP 检索按实际容量工作，Host 语义索引仍受 8192 段上限约束；R4/R6 尚未合入。元数据写失败可能拒挂，不保证断电一致性：v1 一次目录更新是一次块写入，v2 改动块 0 以外的目录项时是两次（先写该块，再写块 0 的 CRC），两次之间断电会让镜像 CRC 不符而被拒挂。
 
 ## 待定设计
 
