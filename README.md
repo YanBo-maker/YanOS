@@ -270,6 +270,16 @@ build/semantic/yan_mcp --allow-write \
 
 学习笔记只放在学习镜像。正文用固定 ID 的五个具名块：`criteria`（学会标准，每条一行、可检查）、`known`（闫博确认已懂）、`unknown`（已知不懂）、`untouched`（还没碰过）、`log`（每次核对的日期、题目、回答要点、被指出的问题和 `[[NAME#ID]]` 原文出处）。写工具不检查这五个块是否齐全。
 
+[学习笔记示例](tests/learning-note/learning-note.md) 与[更新后的示例](tests/learning-note/learning-note-updated.md) 演示了五块格式、追加核对记录以及经模拟确认把一项从 `unknown` 移到 `known`。它们都是测试夹具，不代表闫博的真实理解。[原文夹具](tests/learning-note/notes/) 属于普通笔记库；在学习实例查这些引用会显示 `DANGLING_FILE`，调用方要到普通实例读取相应块，工具不会自动跨库解析。
+
+Linux/WSL 配置开启 `YAN_BUILD_TOOLS`、`YAN_BUILD_SEMANTIC`、`BUILD_TESTING` 且找到 RISC-V 交叉编译器后，[联合验收](tests/guest/run_learning_note.py) 随默认测试注册为 `guest_learning_note`。它通过真实 MCP 预览和提交两次，再重启 MCP、用生产 Guest 终端读回同一镜像，并核对普通笔记库没有变化。可在构建完成后单独运行：
+
+```sh
+ctest --test-dir build/semantic --no-tests=error -R '^guest_learning_note$' --output-on-failure
+```
+
+验收脚本只在临时测试镜像中模拟确认，不会记录或判断真实用户的学习状态。
+
 镜像旁边有 `<realpath(镜像)>.lock`。`yan_run --disk-image` 从启动到退出持有它；写工具在一次调用期间持有它，返回时放开。文件创建后留在原地，生产代码不删除。目录里还没有这个文件时，第一次 `dry_run` 也会创建它。拿不到锁时写工具返回 `{"code":"BUSY"}`，`yan_run` 打印锁冲突并以退出码 5 结束。等到持锁进程结束再试，不要删除锁文件。
 
 `expected_source` 与当前整库身份不一致、并且这次的 `text` 与已有文件内容不同时，工具返回 `{"code":"STALE"}`，镜像不变。调用方再做一次不带旧身份的预览，把新的 `text` 和 `diff` 给闫博确认，然后用新的 `source_sha256` 提交。文件内容已经等于 `text` 时，提交成功并带 `"unchanged": true`，这时不返回 STALE。参数与错误码见[写入类 MCP 工具](docs/mcp-write-tools.md)。
