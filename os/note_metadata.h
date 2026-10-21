@@ -89,6 +89,9 @@ typedef struct {
      * arena or the Host heap; the context only borrows them. */
     YanNoteEntry *entries;
     char (*sort_name)[32];
+    /* 0036-R8: caller-owned index scratch for the shared heapsort; the emitted
+     * order is sort_name[sort_index[i]] and sort_name itself stays untouched. */
+    uint16_t *sort_index;
     uint32_t capacity;
     uint32_t entry_count;
 } YanNoteContext;
@@ -105,12 +108,14 @@ _Static_assert(sizeof(YanNoteContext) <= 65536u,
  * idle context may be re-initialized, which validates the new pair and resets
  * the service to empty, while an active context answers BUSY. */
 YanNoteResult yan_note_init(YanNoteContext *context, YanFs *fs,
-                            YanNoteEntry *entries, char (*sort_name)[32]);
+                            YanNoteEntry *entries, char (*sort_name)[32],
+                            uint16_t *sort_index);
 /* 0036-R3 storage sizes for one `capacity`-entry directory. The Guest calls
  * these for its arena allocations and the Host for the matching calloc, so the
  * two sides cannot drift from sizeof. */
 uint32_t yan_note_entries_storage_bytes(uint32_t capacity);
 uint32_t yan_note_sort_name_storage_bytes(uint32_t capacity);
+uint32_t yan_note_sort_index_storage_bytes(uint32_t capacity);
 
 /* Reads one file's bounded header prefix and publishes the validated info.
  * `info_out` is written only on OK, so an error leaves it byte-identical. A

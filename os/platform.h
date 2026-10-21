@@ -3,6 +3,15 @@
 
 #include <stdint.h>
 
+/* 0036-R8 word copies into and out of the transport rings. The ring itself is
+ * a byte region, so the word type carries the aliasing permission the byte
+ * declarations do not. */
+#if defined(__GNUC__) || defined(__clang__)
+typedef uint32_t yan_platform_word __attribute__((may_alias));
+#else
+typedef uint32_t yan_platform_word;
+#endif
+
 /* YanOS's view of the platform MMIO window.
  *
  * YanOS is a freestanding Guest: it is compiled with -nostdlib and cannot
@@ -284,6 +293,66 @@ static inline uint32_t yan_os_transport_h2g_available(void)
  * which is what makes "the ring never contains half a frame" an invariant
  * instead of a hope. Returns 0 on success and -1 when the channel is
  * unconfigured or the bytes do not fit. */
+/* Copy only within a contiguous part of the ring, then wrap once. The ring
+ * size/available space is validated by the caller before either copy starts.
+ * Four-word batches avoid recomputing a masked ring position for every word. */
+static inline void yan_os_ring_copy_in(volatile uint8_t *ring, uint32_t size,
+                                       uint32_t position, const uint8_t *bytes,
+                                       uint32_t count)
+{
+    while (count != 0u) {
+        uint32_t amount = size - position;
+        if (amount > count) amount = count;
+        uint32_t i = 0u;
+        if ((((uintptr_t)(ring + position) ^ (uintptr_t)bytes) & 3u) == 0u) {
+            while (i < amount && ((uintptr_t)(bytes + i) & 3u) != 0u) {
+                ring[position + i] = bytes[i]; ++i;
+            }
+            for (; amount - i >= 16u; i += 16u) {
+                volatile yan_platform_word *out =
+                    (volatile yan_platform_word *)(void *)(ring + position + i);
+                const yan_platform_word *in =
+                    (const yan_platform_word *)(const void *)(bytes + i);
+                out[0] = in[0]; out[1] = in[1];
+                out[2] = in[2]; out[3] = in[3];
+            }
+            for (; amount - i >= 4u; i += 4u)
+                *(volatile yan_platform_word *)(void *)(ring + position + i) =
+                    *(const yan_platform_word *)(const void *)(bytes + i);
+        }
+        for (; i < amount; ++i) ring[position + i] = bytes[i];
+        bytes += amount; count -= amount; position = 0u;
+    }
+}
+
+static inline void yan_os_ring_copy_out(const volatile uint8_t *ring, uint32_t size,
+                                        uint32_t position, uint8_t *bytes,
+                                        uint32_t count)
+{
+    while (count != 0u) {
+        uint32_t amount = size - position;
+        if (amount > count) amount = count;
+        uint32_t i = 0u;
+        if ((((uintptr_t)(ring + position) ^ (uintptr_t)bytes) & 3u) == 0u) {
+            while (i < amount && ((uintptr_t)(bytes + i) & 3u) != 0u) {
+                bytes[i] = ring[position + i]; ++i;
+            }
+            for (; amount - i >= 16u; i += 16u) {
+                yan_platform_word *out = (yan_platform_word *)(void *)(bytes + i);
+                const volatile yan_platform_word *in =
+                    (const volatile yan_platform_word *)(const void *)(ring + position + i);
+                out[0] = in[0]; out[1] = in[1];
+                out[2] = in[2]; out[3] = in[3];
+            }
+            for (; amount - i >= 4u; i += 4u)
+                *(yan_platform_word *)(void *)(bytes + i) =
+                    *(const volatile yan_platform_word *)(const void *)(ring + position + i);
+        }
+        for (; i < amount; ++i) bytes[i] = ring[position + i];
+        bytes += amount; count -= amount; position = 0u;
+    }
+}
+
 static inline int yan_os_transport_g2h_push(const uint8_t *bytes, uint32_t count)
 {
     const uint32_t size = yan_os_transport_ring_size();
@@ -297,9 +366,7 @@ static inline int yan_os_transport_g2h_push(const uint8_t *bytes, uint32_t count
         return -1;
     }
     volatile uint8_t *ring = (volatile uint8_t *)(uintptr_t)yan_os_transport_ring_base();
-    for (uint32_t i = 0; i < count; ++i) {
-        ring[yan_os_ring_index(head, size, i)] = bytes[i];
-    }
+    yan_os_ring_copy_in(ring, size, head, bytes, count);
     yan_os_fence();
     yan_os_transport_set_g2h_head((head + count) & mask);
     return 0;
@@ -321,9 +388,7 @@ static inline int yan_os_transport_h2g_pop(uint8_t *out, uint32_t count)
     }
     const volatile uint8_t *ring =
         (const volatile uint8_t *)(uintptr_t)(yan_os_transport_ring_base() + size);
-    for (uint32_t i = 0; i < count; ++i) {
-        out[i] = ring[yan_os_ring_index(tail, size, i)];
-    }
+    yan_os_ring_copy_out(ring, size, tail, out, count);
     yan_os_fence();
     yan_os_transport_set_h2g_tail((tail + count) & mask);
     return 0;

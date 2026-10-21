@@ -7,6 +7,7 @@ symbol after the Guest halts and the oracle below recomputes the sum from the
 allocation order in docs/specs/0036-yanfs-multi-block-directory.md. #4 appears
 exactly once (the index_eligible copy the terminal actually uses) and #8 is
 absent because PR1 removed `allocate_extent`'s stack arrays (approved 实施澄清).
+R8 appends four uint16 index tables (name_order and three service sort tables).
 
 A header that fails probe (unknown version, D out of range, N != 64*D-1) must
 stop before the first allocation, so arena_used stays 0.
@@ -52,6 +53,10 @@ def expected_arena(files):
         files,             # #4 index_eligible, shared by both linear contexts
         files * 36,        # #5 YanFsInfo
         files * 32,        # #6 block names
+        files * 2,         # R8 filesystem name_order
+        files * 2,         # R8 metadata sort indices
+        files * 2,         # R8 relation sort indices
+        files * 2,         # R8 block sort indices
     ]
     current = 0
     used = 0
@@ -99,7 +104,7 @@ def main():
     run_args.work = args.work
     run_args.guest = args.guest
 
-    oracle = {63: 15008, 1023: 242528, 2047: 485216, 4095: 970592}
+    oracle = {63: 15518, 1023: 250718, 2047: 501598, 4095: 1003358}
     for files in (63, 1023, 2047, 4095):
         blocks = 65 if files == 4095 else 64
         image = mkfs_image(args.mkfs, args.work / ("ac1-%d.img" % files),

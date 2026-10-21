@@ -304,6 +304,8 @@ static YanBlockResult service_show(YanBlockQuery *query,
 void yan_block_query_destroy(YanBlockQuery *query)
 {
     if (query == NULL) return;
+    free(query->block_sort);
+    query->block_sort = NULL;
     free(query->block_names);
     query->block_names = NULL;
     query->initialized = false;
@@ -320,6 +322,7 @@ YanBlockQueryResult yan_block_query_init(YanBlockQuery *query,
     if (query->initialized && query->blocks.busy) return YAN_BLOCK_QUERY_BUSY;
     /* Free a previous table before the struct is cleared; the pointer is owned
      * by this object and init is the only other reset path. */
+    free(query->block_sort);
     free(query->block_names);
     memset(query, 0, sizeof *query);
     query->adapter = adapter;
@@ -331,10 +334,16 @@ YanBlockQueryResult yan_block_query_init(YanBlockQuery *query,
     uint32_t capacity = adapter->fs.entry_capacity;
     if (capacity == 0u) return YAN_BLOCK_QUERY_INVALID;
     query->block_names = calloc(capacity, 32u);
-    if (query->block_names == NULL) return YAN_BLOCK_QUERY_IO;
-    YanBlockResult result =
-        yan_blocks_init(&query->blocks, &adapter->fs, query->block_names);
+    query->block_sort = calloc(capacity, sizeof *query->block_sort);
+    if (query->block_names == NULL || query->block_sort == NULL) {
+        return YAN_BLOCK_QUERY_IO;
+    }
+    YanBlockResult result = yan_blocks_init(&query->blocks, &adapter->fs,
+                                            query->block_names,
+                                            query->block_sort);
     if (result != YAN_BLOCK_OK) {
+        free(query->block_sort);
+        query->block_sort = NULL;
         free(query->block_names);
         query->block_names = NULL;
         return map_block(result, cancel);

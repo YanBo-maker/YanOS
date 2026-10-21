@@ -20,11 +20,15 @@ typedef struct {
     uint8_t *data;
     uint32_t blocks;
     uint32_t writes;
+    uint32_t reads;
 } V2Device;
 
 static V2Device device;
 static YanFs fs;
 static uint8_t *directory;
+/* The name-order table is caller-owned in production; this suite is single
+ * images at a time and 64*64 entries covers the largest legal directory. */
+_Alignas(YanFsSource) static uint16_t v2_name_order[V2_MAX_DIR_BLOCKS * 64u];
 
 static YanFsIoResult v2_capacity(void *context, uint64_t *blocks)
 {
@@ -36,6 +40,7 @@ static YanFsIoResult v2_capacity(void *context, uint64_t *blocks)
 static YanFsIoResult v2_read(void *context, uint32_t lba, uint8_t out[4096])
 {
     V2Device *self = (V2Device *)context;
+    ++self->reads;
     if (lba >= self->blocks) {
         return YAN_FS_IO_ERROR;
     }
@@ -140,7 +145,7 @@ static void v2_start_image(uint32_t dir_blocks, uint32_t capacity)
     memcpy(device.data, directory, (size_t)dir_blocks * V2_BLOCK);
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
                           yan_fs_init_directory(&fs, v2_backend(), directory,
-                                                dir_blocks));
+                                                dir_blocks, v2_name_order));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_mount(&fs));
 }
 
@@ -166,7 +171,7 @@ static void v2_expect_corrupt(uint32_t init_blocks)
 
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
                           yan_fs_init_directory(&fs, v2_backend(), directory,
-                                                init_blocks));
+                                                init_blocks, v2_name_order));
     TEST_ASSERT_EQUAL_INT(YAN_FS_CORRUPT, yan_fs_mount(&fs));
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
     TEST_ASSERT_EQUAL_INT(YAN_FS_UNMOUNTED, fs.state);
@@ -337,7 +342,7 @@ static void test_0036_R2_v2_mismatch_is_invalid_version_three_unsupported(void)
     device.writes = 0u;
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
                           yan_fs_init_directory(&fs, v2_backend(), directory,
-                                                3u));
+                                                3u, v2_name_order));
     TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID, yan_fs_mount(&fs));
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
     TEST_ASSERT_EQUAL_MEMORY(before, device.data,
@@ -347,7 +352,7 @@ static void test_0036_R2_v2_mismatch_is_invalid_version_three_unsupported(void)
     device.writes = 0u;
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
                           yan_fs_init_directory(&fs, v2_backend(), directory,
-                                                2u));
+                                                2u, v2_name_order));
     TEST_ASSERT_EQUAL_INT(YAN_FS_UNSUPPORTED, yan_fs_mount(&fs));
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
     free(before);
@@ -363,16 +368,24 @@ static void test_0036_R2_init_directory_rejects_bad_arguments(void)
     TEST_ASSERT_NOT_NULL(directory);
 
     TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
-                          yan_fs_init_directory(NULL, io, directory, 1u));
+                          yan_fs_init_directory(NULL, io, directory, 1u,
+                                               v2_name_order));
     TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
-                          yan_fs_init_directory(&local, io, NULL, 1u));
+                          yan_fs_init_directory(&local, io, NULL, 1u,
+                                               v2_name_order));
     TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
-                          yan_fs_init_directory(&local, io, directory, 0u));
+                          yan_fs_init_directory(&local, io, directory, 1u,
+                                               NULL));
     TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
-                          yan_fs_init_directory(&local, io, directory, 65u));
+                          yan_fs_init_directory(&local, io, directory, 0u,
+                                               v2_name_order));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+                          yan_fs_init_directory(&local, io, directory, 65u,
+                                               v2_name_order));
     TEST_ASSERT_EQUAL_INT(
         YAN_FS_INVALID,
-        yan_fs_init_directory(&local, io, (uint8_t *)(void *)&local, 1u));
+        yan_fs_init_directory(&local, io, (uint8_t *)(void *)&local, 1u,
+                              v2_name_order));
 
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, test_fs_init(&local, io));
     TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_unmount(&local));
@@ -481,6 +494,42 @@ static void test_0036_R3_probe_rejects_bad_headers_without_writing(void)
     TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
 }
 
+static void test_0036_R8_name_order_is_protected_workspace(void)
+{
+    v2_start_image(2u, 140u);
+    const uint8_t payload = 0xffu;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_create(&fs, "a", &payload, 1u));
+    uint16_t saved[127];
+    memcpy(saved, v2_name_order, sizeof saved);
+    uint32_t old_reads = device.reads, old_writes = device.writes;
+    uint32_t got = 123u;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_FS_INVALID,
+        yan_fs_read(&fs, "a", 0u, (uint8_t *)v2_name_order, 1u, &got),
+        "R8 read must not overwrite name_order");
+    TEST_ASSERT_EQUAL_UINT32(0u, got);
+    uint8_t out = 0u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+        yan_fs_read(&fs, "a", 0u, &out, 1u, (uint32_t *)(void *)v2_name_order));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+        yan_fs_stat(&fs, "a", (YanFsInfo *)(void *)v2_name_order));
+    YanFsInfo info;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+        yan_fs_list(&fs, (uint32_t *)(void *)v2_name_order, &info));
+    uint32_t cursor = 0u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+        yan_fs_list(&fs, &cursor, (YanFsInfo *)(void *)v2_name_order));
+    TEST_ASSERT_EQUAL_UINT32(0u, cursor);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+        yan_fs_source(&fs, (YanFsSource *)(void *)v2_name_order));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+        yan_fs_create(&fs, "b", (const uint8_t *)v2_name_order, 1u));
+    TEST_ASSERT_EQUAL_MEMORY(saved, v2_name_order, sizeof saved);
+    TEST_ASSERT_EQUAL_UINT32(old_reads, device.reads);
+    TEST_ASSERT_EQUAL_UINT32(old_writes, device.writes);
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_stat(&fs, "a", &info));
+    TEST_ASSERT_EQUAL_STRING("a", info.name);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -492,5 +541,6 @@ int main(void)
     RUN_TEST(test_0036_R2_external_directory_is_not_caller_scratch);
     RUN_TEST(test_0036_R3_probe_reads_v1_and_v2);
     RUN_TEST(test_0036_R3_probe_rejects_bad_headers_without_writing);
+    RUN_TEST(test_0036_R8_name_order_is_protected_workspace);
     return UNITY_END();
 }

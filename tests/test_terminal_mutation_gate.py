@@ -265,7 +265,7 @@ def cli_missing_controls():
         placeholder_cc = sys.executable
         absent_cc = str(Path(base) / "no-such-compiler")
         for rel in ("os/shell.c", "os/note_relations.c", "os/note_metadata.c", "os/shell.h", "os/note_relations.h", "os/note_metadata.h", "os/search.c", "os/search.h",
-                    "os/search_linear.c", "os/search_linear.h",
+                    "os/search_linear.c", "os/search_linear.h", "os/sort.h",
                     "tests/test_line.c",
                     "tests/guest/guest.h", "tests/terminal_runtime_driver.c",
                     "tests/guest/run_terminal_runtime.py",
@@ -274,12 +274,18 @@ def cli_missing_controls():
             saved = victim.read_bytes()
             victim.unlink()
             rc, _blob = run_cli(tree, work, unity, placeholder_cc, "gcc")
+            if rel == "os/sort.h":
+                check("cli", "sort-missing-with-absent-tools",
+                      run_cli(tree, work, unity, absent_cc, absent_cc)[0], 1)
+                check("cli", "runtime-sort-missing-with-absent-tools",
+                      run_cli(tree, work, unity, absent_cc, absent_cc,
+                              mode_args=("--runtime-only",))[0], 1)
             victim.write_bytes(saved)
             check("cli", "missing-" + rel, rc, 1)
         rc, _blob = run_cli(tree, work, unity, absent_cc, "gcc")
         check("cli", "missing-cc-77", rc, 77)
-        # The external cross compiler is checked before repository inputs and is
-        # only required by --runtime-only: an absent gcc is 77, not 1.
+        # With all repository inputs intact, only --runtime-only requires the
+        # external cross compiler: an absent gcc is 77, not 1.
         rc, _blob = run_cli(tree, work, unity, placeholder_cc, absent_cc,
                             mode_args=("--runtime-only",))
         check("cli", "runtime-only-missing-gcc-77", rc, 77)

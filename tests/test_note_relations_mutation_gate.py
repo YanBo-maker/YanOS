@@ -50,6 +50,7 @@ class RelationsGate(unittest.TestCase):
         self.assertEqual("pass", classify_suites({"relation": run}, "owner", "exact"))
 
     def test_required_inputs_hard_fail_before_external_skip(self):
+        self.assertIn("os/sort.h", REQUIRED)
         script = Path(__file__).with_name("run_note_relations_mutation.py")
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

@@ -305,7 +305,13 @@ def require_sources(source):
               source / "os/task.h", source / "os/block.c", source / "os/block.h",
               source / "os/platform.h", source / "os/console.c",
               source / "tools/host_disk.c", source / "tools/host_disk.h",
-              source / "tools/host_block.c", source / "tools/yan_run.c"]
+              source / "tools/host_block.c", source / "tools/yan_run.c",
+              *[source / name for name in (
+                  "host/note_write.c", "host/note_write.h", "os/yanfs.c",
+                  "os/yanfs.h", "os/sort.h", "os/memory.h",
+                  "os/note_metadata_format.c", "os/note_metadata_format.h",
+                  "os/note_blocks_format.c", "os/note_blocks_format.h",
+                  "os/search_text.c", "os/search_text.h")]]
     for path in needed:
         if not path.is_file():
             print(f"FAIL the source under test is missing: {path}", file=sys.stderr)
@@ -342,9 +348,14 @@ def build_executor(args, source, out, host_disk_c):
     sources = sorted((source / "src").glob("*.c"))
     command = [args.cc, "-std=c17", "-O1", "-Wall", "-Wextra", "-Werror",
                "-I", str(source / "include"), "-I", str(source / "tools"),
+               "-I", str(source / "host"), "-I", str(source / "os"),
                str(source / "tools/yan_run.c"), str(source / "tools/host_file.c"),
                str(source / "tools/host_terminal.c"), str(source / "tools/host_block.c"),
-               str(host_disk_c), *map(str, sources), "-o", str(out)]
+               str(host_disk_c), *map(str, sources),
+               *[str(source / name) for name in (
+                   "host/note_write.c", "os/yanfs.c", "os/note_metadata_format.c",
+                   "os/note_blocks_format.c", "os/search_text.c")],
+               "-o", str(out)]
     built = run_process(command, timeout=180)
     if built.returncode != 0:
         raise RuntimeError(f"executor build failed ({out.name}):\n{built.stdout}{built.stderr}")

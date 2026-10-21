@@ -82,9 +82,10 @@ class Gate(unittest.TestCase):
                     capture_output=True,timeout=20)
             # All repository/build inputs exist; only external tools are absent.
             self.assertEqual(77,invoke().returncode)
-            # Chief fixed-eight omission probe: each is hard failure 1.
+            # Original fixed-eight plus the R8 header: hard failure before 77.
             for kind, name in (
                     ('repo', 'os/memory.h'),
+                    ('repo', 'os/sort.h'),
                     ('build', 'CMakeFiles/yan_mcp.dir/tools/yan_mcp.c.o'),
                     ('build', 'CMakeFiles/yan_mcp.dir/tools/mcp_worker.c.o'),
                     ('build', 'CMakeFiles/mcp_fault_probe.dir/tools/yan_mcp.c.o'),

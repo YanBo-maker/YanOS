@@ -20,8 +20,9 @@
 typedef struct {
     YanFs fs;
     /* 0036-R3: the directory cache is calloc'd for the image's D blocks and
-     * released by cleanup. */
+     * released by cleanup. 0036-R8 adds the matching name-order table. */
     uint8_t *directory;
+    uint16_t *name_order;
     int image_fd, index_fd;
     FILE *temporary;
     uint64_t image_size;

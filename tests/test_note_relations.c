@@ -1209,6 +1209,81 @@ static void relation_late_io_failure_precedes_every_callback_and_releases_busy(v
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(before, device_reads, "relation_late_io_no_more_reads");
 }
 
+static void relation_backlinks_reorders_after_candidates_grow_and_shrink(void)
+{
+    fs_mount_fresh();
+    uint32_t length = build_note("link: target.txt\n", NULL, 0u);
+    fs_make_file("z.txt", file_content, length);
+    fs_make_file("a.txt", file_content, length);
+    with_service();
+    TEST_ASSERT_EQUAL_INT(YAN_NOTE_OK,
+        yan_relation_backlinks(&context, "target.txt", collect_rows, NULL, &summary));
+    TEST_ASSERT_EQUAL_UINT32(2u, rows_seen_count);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("a.txt", rows_seen[0].name,
+        "relation_r8_first_backlinks_order");
+    TEST_ASSERT_EQUAL_STRING("z.txt", rows_seen[1].name);
+
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_remove(&fs, "a.txt"));
+    fs_make_file("m.txt", file_content, length);
+    fs_make_file("b.txt", file_content, length);
+    collect_reset();
+    TEST_ASSERT_EQUAL_INT(YAN_NOTE_OK,
+        yan_relation_backlinks(&context, "target.txt", collect_rows, NULL, &summary));
+    TEST_ASSERT_EQUAL_UINT32(3u, rows_seen_count);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("b.txt", rows_seen[0].name,
+        "relation_r8_grown_backlinks_order");
+    TEST_ASSERT_EQUAL_STRING("m.txt", rows_seen[1].name);
+    TEST_ASSERT_EQUAL_STRING("z.txt", rows_seen[2].name);
+
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_remove(&fs, "z.txt"));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_remove(&fs, "m.txt"));
+    collect_reset();
+    TEST_ASSERT_EQUAL_INT(YAN_NOTE_OK,
+        yan_relation_backlinks(&context, "target.txt", collect_rows, NULL, &summary));
+    TEST_ASSERT_EQUAL_UINT32(1u, rows_seen_count);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("b.txt", rows_seen[0].name,
+        "relation_r8_shrunk_backlinks_order");
+}
+
+static void relation_related_reorders_after_candidate_ranks_change(void)
+{
+    fs_mount_fresh();
+    uint32_t length = build_note("tag: t\n", NULL, 0u);
+    fs_make_file("target.txt", file_content, length);
+    length = build_note("tag: t\nlink: target.txt\n", NULL, 0u);
+    fs_make_file("z.txt", file_content, length);
+    fs_make_file("a.txt", file_content, length);
+    with_service();
+    TEST_ASSERT_EQUAL_INT(YAN_NOTE_OK,
+        yan_relation_related(&context, "target.txt", collect_rows, NULL, &summary));
+    TEST_ASSERT_EQUAL_UINT32(2u, rows_seen_count);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("a.txt", rows_seen[0].name,
+        "relation_r8_first_related_order");
+    TEST_ASSERT_EQUAL_STRING("z.txt", rows_seen[1].name);
+
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_remove(&fs, "a.txt"));
+    length = build_note("tag: t\n", NULL, 0u);
+    fs_make_file("m.txt", file_content, length);
+    fs_make_file("b.txt", file_content, length);
+    collect_reset();
+    TEST_ASSERT_EQUAL_INT(YAN_NOTE_OK,
+        yan_relation_related(&context, "target.txt", collect_rows, NULL, &summary));
+    TEST_ASSERT_EQUAL_UINT32(3u, rows_seen_count);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("z.txt", rows_seen[0].name,
+        "relation_r8_reused_related_edge_first");
+    TEST_ASSERT_EQUAL_STRING("b.txt", rows_seen[1].name);
+    TEST_ASSERT_EQUAL_STRING("m.txt", rows_seen[2].name);
+
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_remove(&fs, "z.txt"));
+    collect_reset();
+    TEST_ASSERT_EQUAL_INT(YAN_NOTE_OK,
+        yan_relation_related(&context, "target.txt", collect_rows, NULL, &summary));
+    TEST_ASSERT_EQUAL_UINT32(2u, rows_seen_count);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("b.txt", rows_seen[0].name,
+        "relation_r8_shrunk_related_order");
+    TEST_ASSERT_EQUAL_STRING("m.txt", rows_seen[1].name);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1250,5 +1325,7 @@ int main(void)
     RUN_TEST(relation_late_io_failure_precedes_every_callback_and_releases_busy);
     RUN_TEST(relation_related_uses_shared_tags_before_ascii_for_equal_edges);
     RUN_TEST(relation_failed_init_preserves_an_existing_idle_context);
+    RUN_TEST(relation_backlinks_reorders_after_candidates_grow_and_shrink);
+    RUN_TEST(relation_related_reorders_after_candidate_ranks_change);
     return UNITY_END();
 }

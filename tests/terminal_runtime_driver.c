@@ -127,6 +127,8 @@ enum { FAULT_NONE = 0, FAULT_IO = 1, FAULT_PROTOCOL = 2 };
 
 typedef struct {
     FILE *capture;
+    uint64_t perf_step, perf_inputs[16], perf_prompts[16];
+    unsigned perf_input_count, perf_prompt_count;
     uint32_t delivered;
     uint32_t tx_fault_at;
     bool tx_failed;
@@ -204,6 +206,10 @@ static void backend_tx_write(void *context, uint8_t byte)
     Backend *backend = context;
     ++backend->delivered;
     note_output(backend, byte);
+    if (backend->out_length >= 7u && backend->perf_prompt_count < 16u &&
+        memcmp(backend->out + backend->out_length - 7u, "yanfs> ", 7u) == 0) {
+        backend->perf_prompts[backend->perf_prompt_count++] = backend->perf_step + 1u;
+    }
     if (backend->capture != NULL) {
         (void)fputc(byte, backend->capture);
     }
@@ -836,6 +842,7 @@ int main(int argc, char **argv)
     }
 
     for (uint64_t step = 0; step < max_steps; ++step) {
+        drive.backend.perf_step = step;
         if (drive.backend.tx_failed) {
             if (drive.putc_known && machine.cpu.pc == drive.putc_addr) {
                 ++drive.backend.putc_entries_after_fail;
@@ -880,7 +887,14 @@ int main(int argc, char **argv)
             goto done;
         }
 
+        const bool perf_rx_before = machine.uart.rx_available;
         const YanStatus step_status = yan_machine_step(&machine);
+        if (perf_rx_before && !machine.uart.rx_available &&
+            drive.backend.feed_at > 0u &&
+            drive.backend.feed[drive.backend.feed_at - 1u] == (uint8_t)'\n' &&
+            drive.backend.perf_input_count < 16u) {
+            drive.backend.perf_inputs[drive.backend.perf_input_count++] = step + 1u;
+        }
         if (mode == MODE_PRODUCTION && drive.tasks_known) {
             /* Observation of task 0's allocated stack, including trap frames.
              * This sampled depth is evidence for this execution, not a proof
@@ -1034,6 +1048,11 @@ int main(int argc, char **argv)
 
 done:
     if (status_file != NULL) {
+        fprintf(status_file, "perf_total=%" PRIu64 "\n", drive.backend.perf_step + 1u);
+        for (unsigned i = 0; i < drive.backend.perf_input_count; ++i)
+            fprintf(status_file, "perf_input_%u=%" PRIu64 "\n", i, drive.backend.perf_inputs[i]);
+        for (unsigned i = 0; i < drive.backend.perf_prompt_count; ++i)
+            fprintf(status_file, "perf_prompt_%u=%" PRIu64 "\n", i, drive.backend.perf_prompts[i]);
         (void)fprintf(status_file, "task0_observed_stack_bytes=%" PRIu32
                       "\nblock_responses=%" PRIu64 "\n",
                       drive.task0_observed_stack_bytes, drive.block.served);

@@ -334,8 +334,8 @@ MUTATIONS = {
         # ring are the ones that notice. The mutation is in os/platform.h, which
         # the runner reaches through --platform, so the guest frame layer is
         # built from a copy that lives next to the mutated header.
-        ("        out[i] = ring[yan_os_ring_index(tail, size, i)];",
-         "        out[i] = ring[yan_os_ring_index(0, size, i)];", 1),
+        ("    yan_os_ring_copy_out(ring, size, tail, out, count);",
+         "    yan_os_ring_copy_out(ring, size, 0u, out, count);", 1),
     ],
 
     # ---- Negative controls: these must NOT be counted as detections --------

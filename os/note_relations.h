@@ -115,6 +115,8 @@ typedef struct {
     /* 0036-R3: caller-owned relation/sort scratch, `row_capacity` rows, one per
      * file the image can hold. The context only borrows it. */
     YanRelationRow *rows;
+    /* 0036-R8: caller-owned index scratch for the shared heapsort. */
+    uint16_t *sort_index;
     uint32_t row_capacity;
     uint32_t row_count;
 } YanRelationContext;
@@ -130,9 +132,10 @@ _Static_assert(sizeof(YanRelationContext) <= 65536u,
  * writing the object; an initialized, idle context may be re-initialized after
  * validating the new pair, while an active context answers BUSY. */
 YanNoteResult yan_relation_init(YanRelationContext *context, YanFs *fs,
-                                YanRelationRow *rows);
+                                YanRelationRow *rows, uint16_t *sort_index);
 /* 0036-R3 storage size for one `capacity`-row table. */
 uint32_t yan_relation_rows_storage_bytes(uint32_t capacity);
+uint32_t yan_relation_sort_index_storage_bytes(uint32_t capacity);
 
 /* Declares one existing source; emits one row per declared link in original
  * declaration order. A target is observed only through the directory, so a

@@ -13,11 +13,11 @@ from run_note_metadata_mutation import classify_suites
 from run_yanfs_mutation import classify_run, parse_unity, HarnessError
 
 REQUIRED = (
-    'tools/mcp_protocol.c', 'tools/mcp_protocol.h', 'tools/yan_mcp.c',
+    'tools/mcp_protocol.c', 'tools/mcp_protocol.h', 'tools/mcp_note.h', 'tools/yan_mcp.c',
     'tools/mcp_worker.c', 'tools/mcp_worker.h', 'host/semantic_text.c',
     'host/semantic_text.h', 'host/semantic_sha256.c', 'host/semantic_sha256.h',
     'host/semantic_result.h', 'host/semantic_posix.c', 'host/semantic_posix.h',
-    'host/semantic_llama.h', 'host/semantic.h', 'os/memory.h', 'os/yanfs.c', 'os/yanfs.h',
+    'host/semantic_llama.h', 'host/semantic.h', 'os/memory.h', 'os/sort.h', 'os/yanfs.c', 'os/yanfs.h',
     'host/semantic_corpus.c', 'host/semantic_corpus.h',
     'os/note_blocks.c', 'os/note_blocks.h', 'os/note_blocks_format.c',
     'os/note_blocks_format.h', 'os/note_metadata_format.c',
@@ -42,7 +42,8 @@ BUILD_REQUIRED = (
     'libyan_block_query.a', 'libyan_semantic_llama.a', 'libyan_semantic_json.a',
     'libyan_semantic_posix.a', 'libyan_blocks.a', 'libyan_blocks_format.a',
     'libyan_search_text.a', 'libyan_fs.a', 'libyan_semantic_core.a',
-    'libyan_semantic_corpus.a', 'libyan_note_format.a')
+    'libyan_semantic_corpus.a', 'libyan_note_format.a',
+    'libyan_mcp_note.a', 'libyan_note_write.a')
 SUITE_INPUTS = {
     'mcp_protocol': ('tools/mcp_protocol.c', 'host/semantic_text.c',
                      'host/semantic_sha256.c', 'tools/mcp_worker.c'),
@@ -69,8 +70,11 @@ MUTATIONS = (
     ('utf8-byte-limit', 'host/semantic_text.c', 'length > YAN_SEMANTIC_QUERY_MAX',
      'length > YAN_SEMANTIC_QUERY_MAX + 1u', 'mcp_protocol',
      'test_utf8_query_limit_is_bytes_and_nul_cannot_bypass_it', 'mcp_query_utf8_byte_limit'),
-    ('busy-as-io', 'tools/yan_mcp.c', 'enqueue(s,&request,NULL,0,"BUSY",false)',
-     'enqueue(s,&request,NULL,0,"IO",false)', 'mcp_faults',
+    ('busy-as-io', 'tools/yan_mcp.c',
+     'if (s->task.active) return enqueue(s,&request,NULL,0,"BUSY",false);\n'
+     '        if (!start_task(s,&request))',
+     'if (s->task.active) return enqueue(s,&request,NULL,0,"IO",false);\n'
+     '        if (!start_task(s,&request))', 'mcp_faults',
      'test_busy_does_not_queue_second_task', 'mcp_busy_not_queued'),
     ('cancel-response', 'tools/yan_mcp.c', 'if (cancelled) t->cancelled=true;', '(void)cancelled;',
      'mcp_faults', 'test_cancel_suppresses_response_and_reaps', 'mcp_cancel_no_response'),
@@ -201,6 +205,7 @@ def main():
             native_libs = [args.build/n for n in (
                 'libyan_block_query.a', 'libyan_semantic_llama.a', 'libyan_semantic_json.a')]
             native_libs += [args.yyjson_lib, unity,
+                args.build/'libyan_mcp_note.a', args.build/'libyan_note_write.a',
                 *(args.build/n for n in ('libyan_semantic_posix.a', 'libyan_blocks.a',
                     'libyan_blocks_format.a', 'libyan_search_text.a', 'libyan_fs.a')),
                 args.curl_lib,

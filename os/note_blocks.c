@@ -1,5 +1,6 @@
 #include "note_blocks.h"
 #include "memory.h"
+#include "sort.h"
 #include <stddef.h>
 
 /* All names and IDs have the same fixed, ASCII, NUL-terminated 32-byte shape.
@@ -12,6 +13,13 @@ static int name_compare(const char left[32], const char right[32])
         if (a == 0u) return 0;
     }
     return 0;
+}
+
+/* 0036-R8: order the directory indices by the borrowed name table. */
+static bool block_name_before(const void *context, uint16_t left, uint16_t right)
+{
+    const YanBlockContext *blocks = context;
+    return name_compare(blocks->names[left], blocks->names[right]) < 0;
 }
 
 static bool span(const void *p, size_t n)
@@ -55,11 +63,14 @@ static YanBlockResult fs_state(const YanFs *fs)
 }
 uint32_t yan_blocks_names_storage_bytes(uint32_t capacity)
 { return capacity * 32u; }
+uint32_t yan_blocks_sort_index_storage_bytes(uint32_t capacity)
+{ return capacity * (uint32_t)sizeof(uint16_t); }
 
 YanBlockResult yan_blocks_init(YanBlockContext *c, YanFs *fs,
-                               char (*names)[32])
+                               char (*names)[32], uint16_t *sort_index)
 {
     if (!span(c, sizeof *c) || !span(fs, sizeof *fs) || names == NULL ||
+        sort_index == NULL ||
         overlap(c, sizeof *c, fs, sizeof *fs)) return YAN_BLOCK_INVALID;
     if (c->busy) return YAN_BLOCK_BUSY;
     /* 0036-R3: init runs before mount; a query still requires MOUNTED. */
@@ -67,7 +78,8 @@ YanBlockResult yan_blocks_init(YanBlockContext *c, YanFs *fs,
     if (fs->busy) return YAN_BLOCK_BUSY;
     if (fs->state == YAN_FS_STATE_FAULTED) return YAN_BLOCK_FAULTED;
     if (fs->entry_capacity == 0u) return YAN_BLOCK_INVALID;
-    c->fs = fs; c->names = names; c->name_capacity = fs->entry_capacity;
+    c->fs = fs; c->names = names; c->sort_index = sort_index;
+    c->name_capacity = fs->entry_capacity;
     c->initialized = true; c->busy = false;
     return YAN_BLOCK_OK;
 }
@@ -151,6 +163,7 @@ static YanBlockResult file_scan(YanBlockContext *c, const char *name,
     YanFsInfo file;
     YanBlockResult r = map_fs(yan_fs_stat(c->fs, name, &file));
     if (r != YAN_BLOCK_OK) return r;
+    bool buffered = file.size_bytes <= sizeof c->buffer;
     r = yan_block_text_init(&c->text);
     for (uint32_t offset = 0; r == YAN_BLOCK_OK && offset < file.size_bytes;) {
         uint32_t amount = file.size_bytes - offset;
@@ -163,14 +176,22 @@ static YanBlockResult file_scan(YanBlockContext *c, const char *name,
     if (r != YAN_BLOCK_OK) return r;
     uint32_t prefix = file.size_bytes;
     if (prefix > sizeof c->buffer) prefix = sizeof c->buffer;
-    r = read_exact(c, name, 0, prefix);
+    /* A complete small file remains in the existing buffer after eligibility
+     * validation. The header parser borrows it without modifying its bytes. */
+    if (!buffered) r = read_exact(c, name, 0, prefix);
     if (r != YAN_BLOCK_OK) return r;
     YanNoteResult note = yan_note_parse_header(c->buffer, prefix, &c->metadata, &c->metadata_workspace);
     if (note != YAN_NOTE_OK) return note == YAN_NOTE_METADATA ? YAN_BLOCK_METADATA : YAN_BLOCK_PROTOCOL;
     uint32_t first_line = 1;
     for (uint32_t i = 0; i < c->metadata.header_bytes; ++i) if (c->buffer[i] == '\n') ++first_line;
     r = yan_block_parser_init(&c->parser, c->metadata.header_bytes, first_line, sink, sink != NULL ? c : NULL);
-    for (uint32_t offset = c->metadata.header_bytes; r == YAN_BLOCK_OK && offset < file.size_bytes;) {
+    if (buffered && r == YAN_BLOCK_OK) {
+        r = yan_block_parser_feed(&c->parser,
+            c->buffer + c->metadata.header_bytes,
+            file.size_bytes - c->metadata.header_bytes);
+    }
+    for (uint32_t offset = c->metadata.header_bytes;
+         !buffered && r == YAN_BLOCK_OK && offset < file.size_bytes;) {
         uint32_t amount = file.size_bytes - offset;
         if (amount > sizeof c->buffer) amount = sizeof c->buffer;
         r = read_exact(c, name, offset, amount);
@@ -254,13 +275,8 @@ static YanBlockResult directory(YanBlockContext *c)
         if (c->name_count == c->name_capacity) return YAN_BLOCK_PROTOCOL;
         memcpy(c->names[c->name_count++], file.name, sizeof file.name);
     }
-    for (uint32_t i = 1; i < c->name_count; ++i) {
-        char name[32];
-        memcpy(name, c->names[i], sizeof name);
-        uint32_t j = i;
-        while (j > 0 && name_compare(c->names[j - 1u], name) > 0) { memcpy(c->names[j], c->names[j - 1u], sizeof name); --j; }
-        memcpy(c->names[j], name, sizeof name);
-    }
+    for (uint32_t i = 0; i < c->name_count; ++i) c->sort_index[i] = (uint16_t)i;
+    yan_sort_index(c->sort_index, c->name_count, block_name_before, c);
     return YAN_BLOCK_OK;
 }
 YanBlockResult yan_blocks_backlinks(YanBlockContext *c, const YanBlockAddress *a, YanBlockRowFn sink,
@@ -275,8 +291,9 @@ YanBlockResult yan_blocks_backlinks(YanBlockContext *c, const YanBlockAddress *a
     if (r == YAN_BLOCK_OK) r = directory(c);
     c->filtering = true; c->filter = key;
     for (uint32_t i = 0; r == YAN_BLOCK_OK && i < c->name_count; ++i) {
-        memcpy(c->current_file, c->names[i], sizeof c->current_file);
-        r = file_scan(c, c->names[i], collect);
+        const char *name = c->names[c->sort_index[i]];
+        memcpy(c->current_file, name, sizeof c->current_file);
+        r = file_scan(c, name, collect);
         if (r == YAN_BLOCK_INVALID_TEXT) { ++c->skipped; r = YAN_BLOCK_OK; }
     }
     if (r == YAN_BLOCK_OK) r = emit(c, sink, opaque);

@@ -29,6 +29,7 @@
 typedef struct {
     YanFs *owner;
     uint8_t directory[YAN_FS_BLOCK_SIZE];
+    uint16_t name_order[YAN_FS_MAX_FILES];
 } TestFsStorage;
 
 static TestFsStorage test_fs_storage[TEST_FS_STORAGE_SLOTS];
@@ -39,7 +40,8 @@ static inline YanFsResult test_fs_init(YanFs *fs, YanFsBlockIo io)
     for (uint32_t i = 0; i < test_fs_storage_used; ++i) {
         if (test_fs_storage[i].owner == fs) {
             return yan_fs_init_directory(fs, io, test_fs_storage[i].directory,
-                                         1u);
+                                         1u,
+                                         test_fs_storage[i].name_order);
         }
     }
     if (test_fs_storage_used == TEST_FS_STORAGE_SLOTS) {
@@ -47,7 +49,8 @@ static inline YanFsResult test_fs_init(YanFs *fs, YanFsBlockIo io)
     }
     TestFsStorage *slot = &test_fs_storage[test_fs_storage_used++];
     slot->owner = fs;
-    return yan_fs_init_directory(fs, io, slot->directory, 1u);
+    return yan_fs_init_directory(fs, io, slot->directory, 1u,
+                                 slot->name_order);
 }
 
 /* A D=1 mount is the only shape these helpers support; a multi-block image
@@ -70,6 +73,7 @@ typedef struct {
     YanNoteContext *owner;
     YanNoteEntry entries[YAN_FS_MAX_FILES];
     char sort_name[YAN_FS_MAX_FILES][32];
+    uint16_t sort_index[YAN_FS_MAX_FILES];
 } TestNoteStorage;
 
 static TestNoteStorage test_note_storage[TEST_NOTE_STORAGE_SLOTS];
@@ -81,7 +85,8 @@ static inline YanNoteResult test_note_init(YanNoteContext *context, YanFs *fs)
     for (uint32_t i = 0; i < test_note_storage_used; ++i) {
         if (test_note_storage[i].owner == context) {
             return yan_note_init(context, fs, test_note_storage[i].entries,
-                                 test_note_storage[i].sort_name);
+                                 test_note_storage[i].sort_name,
+                                 test_note_storage[i].sort_index);
         }
     }
     if (test_note_storage_used == TEST_NOTE_STORAGE_SLOTS) {
@@ -89,12 +94,14 @@ static inline YanNoteResult test_note_init(YanNoteContext *context, YanFs *fs)
     }
     TestNoteStorage *slot = &test_note_storage[test_note_storage_used++];
     slot->owner = context;
-    return yan_note_init(context, fs, slot->entries, slot->sort_name);
+    return yan_note_init(context, fs, slot->entries, slot->sort_name,
+                         slot->sort_index);
 }
 
 typedef struct {
     YanRelationContext *owner;
     YanRelationRow rows[YAN_FS_MAX_FILES];
+    uint16_t sort_index[YAN_FS_MAX_FILES];
 } TestRelationStorage;
 
 static TestRelationStorage test_relation_storage[TEST_RELATION_STORAGE_SLOTS];
@@ -106,7 +113,9 @@ static inline YanNoteResult test_relation_init(YanRelationContext *context,
     if (!test_fs_is_v1(fs)) return YAN_NOTE_INVALID;
     for (uint32_t i = 0; i < test_relation_storage_used; ++i) {
         if (test_relation_storage[i].owner == context) {
-            return yan_relation_init(context, fs, test_relation_storage[i].rows);
+            return yan_relation_init(context, fs,
+                                     test_relation_storage[i].rows,
+                                     test_relation_storage[i].sort_index);
         }
     }
     if (test_relation_storage_used == TEST_RELATION_STORAGE_SLOTS) {
@@ -114,12 +123,13 @@ static inline YanNoteResult test_relation_init(YanRelationContext *context,
     }
     TestRelationStorage *slot = &test_relation_storage[test_relation_storage_used++];
     slot->owner = context;
-    return yan_relation_init(context, fs, slot->rows);
+    return yan_relation_init(context, fs, slot->rows, slot->sort_index);
 }
 
 typedef struct {
     YanBlockContext *owner;
     char names[YAN_FS_MAX_FILES][32];
+    uint16_t sort_index[YAN_FS_MAX_FILES];
 } TestBlocksStorage;
 
 static TestBlocksStorage test_blocks_storage[TEST_BLOCKS_STORAGE_SLOTS];
@@ -131,7 +141,9 @@ static inline YanBlockResult test_blocks_init(YanBlockContext *context,
     if (!test_fs_is_v1(fs)) return YAN_BLOCK_INVALID;
     for (uint32_t i = 0; i < test_blocks_storage_used; ++i) {
         if (test_blocks_storage[i].owner == context) {
-            return yan_blocks_init(context, fs, test_blocks_storage[i].names);
+            return yan_blocks_init(context, fs,
+                                   test_blocks_storage[i].names,
+                                   test_blocks_storage[i].sort_index);
         }
     }
     if (test_blocks_storage_used == TEST_BLOCKS_STORAGE_SLOTS) {
@@ -139,7 +151,7 @@ static inline YanBlockResult test_blocks_init(YanBlockContext *context,
     }
     TestBlocksStorage *slot = &test_blocks_storage[test_blocks_storage_used++];
     slot->owner = context;
-    return yan_blocks_init(context, fs, slot->names);
+    return yan_blocks_init(context, fs, slot->names, slot->sort_index);
 }
 
 typedef struct {

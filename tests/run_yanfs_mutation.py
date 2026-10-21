@@ -43,7 +43,7 @@ MUTANT_FLAGS = ["-std=c17", "-Wall", "-Wextra", "-Wpedantic"]
 BUILD_TIMEOUT = 180
 RUN_TIMEOUT = 90
 
-OS_FILES = ["yanfs.h", "yanfs.c", "yanfs_block.h", "yanfs_block.c",
+OS_FILES = ["yanfs.h", "yanfs.c", "sort.h", "yanfs_block.h", "yanfs_block.c",
             "block.h", "platform.h", "task.h",
             "note_metadata_format.h", "note_metadata.h", "note_relations.h",
             "note_blocks_format.h", "note_blocks.h", "search_terms.h",
@@ -131,33 +131,33 @@ MUTATIONS = [
     {
         "name": "extent_overlap_accepted",
         "file": "os/yanfs.c",
-        "old": """            if (first_start < second_start + second_count &&
-                second_start < first_start + first_count) {
-                return YAN_FS_CORRUPT; /* extents must not overlap */
-            }
+        "old": """        if (load_le32(current + FS_ENTRY_START_OFFSET) < previous_end) {
+            return YAN_FS_CORRUPT; /* extents must not overlap */
+        }
 """,
-        "new": """            if (first_start == 0u && second_start == 0u &&
-                first_start < second_start + second_count &&
-                second_start < first_start + first_count) {
-                return YAN_FS_CORRUPT; /* extents must not overlap */
-            }
+        "new": """        if (load_le32(current + FS_ENTRY_START_OFFSET) == 0u &&
+            load_le32(current + FS_ENTRY_START_OFFSET) < previous_end) {
+            return YAN_FS_CORRUPT; /* mutant: overlapping nonzero starts accepted */
+        }
 """,
     },
     {
         "name": "tail_not_zeroed",
         "file": "os/yanfs.c",
-        "old": "            fs->scratch[j] = j < chunk ? bytes[offset + j] : 0u;\n",
-        "new": "            fs->scratch[j] = j < chunk ? bytes[offset + j] : 0xA5u;\n",
+        "old": "memset(fs->scratch + chunk, 0, YAN_FS_BLOCK_SIZE - chunk);",
+        "new": "memset(fs->scratch + chunk, 0xA5, YAN_FS_BLOCK_SIZE - chunk);",
     },
     {
         "name": "cache_published_before_validation",
         "file": "os/yanfs.c",
         "old": """    if (result != YAN_FS_OK) {
         clear_directory(fs);
+        fs->name_order_count = 0u;
     }
 """,
         "new": """    if (result != YAN_FS_OK) {
         (void)0; /* mutant: a rejected directory stays visible in the cache */
+        fs->name_order_count = 0u;
     }
 """,
     },
@@ -409,8 +409,8 @@ NO_EFFECT = {
 WRONG_OWNER = {
     "name": "wrong-owner-control",
     "file": "os/yanfs.c",
-    "old": "            fs->scratch[j] = j < chunk ? bytes[offset + j] : 0u;\n",
-    "new": "            fs->scratch[j] = j < chunk ? bytes[offset + j] : 0xA5u;\n",
+    "old": "memset(fs->scratch + chunk, 0, YAN_FS_BLOCK_SIZE - chunk);",
+    "new": "memset(fs->scratch + chunk, 0xA5, YAN_FS_BLOCK_SIZE - chunk);",
     "owner": "format_encodes_capacity_little_endian",
     "assertion": "wrong-owner-control",
 }
@@ -781,14 +781,6 @@ def main():
         return 2
     print("PASS mocked run_suites precedence controls")
 
-    if shutil.which(args.cc) is None:
-        print("SKIP: external C compiler missing: %s" % args.cc)
-        return 77
-    unity = args.unity.resolve()
-    if not (unity / "src/unity.c").is_file() or not (unity / "src/unity.h").is_file():
-        print("SKIP: external Unity missing under %s/src" % unity)
-        return 77
-
     source = args.source.resolve()
     missing = [str(source / "os" / name) for name in OS_FILES
                if not (source / "os" / name).is_file()]
@@ -798,6 +790,13 @@ def main():
         print("FAIL the source/tests under test are missing: %s" % ", ".join(missing),
               file=sys.stderr)
         return 1
+    if shutil.which(args.cc) is None:
+        print("SKIP: external C compiler missing: %s" % args.cc)
+        return 77
+    unity = args.unity.resolve()
+    if not (unity / "src/unity.c").is_file() or not (unity / "src/unity.h").is_file():
+        print("SKIP: external Unity missing under %s/src" % unity)
+        return 77
     for name in OWNING_ASSERTIONS:
         match = next(item for item in MUTATIONS if item["name"] == name)
         if not owner_exists(source, OWNING_ASSERTIONS[name][0], match["file"]):

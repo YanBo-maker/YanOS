@@ -141,7 +141,10 @@ esac
 # from the inside would recurse. guest_console_mutation is a nested mutation
 # harness. --ignore adds to the list, --exclude replaces it.
 if [ -z "$exclude" ]; then
-    exclude="device_mutation|guest_console_mutation"
+    # The native filesystem oracle does not link YanCPU, Bus or devices. Its
+    # 10,000 operations remain in the default regression, but cannot detect
+    # UART/PLIC mutants. An explicit --exclude still replaces this default.
+    exclude="device_mutation|guest_console_mutation|^yanfs_name_order$"
 fi
 if [ -n "$ignore" ]; then
     exclude="$exclude|$ignore"

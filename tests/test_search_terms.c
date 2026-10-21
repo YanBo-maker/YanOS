@@ -1256,10 +1256,10 @@ static void semantic_source_io_fault_propagates_without_ok(void)
     setup_linear_terms();
     fixture_create("note.md", (const uint8_t *)content,
                    (uint32_t)strlen(content));
-    /* The next data read fails: the query must surface IO, never a zero-result
-     * success. */
+    /* This file fits the cached header window, so its one prefetch is the only
+     * data read: failing that read must surface IO, never a zero-result success. */
     device_reads = 0u;
-    device_read_fail_at = 2u;
+    device_read_fail_at = 1u;
     capture_reset();
     capture_terms = &terms;
     YanSearchTermsSummary summary;
@@ -1271,6 +1271,133 @@ static void semantic_source_io_fault_propagates_without_ok(void)
         &terms, (const uint8_t *)"hit", 3u, sink, &summary);
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SEARCH_TERMS_IO, result,
                                   "an I/O fault must not become a success");
+}
+
+/* 0036-R8: the whole small-file preflight and scan must share one medium
+ * read. The second query re-reads exactly once, proving the borrowed prefix is
+ * per-file/per-query state and not a persistent cache. */
+static void linear_small_file_query_reads_medium_once(void)
+{
+    fixture_use(small_medium, SMALL_BLOCKS);
+    setup_linear_terms();
+    fixture_create("note.md", (const uint8_t *)"hit\n", 4u);
+
+    device_reads = 0u;
+    YanSearchTermsSummary summary = run_ok_query("hit");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1u, device_reads,
+        "a <=4096-byte file must be read once for both preflight and scan");
+    TEST_ASSERT_EQUAL_UINT64(1u, summary.total);
+    TEST_ASSERT_EQUAL_UINT32(1u, capture.matches);
+
+    device_reads = 0u;
+    summary = run_ok_query("hit");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1u, device_reads,
+        "the prefix must not survive as a persistent cross-query cache");
+    TEST_ASSERT_EQUAL_UINT64(1u, summary.total);
+    TEST_ASSERT_EQUAL_UINT32(1u, capture.matches);
+}
+
+/* A NUL in the last byte of a full 4096-byte cached file must still make the
+ * whole file skip exactly once and never reach ranking. */
+static void linear_cached_nul_at_end_is_skipped_once(void)
+{
+    fixture_use(small_medium, SMALL_BLOCKS);
+    static uint8_t content[YAN_NOTE_HEADER_MAX];
+    memset(content, (uint8_t)'a', sizeof content);
+    memcpy(content, "hit\n", 4u);
+    content[sizeof content - 1u] = 0u;
+    setup_linear_terms();
+    fixture_create("nul.md", content, (uint32_t)sizeof content);
+
+    YanSearchTermsSummary summary = run_ok_query("hit");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1u, summary.skipped,
+        "a cached file with a trailing NUL must be skipped exactly once");
+    TEST_ASSERT_EQUAL_UINT64(0u, summary.total);
+    TEST_ASSERT_EQUAL_UINT32(0u, capture.matches);
+}
+
+/* The same guard one byte before the end: a NUL near the end of the cached
+ * block is still detected by the whole-file preflight. */
+static void linear_cached_nul_near_end_is_skipped_once(void)
+{
+    fixture_use(small_medium, SMALL_BLOCKS);
+    static uint8_t content[YAN_NOTE_HEADER_MAX];
+    memset(content, (uint8_t)'a', sizeof content);
+    memcpy(content, "hit\n", 4u);
+    content[sizeof content - 2u] = 0u;
+    content[sizeof content - 1u] = (uint8_t)'\n';
+    setup_linear_terms();
+    fixture_create("nul.md", content, (uint32_t)sizeof content);
+
+    YanSearchTermsSummary summary = run_ok_query("hit");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1u, summary.skipped,
+        "a cached file with a NUL before the end must be skipped exactly once");
+    TEST_ASSERT_EQUAL_UINT64(0u, summary.total);
+    TEST_ASSERT_EQUAL_UINT32(0u, capture.matches);
+}
+
+/* A >4096-byte file has its first block in the streaming path; an I/O failure
+ * on the second data block must still surface as TERMS_IO and must not be
+ * mistaken for a complete scan of the cached first block. */
+static void linear_large_file_second_block_io_is_not_hidden(void)
+{
+    fixture_use(big_medium, BIG_BLOCKS);
+    static uint8_t content[5000];
+    memset(content, (uint8_t)'a', sizeof content);
+    memcpy(content, "hit\n", 4u);
+    content[sizeof content - 1u] = (uint8_t)'\n';
+    setup_linear_terms();
+    fixture_create("large.md", content, (uint32_t)sizeof content);
+
+    device_reads = 0u;
+    device_read_fail_at = 2u;
+    capture_reset();
+    capture_terms = &terms;
+    YanSearchTermsSummary summary;
+    YanSearchTermsSink sink;
+    sink.context = &capture;
+    sink.match = capture_match;
+    sink.chunk = NULL;
+    YanSearchTermsResult result = yan_search_terms(
+        &terms, (const uint8_t *)"hit", 3u, sink, &summary);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        YAN_SEARCH_TERMS_IO, result,
+        "the second-block I/O fault must propagate past the cached first block");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        0u, capture.matches,
+        "a failed preflight must not emit a partial match");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        2u, device_reads, "the failing second block must have been requested");
+    device_read_fail_at = 0u;
+}
+
+/* Two equal-length matches end the scan with the second file's prefix cached.
+ * The first candidate's snippet must still come from its own file; a stale
+ * prefix would return the second file's identical-length body. */
+static void linear_snippet_does_not_consume_a_later_files_prefix(void)
+{
+    fixture_use(small_medium, SMALL_BLOCKS);
+    setup_linear_terms();
+    fixture_create("a.md", (const uint8_t *)"hit A\n", 6u);
+    fixture_create("b.md", (const uint8_t *)"hit B\n", 6u);
+
+    YanSearchTermsSummary summary = run_ok_query_snippets("hit");
+    TEST_ASSERT_EQUAL_UINT64(2u, summary.total);
+    TEST_ASSERT_EQUAL_UINT32(2u, capture.matches);
+    TEST_ASSERT_EQUAL_STRING("a.md", capture.names[0]);
+    TEST_ASSERT_EQUAL_STRING("b.md", capture.names[1]);
+    TEST_ASSERT_EQUAL_UINT32(5u, capture.snippet_length[0]);
+    TEST_ASSERT_EQUAL_UINT32(5u, capture.snippet_length[1]);
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(
+        "hit A", capture.snippet_body[0], 5u,
+        "the first candidate must not consume the last file's cached prefix");
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(
+        "hit B", capture.snippet_body[1], 5u,
+        "the second candidate must not consume a previous candidate's prefix");
 }
 
 static void semantic_search_never_writes_the_medium(void)
@@ -1928,6 +2055,11 @@ int main(void)
     RUN_TEST(semantic_group_score_saturates_above_255);
     RUN_TEST(semantic_slot_holes_keep_directory_order);
     RUN_TEST(semantic_protocol_fault_propagates);
+    RUN_TEST(linear_small_file_query_reads_medium_once);
+    RUN_TEST(linear_cached_nul_at_end_is_skipped_once);
+    RUN_TEST(linear_cached_nul_near_end_is_skipped_once);
+    RUN_TEST(linear_large_file_second_block_io_is_not_hidden);
+    RUN_TEST(linear_snippet_does_not_consume_a_later_files_prefix);
     RUN_TEST(linear_status_busy_is_not_swallowed);
     RUN_TEST(terms_nested_reader_is_busy_without_backend_io);
     RUN_TEST(terms_reader_rejects_overlapping_outputs_unchanged);

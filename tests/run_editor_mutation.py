@@ -77,7 +77,7 @@ BUILD_TIMEOUT = 180
 
 # The whole tree the editor suite needs. Every one is a hard repository input.
 EDITOR_SOURCES = ["tests/test_editor.c", "os/editor.c", "os/yanfs.c"]
-EDITOR_OS = ["editor.h", "editor.c", "yanfs.h", "yanfs.c", "shell.h", "note_relations.h", "note_blocks.h", "note_blocks_format.h", "note_metadata.h", "search.h",
+EDITOR_OS = ["editor.h", "editor.c", "yanfs.h", "yanfs.c", "sort.h", "shell.h", "note_relations.h", "note_blocks.h", "note_blocks_format.h", "note_metadata.h", "search.h",
              "search_terms.h", "note_metadata_format.h", "search_terms_core.h",
              "search_terms_linear.h", "search_terms_index.h"]
 REQUIRED_REPO = (
@@ -379,7 +379,14 @@ def main():
     parser.add_argument("--unity", required=True, type=Path)
     args = parser.parse_args()
 
-    # External first: only the compiler and Unity can skip.
+    source = args.source.resolve()
+    missing = [str(source / rel) for rel in REQUIRED_REPO
+               if not (source / rel).is_file()]
+    if missing:
+        print("FAIL the source/tests under test are missing: %s"
+              % ", ".join(missing), file=sys.stderr)
+        return 1
+    # Missing repository inputs are hard failures, even without external tools.
     if shutil.which(args.cc) is None:
         print("SKIP: external C compiler missing: %s" % args.cc)
         return 77
@@ -388,13 +395,6 @@ def main():
         print("SKIP: external Unity missing under %s/src" % unity)
         return 77
 
-    source = args.source.resolve()
-    missing = [str(source / rel) for rel in REQUIRED_REPO
-               if not (source / rel).is_file()]
-    if missing:
-        print("FAIL the source/tests under test are missing: %s"
-              % ", ".join(missing), file=sys.stderr)
-        return 1
     if _SHARED is None:
         print("FAIL the shared mutation helper tests/run_yanfs_mutation.py is not"
               " importable: %r" % _IMPORT_ERROR, file=sys.stderr)

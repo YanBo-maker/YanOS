@@ -72,13 +72,101 @@ static YanSearchTermsResult linear_map_fs(YanFsResult result)
 typedef struct {
     YanFs *fs;
     const char *name;
+    /* 0036-R8: for a file that fits in the context's header window, the one
+     * medium read that fills this borrowed prefix serves both the whole-file
+     * preflight and the scan (and the snippet when it is still the same file).
+     * The pointer and name are valid only while `name` is unchanged; every new
+     * file either replaces them through linear_reader_prefetch or clears them
+     * before a snippet read. */
+    const uint8_t *prefix;
+    uint32_t prefix_length;
+    char prefix_name[YAN_FS_NAME_MAX + 1u];
 } LinearReader;
+
+static void linear_reader_init(LinearReader *reader, YanFs *fs, const char *name)
+{
+    reader->fs = fs;
+    reader->name = name;
+    reader->prefix = NULL;
+    reader->prefix_length = 0u;
+    reader->prefix_name[0] = '\0';
+}
+
+static void linear_reader_forget_prefix(LinearReader *reader)
+{
+    reader->prefix = NULL;
+    reader->prefix_length = 0u;
+    reader->prefix_name[0] = '\0';
+}
+
+static bool linear_reader_prefix_is(const LinearReader *reader,
+                                    const char *name)
+{
+    if (reader->prefix == NULL || name == NULL) {
+        return false;
+    }
+    uint32_t at = 0u;
+    while (reader->prefix_name[at] != '\0' && name[at] != '\0' &&
+           reader->prefix_name[at] == name[at]) {
+        ++at;
+    }
+    return reader->prefix_name[at] == '\0' && name[at] == '\0';
+}
+
+/* Reads a file that fits the context's header window into `prefix` exactly
+ * once. A larger file leaves the prefix empty, so the shared streaming core
+ * keeps its bounded two-read preflight/scan path. The caller must not have a
+ * live prefix in this reader before the call. */
+static YanSearchTermsResult linear_reader_prefetch(LinearReader *reader,
+                                                   uint8_t *prefix,
+                                                   uint32_t capacity,
+                                                   uint32_t file_size)
+{
+    linear_reader_forget_prefix(reader);
+    if (file_size == 0u || file_size > capacity) {
+        return YAN_SEARCH_TERMS_OK;
+    }
+    uint32_t got = 0u;
+    YanFsResult result =
+        yan_fs_read(reader->fs, reader->name, 0u, prefix, file_size, &got);
+    if (result != YAN_FS_OK) {
+        return linear_map_fs(result);
+    }
+    if (got != file_size) {
+        return YAN_SEARCH_TERMS_PROTOCOL;
+    }
+    /* The directory contract caps a name at 31 bytes, but a listing copied
+     * from a malformed block may not be NUL-terminated. Bound the scan before
+     * trusting the name, so this never reads past the 32-byte field. */
+    uint32_t name_length = 0u;
+    while (name_length <= YAN_FS_NAME_MAX &&
+           reader->name[name_length] != '\0') {
+        ++name_length;
+    }
+    if (name_length > YAN_FS_NAME_MAX) {
+        return YAN_SEARCH_TERMS_PROTOCOL;
+    }
+    memcpy(reader->prefix_name, reader->name, name_length + 1u);
+    reader->prefix = prefix;
+    reader->prefix_length = file_size;
+    return YAN_SEARCH_TERMS_OK;
+}
 
 static YanSearchTermsResult linear_read(void *context, uint32_t offset,
                                         uint32_t capacity, uint8_t *out,
                                         uint32_t *length)
 {
     LinearReader *reader = (LinearReader *)context;
+    /* The core bounds every request by file_size, and the prefix only covers
+     * whole files that fit it, so a fully covered request is exactly the bytes
+     * that would have come from the medium. A partially covered request falls
+     * through to yan_fs_read instead of mixing the two sources. */
+    if (reader->prefix != NULL && offset <= reader->prefix_length &&
+        capacity <= reader->prefix_length - offset) {
+        memcpy(out, reader->prefix + offset, capacity);
+        *length = capacity;
+        return YAN_SEARCH_TERMS_OK;
+    }
     uint32_t got = 0u;
     YanFsResult result =
         yan_fs_read(reader->fs, reader->name, offset, out, capacity, &got);
@@ -129,10 +217,14 @@ static YanSearchTermsResult linear_qualify_file(YanSearchTermsLinear *linear,
                                                 bool *valid)
 {
     LinearReader reader;
-    reader.fs = linear->fs;
-    reader.name = name;
+    linear_reader_init(&reader, linear->fs, name);
+    YanSearchTermsResult result = linear_reader_prefetch(
+        &reader, linear->metadata_prefix, YAN_NOTE_HEADER_MAX, file_size);
+    if (result != YAN_SEARCH_TERMS_OK) {
+        return result;
+    }
     bool skip = false;
-    YanSearchTermsResult result = yan_search_terms_core_preflight(
+    result = yan_search_terms_core_preflight(
         linear_read, &reader, linear->scratch.chunk, YAN_SEARCH_TERMS_CHUNK,
         file_size, &skip);
     if (result != YAN_SEARCH_TERMS_OK) {
@@ -145,11 +237,15 @@ static YanSearchTermsResult linear_qualify_file(YanSearchTermsLinear *linear,
     *valid = true;
     uint32_t want = file_size < YAN_NOTE_HEADER_MAX ? file_size
                                                     : YAN_NOTE_HEADER_MAX;
-    uint32_t got = 0u;
-    YanFsResult read_result =
-        yan_fs_read(linear->fs, name, 0u, linear->metadata_prefix, want, &got);
-    if (read_result != YAN_FS_OK) {
-        return linear_map_fs(read_result);
+    uint32_t got = want;
+    if (reader.prefix_length < want) {
+        got = 0u;
+        YanFsResult read_result =
+            yan_fs_read(linear->fs, name, 0u, linear->metadata_prefix, want,
+                        &got);
+        if (read_result != YAN_FS_OK) {
+            return linear_map_fs(read_result);
+        }
     }
     if (got != want) {
         return YAN_SEARCH_TERMS_PROTOCOL;
@@ -286,8 +382,7 @@ static YanSearchTermsResult linear_query_locked(
     yan_search_terms_rank_init(rank);
 
     LinearReader reader;
-    reader.fs = linear->fs;
-    reader.name = NULL;
+    linear_reader_init(&reader, linear->fs, NULL);
     uint32_t cursor = 0u;
     for (;;) {
         YanFsInfo info;
@@ -316,6 +411,12 @@ static YanSearchTermsResult linear_query_locked(
             }
         }
         reader.name = info.name;
+        result = linear_reader_prefetch(&reader, linear->metadata_prefix,
+                                        YAN_NOTE_HEADER_MAX,
+                                        info.size_bytes);
+        if (result != YAN_SEARCH_TERMS_OK) {
+            return result;
+        }
         result = yan_search_terms_core_scan_file(
             info.name, slot, info.size_bytes, linear_read, &reader, &pattern,
             rank, &linear->scratch);
@@ -329,6 +430,12 @@ static YanSearchTermsResult linear_query_locked(
                          : YAN_SEARCH_TERMS_SHOWN_MAX;
     for (uint32_t i = 0u; i < shown; ++i) {
         YanSearchTermsCandidate *candidate = &rank->candidate[i];
+        /* A snippet is only allowed to reuse the prefix of the file it names.
+         * The scan normally leaves the last file cached; a candidate from any
+         * other file drops that prefix before the read. */
+        if (!linear_reader_prefix_is(&reader, candidate->name)) {
+            linear_reader_forget_prefix(&reader);
+        }
         reader.name = candidate->name;
         const uint8_t *body = NULL;
         uint32_t body_length = 0u;

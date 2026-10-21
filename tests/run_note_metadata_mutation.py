@@ -7,7 +7,7 @@ import sys
 import tempfile
 
 REQUIRED = ("os/note_metadata_format.c", "os/note_metadata_format.h",
-            "os/memory.h", "tests/test_note_metadata_format.c",
+            "os/memory.h", "os/sort.h", "tests/test_note_metadata_format.c",
             "tests/run_yanfs_mutation.py", "tests/run_note_metadata_mutation.py",
             "os/note_metadata.c", "os/note_metadata.h", "os/yanfs.c", "os/yanfs.h",
             "os/search_terms.c", "os/search_terms.h", "os/search_terms_linear.c",

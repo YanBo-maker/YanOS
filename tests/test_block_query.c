@@ -780,9 +780,9 @@ static void test_read_count_and_no_writes(void)
     text_file("note", "@block a\nAAAA");
     adapter_mount();
     TEST_ASSERT_EQUAL_INT(YAN_BLOCK_QUERY_OK, read_fresh("note", "a", 0));
-    /* A mount + digest; service text, prefix and parser passes plus one show
-     * chunk; B mount + digest. No extra whole-file identity pass. */
-    TEST_ASSERT_EQUAL_UINT32(8, reads);
+    /* A mount + digest; one buffered service preflight plus one show chunk;
+     * B mount + digest. Both source observations remain mandatory. */
+    TEST_ASSERT_EQUAL_UINT32(6, reads);
     TEST_ASSERT_EQUAL_UINT32(2, mounts);
     TEST_ASSERT_EQUAL_UINT32(0, writes);
 }

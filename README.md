@@ -12,6 +12,8 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [YanFS](docs/specs/0021-yanfs.md) 已实现并验证格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收。初版采用单根目录、最多 63 文件和连续 extent；覆盖需要新旧内容同时容纳，碎片可能导致 NOSPACE。元数据写失败可能拒挂，不保证断电一致性，不自动修复。实现与验证已完成。
 
+[多块目录](docs/specs/0036-yanfs-multi-block-directory.md)已支持旧 v1 镜像和最多 4095 文件的 v2 镜像，新镜像默认容量为 1023。终端按镜像容量分配服务表；本分支的 R8 优化挂载、名称查找和查询传输，命令与盘上格式保持。Host 语义及 MCP 检索遇到 slot ≥ 63 的已用目录项仍返回 CORRUPT，完整 v2 检索与离线迁移尚待后续阶段。
+
 [Guest 终端文件操作](docs/specs/0022-terminal-file-operations.md) 已实现并验证：独立应用提供 help、ls、stat、cat、create、write、rm 和 exit，使用 UART 中断等待输入，接入已有 YanFS 镜像。create 创建新文件，write 整文件覆盖；单行最多 1023 字节，超长或非法控制字节整行拒绝。cat 保留合法 UTF-8，并转义指定控制字节和非法编码。实现与验证完成。
 
 [多行文本编辑](docs/specs/0023-multiline-text-editor.md) 已实现并验证：edit加载或新建16KiB内存草稿，用行式命令追加、替换、删除和显示，一次保存或取消；保留已有换行格式。
