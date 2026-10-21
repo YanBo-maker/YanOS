@@ -106,7 +106,7 @@ def main():
 
     expected_rows = {
         'links': b'LINK z OK\r\nLINK a OK\r\nOK links shown=2\r\n',
-        'backlinks': b'BACKLINK a\r\nBACKLINK z\r\nOK backlinks shown=2 target=OK\r\n',
+        'backlinks': b'BACKLINK a\r\nBACKLINK z\r\nOK backlinks total=2 shown=2 target=OK\r\n',
         'related': b'RELATED a out=1 in=1 tags=1\r\nRELATED z out=1 in=1 tags=0\r\nOK related total=2 shown=2\r\n',
     }
     for name, rows in expected_rows.items():

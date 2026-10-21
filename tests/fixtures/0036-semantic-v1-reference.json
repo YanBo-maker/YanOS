@@ -1,0 +1,8 @@
+{
+  "reference_commit": "41b83b5",
+  "r4_source_sha256": "ef8269f9217f15f587c7a7154e3a8757e776cbd2c69a72bb3c204618ffd67178",
+  "r6_source_sha256": "7a33bd3a44cc529b54b662d3f0160c128886a93b60d07dfe747bcd5b35f28433",
+  "index_bytes": 8576,
+  "identity_independent_index_sha256": "c4bc1f0821b35417c3e7ca90a63bff9d27e50daa82b1aa74d11844a58b342370",
+  "normalization": "Only header bytes [64,160) (model/runner/config identities) are zeroed; source identity, counts, payload checksum and all record bytes remain exact. Local --baseline-* verification additionally compares complete index bytes."
+}

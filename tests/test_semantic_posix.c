@@ -16,6 +16,7 @@ static YanSemanticPosix adapter;
 static YanSemanticIdentity identity;
 static YanSemanticSource source;
 static YanSemanticStore store;
+static YanSemanticCorpus image_corpus;
 
 static YanFsIoResult cap(void *p, uint64_t *blocks)
 { (void)p; *blocks = 16; return YAN_FS_IO_OK; }
@@ -63,6 +64,7 @@ void setUp(void)
 }
 void tearDown(void)
 {
+    yan_semantic_corpus_release(&image_corpus);
     yan_semantic_posix_cleanup(&adapter);
     unlink(alias); unlink(index_path); unlink(image); unlink(model); unlink(runner);
     rmdir(index_path); rmdir(directory);
@@ -71,6 +73,8 @@ static void test_readonly_source_and_independent_index(void)
 {
     TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, open_adapter());
     yan_semantic_posix_bind(&adapter, &source, &store);
+    TEST_ASSERT_EQUAL_UINT32(63, adapter.fs.entry_capacity);
+    TEST_ASSERT_EQUAL_UINT32(63, source.file_capacity);
     uint32_t cursor = 0; YanSemanticFile file; uint8_t bytes[6];
     TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, source.next(source.context, &cursor, &file));
     TEST_ASSERT_EQUAL_STRING("note", file.name); TEST_ASSERT_EQUAL_UINT32(0, file.slot);
@@ -141,7 +145,6 @@ static void test_one_block_empty_filesystem_is_legal(void)
     TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
     assert_file(image, disk, 4096);
 }
-static YanSemanticCorpus image_corpus;
 static void test_image_only_open_without_dependencies(void)
 {
     TEST_ASSERT_EQUAL_INT(0, unlink(model));
@@ -209,7 +212,7 @@ static void test_image_digest_matches_corpus_scan(void)
     yan_semantic_posix_bind_source(&adapter, &source);
     uint8_t digest[32];
     TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, digest));
-    memset(&image_corpus, 0, sizeof image_corpus);
+    yan_semantic_corpus_release(&image_corpus);
     TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_corpus_scan(&image_corpus, &source));
     TEST_ASSERT_EQUAL_UINT32(1, image_corpus.skipped);
     TEST_ASSERT_EQUAL_MEMORY(image_corpus.source_hash, digest, 32);
@@ -229,11 +232,32 @@ static void test_image_digest_ignores_bad_header(void)
     write_file(image, disk, sizeof disk);
     TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_open_image(&adapter, image));
     yan_semantic_posix_bind_source(&adapter, &source);
-    memset(&image_corpus, 0, sizeof image_corpus);
+    yan_semantic_corpus_release(&image_corpus);
     TEST_ASSERT_EQUAL(YAN_SEMANTIC_METADATA,
                       yan_semantic_corpus_scan(&image_corpus, &source));
     TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, after));
     TEST_ASSERT_NOT_EQUAL(0, memcmp(before, after, 32));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+}
+/* 0036-R6: a bound source reports exactly the mounted image's capacity. A v1
+ * image is 63; a D=2 v2 image is 127. */
+static void test_source_capacity_tracks_mounted_image(void)
+{
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, open_adapter());
+    yan_semantic_posix_bind_source(&adapter, &source);
+    TEST_ASSERT_EQUAL_UINT32(63, adapter.fs.entry_capacity);
+    TEST_ASSERT_EQUAL_UINT32(63, source.file_capacity);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
+
+    TEST_ASSERT_EQUAL(YAN_FS_OK, yan_fs_format_directory(disk, 2u, 16u));
+    write_file(image, disk, sizeof disk);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_open_image(&adapter, image));
+    yan_semantic_posix_bind_source(&adapter, &source);
+    TEST_ASSERT_EQUAL_UINT32(127, adapter.fs.entry_capacity);
+    TEST_ASSERT_EQUAL_UINT32(127, source.file_capacity);
+    yan_semantic_corpus_release(&image_corpus);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_corpus_scan(&image_corpus, &source));
+    TEST_ASSERT_EQUAL_UINT32(0, image_corpus.file_count);
     TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_posix_cleanup(&adapter));
 }
 static void test_cleanup_close_error_and_idempotence(void)
@@ -315,6 +339,7 @@ int main(void)
     RUN_TEST(test_image_open_validation_and_geometry);
     RUN_TEST(test_image_digest_matches_corpus_scan);
     RUN_TEST(test_image_digest_ignores_bad_header);
+    RUN_TEST(test_source_capacity_tracks_mounted_image);
     RUN_TEST(test_cleanup_close_error_and_idempotence);
     RUN_TEST(test_typed_open_reports_unsupported_and_legacy_mapping);
     return UNITY_END();

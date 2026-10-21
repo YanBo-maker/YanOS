@@ -41,10 +41,10 @@ def navigation(args, work):
         ('interrupt',meta.head(b'tag: os',b'tag: riscv',b'link: plic')),
         ('uart',meta.head(b'tag: os')),('memory',meta.head(b'tag: os',b'tag: riscv'))],[
         (b'links plic',b'LINK uart OK\r\nOK links shown=1\r\n'),
-        (b'backlinks plic',b'BACKLINK interrupt\r\nOK backlinks shown=1 target=OK\r\n'),
+        (b'backlinks plic',b'BACKLINK interrupt\r\nOK backlinks total=1 shown=1 target=OK\r\n'),
         (b'related plic',related([('interrupt',0,1,2),('uart',1,0,1),('memory',0,0,2)])),
         (b'links uart',b'OK links shown=0\r\n'),
-        (b'backlinks absent',b'OK backlinks shown=0 target=DANGLING\r\n')])
+        (b'backlinks absent',b'OK backlinks total=0 shown=0 target=DANGLING\r\n')])
 
 
 def missing_and_bad_target(args, work):
@@ -61,8 +61,8 @@ def missing_target_backlinks(args, work):
     run(args,work,'missing-backlinks',[
         ('z',meta.head(b'link: gone')),('A',meta.head(b'link: gone')),
         ('a',meta.head(b'link: Gone')),('self',meta.head(b'link: self'))],[
-        (b'backlinks gone',b'BACKLINK A\r\nBACKLINK z\r\nOK backlinks shown=2 target=DANGLING\r\n'),
-        (b'backlinks self',b'BACKLINK self\r\nOK backlinks shown=1 target=OK\r\n'),
+        (b'backlinks gone',b'BACKLINK A\r\nBACKLINK z\r\nOK backlinks total=2 shown=2 target=DANGLING\r\n'),
+        (b'backlinks self',b'BACKLINK self\r\nOK backlinks total=1 shown=1 target=OK\r\n'),
         (b'related self',related([]))])
 
 
@@ -88,7 +88,7 @@ def opaque_and_exact_tags(args, work):
         (b'links n',b'OK links shown=0\r\n'),
         (b'related n',related([('a',0,0,1)])),
         (b'related binary',related([])),
-        (b'backlinks n',b'OK backlinks shown=0 target=OK\r\n')])
+        (b'backlinks n',b'OK backlinks total=0 shown=0 target=OK\r\n')])
 
 
 def mutations_and_restart(args, work):
@@ -98,7 +98,7 @@ def mutations_and_restart(args, work):
         (b'related n',related([('a',1,1,1)])),
         (b'mv a b',b'OK mv\r\n'),
         (b'links n',b'LINK a DANGLING\r\nOK links shown=1\r\n'),
-        (b'backlinks a',b'BACKLINK n\r\nOK backlinks shown=1 target=DANGLING\r\n'),
+        (b'backlinks a',b'BACKLINK n\r\nOK backlinks total=1 shown=1 target=DANGLING\r\n'),
         (b'related n',related([('b',0,1,1)])),
         (b'cp b c',b'OK cp\r\n'),
         (b'related n',related([('b',0,1,1),('c',0,1,1)])),
@@ -113,14 +113,14 @@ def mutations_and_restart(args, work):
         (b'related n',related([]))],readonly=False)
     run(args,work,'restart',[],[
         (b'links n',b'LINK c DANGLING\r\nOK links shown=1\r\n'),
-        (b'backlinks c',b'BACKLINK n\r\nOK backlinks shown=1 target=DANGLING\r\n'),
+        (b'backlinks c',b'BACKLINK n\r\nOK backlinks total=1 shown=1 target=DANGLING\r\n'),
         (b'related n',related([]))],disk=disk)
 
 
 def grammar(args, work):
     expected=[(cmd,b'ERROR USAGE\r\n') for cmd in (
         b'links',b'links n extra',b'backlinks',b'backlinks ../x',b'related',b'related n extra')]
-    expected += [(b'links absent',b'ERROR NOT_FOUND\r\n'),(b'backlinks absent',b'OK backlinks shown=0 target=DANGLING\r\n')]
+    expected += [(b'links absent',b'ERROR NOT_FOUND\r\n'),(b'backlinks absent',b'OK backlinks total=0 shown=0 target=DANGLING\r\n')]
     run(args,work,'grammar',[('n',b'plain')],expected)
 
 

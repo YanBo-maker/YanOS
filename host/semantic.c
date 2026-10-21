@@ -178,7 +178,8 @@ static const uint8_t yan_semantic_magic[8] = {
     (uint8_t)'E', (uint8_t)'M', (uint8_t)'1', (uint8_t)0
 };
 
-static bool parse_index_header(const uint8_t *header, YanSemanticIndexMeta *meta)
+static bool parse_index_header(const uint8_t *header, YanSemanticIndexMeta *meta,
+                               uint32_t capacity)
 {
     if (memcmp(header, yan_semantic_magic, sizeof yan_semantic_magic) != 0) {
         return false;
@@ -189,8 +190,9 @@ static bool parse_index_header(const uint8_t *header, YanSemanticIndexMeta *meta
     }
     const uint32_t segments = get_u32le(header + 16u);
     const uint32_t skipped = get_u32le(header + 20u);
-    if (segments > YAN_SEMANTIC_SEGMENT_MAX ||
-        skipped > YAN_SEMANTIC_FILE_MAX) {
+    /* 0036-R6: skipped counts ineligible files, so it is bounded by this
+     * mounted image's runtime capacity, not by the v1 constant 63. */
+    if (segments > YAN_SEMANTIC_SEGMENT_MAX || skipped > capacity) {
         return false;
     }
     if (get_u32le(header + 24u) != YAN_SEMANTIC_HEADER_BYTES ||
@@ -313,7 +315,7 @@ static YanSemanticResult read_index(YanSemantic *ctx, YanSemanticIndexMeta *meta
     if (result != YAN_SEMANTIC_OK) {
         goto done;
     }
-    if (!parse_index_header(header, meta)) {
+    if (!parse_index_header(header, meta, ctx->source.file_capacity)) {
         result = YAN_SEMANTIC_CORRUPT;
         goto done;
     }
@@ -731,6 +733,7 @@ cleanup:
     free(raw);
     free(input);
     free(record);
+    yan_semantic_corpus_release(corpus);
     free(corpus);
     return result;
 }
@@ -806,6 +809,7 @@ cleanup:
     }
     free(records);
     free(vectors);
+    yan_semantic_corpus_release(corpus);
     free(corpus);
     if (result != YAN_SEMANTIC_OK) {
         return result;
@@ -1046,6 +1050,7 @@ cleanup:
     free(query_vector);
     free(ranked);
     free(raw);
+    yan_semantic_corpus_release(corpus);
     free(corpus);
     return result;
 }

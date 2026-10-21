@@ -118,7 +118,7 @@ typedef struct {
 
 /* Whole-query summary, valid only when the query returned OK. `total` is a
  * uint64 line count, `shown` is at most 20, `skipped` counts skipped files and
- * is at most 63 for the single-root directory, and `mode` says which path ran.
+ * is at most the mounted directory capacity, and `mode` says which path ran.
  * A cancelled query publishes no summary. */
 typedef struct {
     uint64_t total;

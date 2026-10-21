@@ -686,8 +686,11 @@ static void relation_backlinks_late_bad_header_reserves_everything(void)
 {
     fs_mount_fresh();
     uint32_t length = build_note("link: ghost.txt\n", NULL, 0u);
-    fs_make_file("a.txt", file_content, length);
-    fs_make_file("b.txt", file_content, length);
+    for (uint32_t i = 0u; i < 24u; ++i) {
+        char name[32];
+        (void)snprintf(name, sizeof name, "f%02u.txt", i);
+        fs_make_file(name, file_content, length);
+    }
     length = build_note("kind: note\n", NULL, 0u);
     fs_make_file("z.txt", file_content, length);
     with_service();
@@ -720,15 +723,15 @@ static void relation_backlinks_covers_a_full_directory(void)
         yan_relation_backlinks(&context, "ghost.txt", collect_rows, NULL,
                                &summary),
         "relation_backlinks_full_directory_ok");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(63u, rows_seen_count,
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(20u, rows_seen_count,
                                      "relation_backlinks_full_directory_rows");
     TEST_ASSERT_EQUAL_STRING_MESSAGE("f00.txt", rows_seen[0].name,
                                      "relation_backlinks_full_directory_first");
-    TEST_ASSERT_EQUAL_STRING_MESSAGE("f62.txt", rows_seen[62].name,
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("f19.txt", rows_seen[19].name,
                                      "relation_backlinks_full_directory_last");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(63u, summary.total,
                                      "relation_backlinks_full_directory_total");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(63u, summary.shown,
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(20u, summary.shown,
                                      "relation_backlinks_full_directory_shown");
     TEST_ASSERT_FALSE_MESSAGE(summary.target_exists,
                               "relation_backlinks_full_directory_target_false");

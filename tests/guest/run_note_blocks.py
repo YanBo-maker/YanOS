@@ -47,7 +47,7 @@ def basic_and_old_relations(args, work):
         b'block refs old', b'block backlinks n#a', b'block backlinks absent#x'])
     relation.run(args, work, 'old-relations', list(files.items()), [
         (b'links n', b'LINK s OK\r\nOK links shown=1\r\n'),
-        (b'backlinks s', b'BACKLINK n\r\nOK backlinks shown=1 target=OK\r\n'),
+        (b'backlinks s', b'BACKLINK n\r\nOK backlinks total=1 shown=1 target=OK\r\n'),
         (b'related n', b'RELATED s out=1 in=0 tags=0\r\nOK related total=1 shown=1\r\n')])
 
 
