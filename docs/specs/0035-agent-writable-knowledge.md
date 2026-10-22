@@ -256,3 +256,53 @@ name 沿用 YanFS 名称规则；text 必须满足 0032 的文本资格，长度
 证据入口：`E:/YanOS/build/20261022-dsh-usage/` 中的 `chief-preflight.json`、`consumer-events.jsonl`、`consumer-retry-events.jsonl`、`chief-live-audit.json`、`live-preview.json`、`owner-confirmation.json`、`confirmed-commit-events.jsonl` 与 `persisted-check.json`。准备源码、独立审核及探针在隔离工作树 `build/20261022-dsh-usage/`；Guest 的实际 argv/stdout/stderr/rc 在其 `guest-readback/`。初次失败记录保留，后续重试与确认提交分别记录；没有复活归档实验或新增 Codex 子 Agent。
 
 限制：仅为独立样本库的一次真实确认新建，没有真实问答测验、理解验收、日常个人库迁移、客户端长期稳定性或真实确认覆盖写验收。引用仍按实例各自解析；这次确认不授权 Agent 自动标记已懂或跳过后续写入预览。
+
+
+## VERIFY 执行记录：写工具文档一致性检查（2026-10-22，Issue #61）
+
+本轮验证既有 R2/R9/R10 的文档与真实接口是否一致，没有新增需求或改变工具行为。新增独立纯 Python 检查器 `tests/mcp_write_docs.py`，从[写工具说明](../mcp-write-tools.md)读取两个工具参考段，与真实 `tools/list` 的名称、description、annotations、inputSchema、outputSchema 比较；create 的共享输入结构须有明确引用。对象键序和缩进不影响比较，嵌套字段、数组次序及类型纳入检查，布尔值不与数字相等。缺文档、坏 JSON 或字段不符均失败，不返回 77。
+
+`mcp_note` 在原写工具测试中接入真实进程核对；新检查使用不存在的镜像与依赖路径，只请求工具列表。检查器在 main 执行路径才导入，借用 Server 的学习记录验收不新增文档或 helper 依赖。`mcp_write_docs` 是配置找到 Python 时注册的纯检查器自测，不等同 R2-AC1 的官方 SDK 工具发现验收；后者继续由 `mcp_sdk` 负责。README 与其他用法段落不属于本检查器的覆盖范围，仍由独立文档审核对齐。
+
+总审核先独立采集真实服务的八工具列表，按当前文档逐字段核对两个写工具，基线一致；没有以此冒充新增自动检查已经通过。dsh 编码子任务与独立只读子任务各一，技术与文档统一审核最多两轮；重试复用原会话，不复活旧试用或归档实验。
+
+执行结果均为本轮重新运行，默认命令为 `ctest --test-dir <构建目录> -C <配置> --output-on-failure -j 3`；Linux 省略 `-C`，实际变异命令增加 `-R '_mutation$'`。F1 修补前的三平台默认回归与实际组选取均零失败、零跳过：
+
+| 配置 | 注册 / 本次选择并通过 | CTest 实耗 |
+| --- | --- | --- |
+| Linux Release，tools、semantic/MCP、Guest 与 SDK 开启 | 141 / 141 | 182.42 s |
+| Linux Debug + ASan/UBSan，同上 | 141 / 141 | 259.48 s |
+| Windows MSVC Debug，semantic/MCP 与 Guest 关闭 | 78 / 78 | 195.92 s |
+| Linux Release，实际变异配置 | 159 / 17 | 340.12 s |
+
+Linux 默认集合中的 `mcp_note`、`mcp_sdk`、`mcp_write_docs`、学习联合验收均实际 Passed；Windows 的 `mcp_write_docs` 实际 Passed。最终纯检查器含十八项自测，实际接口比较在原 `mcp_note` 中，不把纯检查器标签当作官方 SDK 的完整 R2-AC1 验收。
+
+总审核另按名复制所需文件，在临时副本运行真实写工具测试：正常接线退出 0，篡改 description、删除文档、删除 helper 分别退出 1；把比较器改为直接通过后，纯检查器负例退出 1。原仓库文件保持。这些是受控接线与检查器负例，不计入十七个既有实际变异组，也不证明所有读者文档已自动检查。
+
+构建目录复用 `build/20261021-learning-loop/chief-release`、`chief-asan`、`chief-windows`、`chief-mutation`，本轮重新配置、构建并生成日志。344 个代码与测试输入在完整回归期间保存哈希；当时修改文件的 mtime 均早于测试启动，完整回归完成后逐项保持。随后 F1 仅修改两个测试模块，其余 342 项逐项保持；最终两个模块另按下述定向检查验收。生产源码没有变化。原所有者修改、既有试用镜像和索引不属于本轮写入对象。
+
+证据入口：`E:/YanOS/build/20261022-mcp-doc-alignment/` 下的 `verified-results.json`、四份 `*-ctest.log`、`*-registration.log`、`frozen-inputs.json`、`chief-controls.json` 与对应原始输出。Windows 首次启动因当前 shell 的 PATH 无 cmake 而在配置前失败，未执行测试；随后使用原缓存指向的 Visual Studio CMake/CTest 绝对路径完成本表回归，未更改全局配置。
+
+独立审核第一轮确认当前文档与实际工具一致，并指出 create 小节若同时保留共享引用与另一份 inputSchema 声明，检查器会忽略后者。总审核将这一项提升为 F1：被检查字段的矛盾声明不能静默通过。原 dsh 编码会话只修补 `tests/mcp_write_docs.py` 和 `tests/test_mcp_write_docs.py`，遇到共享引用外的显式 inputSchema 声明即报歧义；不拒绝无关 JSON 示例，字段和实际 MCP 接口保持。
+
+总审核从修后代码移除该补丁，在私有副本精确还原旧 helper，并核对 SHA-256 等于完整回归时的冻结值。同一矛盾文档与实际工具列表在旧 helper 下误通过，在新 helper 下明确拒绝；正常文档与无关 JSON 示例均仍通过。证据 `post-f1-results.json`。修后只重跑受影响的检查，没有声称完整三平台回归和实际变异在新 helper 上重跑：
+
+| 修后配置 / 范围 | 实际通过 | CTest 实耗 |
+| --- | --- | --- |
+| Linux Release，mcp_note 与 mcp_write_docs | 2/2 | 0.70 s |
+| Linux ASan/UBSan，同上 | 2/2 | 2.64 s |
+| Windows Debug，mcp_write_docs | 1/1 | 0.29 s |
+
+上述检查均无失败或跳过，最终纯自测为十八项。原报告保持；文档派生的纯检查器正控只验证检查器，实际服务由 mcp_note 核对；额外展示字段如 title 不在所定义五字段范围内。这两项为已声明边界，不列作待修产品缺陷。第二轮仅复核 F1 及对应记录，无新完整审查轮次。
+
+审核状态：原独立只读 dsh 完成两轮核对，第二轮仅复核 F1 修补及对应记录，无剩余阻塞项；总审核九项提交前检查完成。
+
+本轮实现提交 `31a88e0`、文档提交 `12f9096` 经所有者明确批准，已推送并创建 [PR #87](https://github.com/YanBo-maker/YanOS/pull/87)，暂以 `codex/0035-dsh-usage` 为 base，仅展示本轮改动。远端 CI 已触发；发布事实更新后按最新精确 head 的实际检查及原始任务日志验收，结果记入 PR 摘要，不使用父 PR #86 或旧 head 的通过结果替代。尚未合入。0035 状态保持 Approved；README、规格索引、决策与既有工具说明约束未扩展。
+
+### PR #85/#86 合入与 PR #87 状态来源（2026-10-22）
+
+项目所有者明确批准按 #85 → #86 → #87 依次合入 main，并保留阶段提交。#85 已按 merge commit 合入（`3377a50`），随后 #86 改以 main 为 base 并合入（`fae32e8`）；两次合入后的文件树分别与已验证的 `30916a6`、`135d272` 完全一致。
+
+#87 已改以 main 为 base。已验证提交 `349896e` 的三项 CI 及原始日志已核对：Linux Debug ASan/UBSan 141/141（835.22 s）、Linux Release 141/141（356.88 s）、Windows Debug 78/78（318.42 s），均无失败或跳过；这是 F1 修补后的完整远端回归，先前本地 F1 前后记录保持原范围。后续提交的检查与合入状态以 [PR #87](https://github.com/YanBo-maker/YanOS/pull/87) 的实时记录为准；以上静态结果仅证明 `349896e`，不证明尚未运行的提交。
+
+上文各次“尚未合入”保留其发布时状态；#85/#86 已完成的合入由本节接续，#87 的当前状态通过该 PR 查阅。此次仅修正父 PR、目标分支及状态来源，不改实现或接口，0035 整体仍为 Approved；阶段合入后按 0034 R7 归档监控通道并保留入口。
