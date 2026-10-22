@@ -736,3 +736,13 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 
 规格 0035-R8 要求放在 `tests/` 的示例学习笔记夹具，2921fed 的树里还没有。各阶段验证明细仍只写在对应规格的 VERIFY 执行记录。
 
+
+
+## 2026-10-22：dsh 真实双库试用前的当前阶段
+
+当前补齐 [0035](specs/0035-agent-writable-knowledge.md) R8 的学习笔记示例与 Host／Guest 联合验收。新建、整文件覆盖、预览和双镜像实例已具备；本阶段把普通笔记中的原文依据、独立学习记录、确认后提交以及重启读回串成可复现流程。五个学习块沿用已批准的约定，测试中的确认与理解状态都是模拟示例，不代表项目所有者已经学会。
+
+R8 的示例与联合验收已实现，本机回归和实际变异检查已完成。独立 dsh 已完成代码核对并提出文档对齐意见，正式文档已按意见修订；验证范围、修订复核和总审核记录见该规格的 VERIFY 执行记录。测试提交 `f93bcfd` 与文档提交 `0aee7d2` 已发布为 [PR #85](https://github.com/YanBo-maker/YanOS/pull/85)，base 为 main；当前精确 head 的远端检查及实际任务日志见该 PR，尚未合入。0035 仍为 Approved，不以 R8 补齐宣称整份规格已交付。
+
+[0036](specs/0036-yanfs-multi-block-directory.md) 的 R1–R3 与 R8 已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 等合入 main（`abbb151`）。R4/R6 的 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81) 和 R7 离线迁移的 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82) 已发布，仍待合入；本阶段从 main 独立开发，不包含这两项待合入的实现。
+

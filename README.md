@@ -207,6 +207,8 @@ stdio server的stdout只含协议，不是交互式命令行。调用方以子�
 
 通用stdio启动参数示例，字段对应SDK的启动配置；不同harness的注册位置由调用方适配，不自动修改全局配置：
 
+dsh 用户可按[双库接入示例](docs/dsh-mcp-quickstart.md)创建专用 profile，连接只读普通库和可写学习库。预览、确认与提交仍遵循下文的写入约定。
+
 ```json
 {
   "command": "/absolute/path/yan_mcp",
