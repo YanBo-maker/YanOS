@@ -722,3 +722,17 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 
 规格 R8 要求放在 `tests/` 的示例学习笔记夹具，2921fed 的树里还没有。各阶段验证明细仍只写在对应规格的 VERIFY 执行记录。
 
+
+
+## 当前阶段
+
+[0036](specs/0036-yanfs-multi-block-directory.md) 已批准（2026-10-20），进行中。PR1（R1+R2，[PR #62](https://github.com/YanBo-maker/YanOS/pull/62)）：`yan_mkfs` 新增 `--files N`（N=64·D−1，D=1..64；N=63 写 v1，N>63 写 version 2 多块目录，D>1 时 `--blocks` 必须大于 D），YanFS 核心能挂载并读写 v1 和 v2。PR2a（[PR #70](https://github.com/YanBo-maker/YanOS/pull/70)）：终端 Guest 改为 probe + arena + `yan_fs_init_directory` 启动；`yan_run` 缺省 RAM 改为 64 MiB，ring 基址 0x83FFC000。PR2b：`--files` 缺省改为 1023；终端与 `note_write`、`semantic_posix` 按镜像的 D/N 从 arena 或 calloc 分配服务表，v1 和任意 N 的 v2 都可挂载，临时 `ERROR CAPACITY` 守卫已删除；语义检索和 MCP 检索工具（经 `host/semantic_corpus.c`）仍只接受 slot < 63 的文件，遇到 slot ≥ 63 的文件返回 CORRUPT，完整支持 v2 要等 0036-R6（PR4）；R3-AC1 的 arena 实测和 R3-AC2 的 32 MiB 预算由 CI 测试覆盖。`yan_run` 的「加载段多于 16 个」拒绝只对导出 arena 符号的 ELF 生效；两个符号都不导出的 ELF 不做该检查，照常运行。R5-AC1 的 5×10⁷ 步数上限保留在 0036（#70 裁定），由 PR2b 之后的 PR3（0036-R8）达标；PR #70 记录的 N=1023 实测步数是 R8 的改动前基线。
+
+0036-R8 的排序、名称索引和传输优化已在本分支实现，新增小文件读取复用；默认回归、sanitizer、Windows、性能及实际变异验证已完成，独立文档对齐和总审核已完成，未合入 main。命令、出处和磁盘格式保持；名称索引工作区的别名拒绝规则已于 2026-10-21 获项目所有者批准。完整 v2 Host 检索仍由 R6（PR4）交付，迁移工具由 R7（PR5）交付。
+
+[0035](specs/0035-agent-writable-knowledge.md) 的规格头仍是 Approved（2026-10-20）。Host 侧镜像旁锁与原子写已随 [PR #52](https://github.com/YanBo-maker/YanOS/pull/52) 合入 main（4af3cfd）。`yanos_note_create`、`yanos_note_replace` 与 `--allow-write` 已随 [PR #55](https://github.com/YanBo-maker/YanOS/pull/55) 合入 main（2921fed）。`serverInfo.version` 为 `0035`（`tools/mcp_protocol.c` 的 `SERVER_INFO`）。
+
+Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `YAN_BUILD_SEMANTIC`，安装 curl、yyjson 和 `mcp==2.3.0`，并在测试前检查 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk` 的注册数为 4。windows-2022 仍只做 Debug，配置步骤不打开 `YAN_BUILD_SEMANTIC`，也不安装 RISC-V 工具链。
+
+规格 0035-R8 要求放在 `tests/` 的示例学习笔记夹具，2921fed 的树里还没有。各阶段验证明细仍只写在对应规格的 VERIFY 执行记录。
+

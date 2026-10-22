@@ -2,15 +2,11 @@
 
 ## 当前阶段
 
-[0036](specs/0036-yanfs-multi-block-directory.md) 已批准（2026-10-20），进行中。PR1（R1+R2，[PR #62](https://github.com/YanBo-maker/YanOS/pull/62)）：`yan_mkfs` 新增 `--files N`（N=64·D−1，D=1..64；N=63 写 v1，N>63 写 version 2 多块目录，D>1 时 `--blocks` 必须大于 D），YanFS 核心能挂载并读写 v1 和 v2。PR2a（[PR #70](https://github.com/YanBo-maker/YanOS/pull/70)）：终端 Guest 改为 probe + arena + `yan_fs_init_directory` 启动；`yan_run` 缺省 RAM 改为 64 MiB，ring 基址 0x83FFC000。PR2b：`--files` 缺省改为 1023；终端与 `note_write`、`semantic_posix` 按镜像的 D/N 从 arena 或 calloc 分配服务表，v1 和任意 N 的 v2 都可挂载，临时 `ERROR CAPACITY` 守卫已删除；语义检索和 MCP 检索工具（经 `host/semantic_corpus.c`）仍只接受 slot < 63 的文件，遇到 slot ≥ 63 的文件返回 CORRUPT，完整支持 v2 要等 0036-R6（PR4）；R3-AC1 的 arena 实测和 R3-AC2 的 32 MiB 预算由 CI 测试覆盖。`yan_run` 的「加载段多于 16 个」拒绝只对导出 arena 符号的 ELF 生效；两个符号都不导出的 ELF 不做该检查，照常运行。R5-AC1 的 5×10⁷ 步数上限保留在 0036（#70 裁定），由 PR2b 之后的 PR3（0036-R8）达标；PR #70 记录的 N=1023 实测步数是 R8 的改动前基线。
+当前补齐 [0035](specs/0035-agent-writable-knowledge.md) R8 的学习笔记示例与 Host／Guest 联合验收。新建、整文件覆盖、预览和双镜像实例已具备；本阶段把普通笔记中的原文依据、独立学习记录、确认后提交以及重启读回串成可复现流程。五个学习块沿用已批准的约定，测试中的确认与理解状态都是模拟示例，不代表项目所有者已经学会。
 
-0036-R8 的排序、名称索引和传输优化已在本分支实现，新增小文件读取复用；默认回归、sanitizer、Windows、性能及实际变异验证已完成，独立文档对齐和总审核已完成，未合入 main。命令、出处和磁盘格式保持；名称索引工作区的别名拒绝规则已于 2026-10-21 获项目所有者批准。完整 v2 Host 检索仍由 R6（PR4）交付，迁移工具由 R7（PR5）交付。
+R8 的示例与联合验收已实现，本机回归和实际变异检查已完成。独立 dsh 已完成代码核对并提出文档对齐意见，正式文档已按意见修订；验证范围、修订复核和总审核记录见该规格的 VERIFY 执行记录。测试提交 `f93bcfd` 与文档提交 `0aee7d2` 已发布为 [PR #85](https://github.com/YanBo-maker/YanOS/pull/85)，base 为 main；当前精确 head 的远端检查及实际任务日志见该 PR，尚未合入。0035 仍为 Approved，不以 R8 补齐宣称整份规格已交付。
 
-[0035](specs/0035-agent-writable-knowledge.md) 的规格头仍是 Approved（2026-10-20）。Host 侧镜像旁锁与原子写已随 [PR #52](https://github.com/YanBo-maker/YanOS/pull/52) 合入 main（4af3cfd）。`yanos_note_create`、`yanos_note_replace` 与 `--allow-write` 已随 [PR #55](https://github.com/YanBo-maker/YanOS/pull/55) 合入 main（2921fed）。`serverInfo.version` 为 `0035`（`tools/mcp_protocol.c` 的 `SERVER_INFO`）。
-
-Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `YAN_BUILD_SEMANTIC`，安装 curl、yyjson 和 `mcp==2.3.0`，并在测试前检查 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk` 的注册数为 4。windows-2022 仍只做 Debug，配置步骤不打开 `YAN_BUILD_SEMANTIC`，也不安装 RISC-V 工具链。
-
-规格 0035-R8 要求放在 `tests/` 的示例学习笔记夹具，2921fed 的树里还没有。各阶段验证明细仍只写在对应规格的 VERIFY 执行记录。
+[0036](specs/0036-yanfs-multi-block-directory.md) 的 R1–R3 与 R8 已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 等合入 main（`abbb151`）。R4/R6 的 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81) 和 R7 离线迁移的 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82) 已发布，仍待合入；本阶段从 main 独立开发，不包含这两项待合入的实现。
 
 ## 已交付能力
 
@@ -59,6 +55,8 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 - CI 不打开 `YAN_ENABLE_MUTATION_TESTS`。默认套件里的 `*_mutation_gate` 纯门禁仍会注册。`guest_console_mutation_gate` 只在变异配置打开时注册（`CMakeLists.txt` 中该门禁与 `YAN_ENABLE_MUTATION_TESTS` 同支）。
 - Linux CI（`.github/workflows/build.yml`，2921fed）打开 `YAN_BUILD_SEMANTIC`，因此会构建 `yan_mcp`。`CMakeLists.txt` 在该开关下注册 `mcp_protocol`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk`、`mcp_faults` 等测试；`mcp_note` 还要求已有 `yan_mcp`、`yan_run`、`yanfs_terminal` 和 `note_read_probe`。workflow 在配置后检查 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk` 四项都已注册。`guest_note_blocks_host` 写在 `if(TARGET yan_mcp)` 里，Linux 打开该开关后满足条件。windows-2022 的配置不传 `YAN_BUILD_SEMANTIC`（默认 OFF），不构建 `yan_mcp`。不依赖该开关的 Host 侧测试仍会注册。`YAN_ENABLE_MUTATION_TESTS` 仍然不打开。
 - 没有 S/U 模式、`medeleg` / `mideleg`、虚拟内存分页和抢占式调度。YanFS 仍是单根目录、连续 extent；v1 最多 63 个文件，v2（0036）最多 4095 个，终端和 Host 工具按容量分配后都可挂载，但语义/MCP 检索在 R6（PR4）之前对 slot ≥ 63 的文件返回 CORRUPT。元数据写失败可能拒挂，不保证断电一致性：v1 一次目录更新是一次块写入，v2 改动块 0 以外的目录项时是两次（先写该块，再写块 0 的 CRC），两次之间断电会让镜像 CRC 不符而被拒挂。
+
+- 学习笔记联合验收只在临时双镜像上模拟人工确认；它核对原文、引用位置、镜像隔离和持久化，不能判断项目所有者是否学会，也不能保证任意 Agent 都遵守确认约束。`guest_learning_note` 在 Linux 工具、semantic/MCP 与 Guest 目标齐备时随默认套件注册；Windows 只运行纯 Python 的 `learning_note_gate`。本阶段远端执行尚待 PR CI。
 
 ## 待定设计
 
