@@ -746,3 +746,14 @@ R8 的示例与联合验收已实现，本机回归和实际变异检查已完�
 
 [0036](specs/0036-yanfs-multi-block-directory.md) 的 R1–R3 与 R8 已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 等合入 main（`abbb151`）。R4/R6 的 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81) 和 R7 离线迁移的 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82) 已发布，仍待合入；本阶段从 main 独立开发，不包含这两项待合入的实现。
 
+
+
+## 2026-10-22：dsh 真实双库试用阶段
+
+
+当前按 [0035](specs/0035-agent-writable-knowledge.md) R8–R11 验证 dsh 的真实双库使用：从普通库检索并读取原文，向学习库预览记录，经闫博确认后提交，再重启 MCP 和通过生产 Guest 终端读回。学习记录保留空的 `known`；保存确认不代表确认学会。
+
+检索、原文读取、预览和确认后的保存均已实测，重启与 Guest 读回和普通库隔离已由总审核核对。初次消费者在预览前异常退出，同一会话唯一一次重试成功；原因未确定，不能据此宣称客户端稳定性已经充分验证。接入说明与执行边界已由原独立只读 dsh 会话核对，总审核已完成本地收口；本轮文档已获准发布为 [PR #86](https://github.com/YanBo-maker/YanOS/pull/86)，暂以 PR #85 分支为 base。最新提交的远端检查与原始日志见该 PR，合入状态单独跟踪。
+
+前一阶段学习笔记联合验收已发布为 [PR #85](https://github.com/YanBo-maker/YanOS/pull/85)，精确 head `30916a6` 的远端检查及原始日志已核对通过，尚未合入；0035 整体仍为 Approved。本分支基于该 head，不包含仍待合入的 [0036](specs/0036-yanfs-multi-block-directory.md) R4/R6（[PR #81](https://github.com/YanBo-maker/YanOS/pull/81)）和 R7（[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)）。执行记录见 0035 的 VERIFY，操作入口见 [dsh 双库接入](dsh-mcp-quickstart.md)。
+

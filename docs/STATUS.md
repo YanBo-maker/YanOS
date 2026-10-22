@@ -2,11 +2,11 @@
 
 ## 当前阶段
 
-当前按 [0035](specs/0035-agent-writable-knowledge.md) R8–R11 验证 dsh 的真实双库使用：从普通库检索并读取原文，向学习库预览记录，经闫博确认后提交，再重启 MCP 和通过生产 Guest 终端读回。学习记录保留空的 `known`；保存确认不代表确认学会。
+当前推进 [Issue #61](https://github.com/YanBo-maker/YanOS/issues/61)：为 [0035](specs/0035-agent-writable-knowledge.md) 写工具参考增加自动核对，比较实际 MCP 工具列表与文档的参数、返回结构、注解和说明文字。新检查放在独立测试模块，既有测试只负责调用；生产工具、磁盘格式及 MCP 参数保持。
 
-检索、原文读取、预览和确认后的保存均已实测，重启与 Guest 读回和普通库隔离已由总审核核对。初次消费者在预览前异常退出，同一会话唯一一次重试成功；原因未确定，不能据此宣称客户端稳定性已经充分验证。接入说明与执行边界已由原独立只读 dsh 会话核对，总审核已完成本地收口；本轮文档已获准发布为 [PR #86](https://github.com/YanBo-maker/YanOS/pull/86)，暂以 PR #85 分支为 base。最新提交的远端检查与原始日志见该 PR，合入状态单独跟踪。
+上一阶段 dsh 真实双库试用已发布为 [PR #86](https://github.com/YanBo-maker/YanOS/pull/86)，精确 head `135d272` 的远端检查与原始日志已核对通过。该 PR 与父 [PR #85](https://github.com/YanBo-maker/YanOS/pull/85) 尚未合入；本分支基于该 head。0035 整体仍为 Approved，实际检索、确认保存与读回的范围见 VERIFY，使用入口见 [dsh 双库接入](dsh-mcp-quickstart.md)。
 
-前一阶段学习笔记联合验收已发布为 [PR #85](https://github.com/YanBo-maker/YanOS/pull/85)，精确 head `30916a6` 的远端检查及原始日志已核对通过，尚未合入；0035 整体仍为 Approved。本分支基于该 head，不包含仍待合入的 [0036](specs/0036-yanfs-multi-block-directory.md) R4/R6（[PR #81](https://github.com/YanBo-maker/YanOS/pull/81)）和 R7（[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)）。执行记录见 0035 的 VERIFY，操作入口见 [dsh 双库接入](dsh-mcp-quickstart.md)。
+本轮本地实现与验证已完成，原独立只读 dsh 与总审核完成对齐；本阶段尚未发布。验证和审核状态记录在 0035 VERIFY。[0036](specs/0036-yanfs-multi-block-directory.md) R4/R6（[PR #81](https://github.com/YanBo-maker/YanOS/pull/81)）及 R7（[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)）仍待合入，本分支不含这些阶段。
 
 ## 已交付能力
 
@@ -46,7 +46,11 @@
 - 0035 镜像旁锁、原子写，以及 MCP 写工具 `yanos_note_create` / `yanos_note_replace`。[0035](specs/0035-agent-writable-knowledge.md)，[PR #52](https://github.com/YanBo-maker/YanOS/pull/52)（4af3cfd）、[PR #55](https://github.com/YanBo-maker/YanOS/pull/55)（2921fed）
 - 0035 dsh 双库真实试用已在独立样本镜像完成，经确认保存记录并由重启 MCP 与生产 Guest 读回；接入文档已完成独立对齐。[接入说明](dsh-mcp-quickstart.md)
 
+- 0035 写工具参考已接入自动核对：真实工具列表比较与纯检查器自测分别运行；本轮本地验证完成，发布另行跟踪。[工具说明](mcp-write-tools.md)
+
 ## 覆盖边界与已知限制
+
+- 写工具文档核对只覆盖 `mcp-write-tools.md` 的两个工具参考段；Linux 的 `mcp_note` 比较实际工具列表，纯 Python 的 `mcp_write_docs` 在配置找到 Python 时注册，Windows 也运行。README、STATUS 与其余用法段落仍需独立文档审核。
 
 - CI 矩阵与失败条件见 `.github/workflows/build.yml`：ubuntu-22.04 Debug+ASan、ubuntu-22.04 Release 安装 `gcc-riscv64-linux-gnu` 并打开 `YAN_BUILD_TOOLS`；工具链缺失、Guest 测试未注册、或日志中有 `(Skipped)` 时 Linux 任务失败。windows-2022 Debug 不装该工具链，也不跑 Guest 测试。
 - 外部验证层仍不在 CI：NEMU 差分（`difftest_*`）、官方 riscv-tests、Sail 签名、ACT4。依赖缺失时这些测试不注册，或按原脚本返回 SKIP，不记为通过。历史测量在归档的「外部验证层」。
