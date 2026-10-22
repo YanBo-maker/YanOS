@@ -251,7 +251,7 @@ name 沿用 YanFS 名称规则；text 必须满足 0032 的文本资格，长度
 - 总审核在当前会话提供完整正文与差异，闫博明确回答“确认保存这份试用记录（推荐）”。总审核将这条真实确认转交原 dsh 会话，用预览的同一 name、text 和 source 提交一次；不是夹具模拟，不是对“已学会”的确认。提交退出 0，工具报告 `note_create`、470 字节、新来源 `89b24c1653d53690e6339f36770cf50ba6b225535b365dcf8713bec7c38f2532`；随后读回五块，`known` 仍为空。
 - 关闭该进程后，总审核另启只读官方 SDK 会话，核对五块全文、来源和学习库断链状态，再用生产 `yan_run`、`yanfs_terminal.elf` 对同一学习镜像执行列块、cat 和 show log，并断言 `yanfs: exit` 与退出 0。新 SDK 读回耗时 0.656 s，Guest 读回 0.111 s。磁盘中的完整笔记逐字节等于已确认预览；Guest 查询前后镜像相同，普通镜像和原索引始终不变。
 
-本轮没有重新声称默认回归或实际变异通过；它们仍属于上节 R8 的既有提交与对应 CI。PR #85 精确 head `30916a6` 的三项原始任务日志已经总审核核对通过（运行 `39596620235`）；本轮接入文档尚未推送或运行远端 CI，不能把前一 head 的结果算作这些文档的 CI。
+本轮没有重新声称默认回归或实际变异通过；它们仍属于上节 R8 的既有提交与对应 CI。PR #85 精确 head `30916a6` 的三项原始任务日志已经总审核核对通过（运行 `39596620235`）；本轮接入文档提交 `a532995` 经所有者明确批准，已推送并创建 [PR #86](https://github.com/YanBo-maker/YanOS/pull/86)，暂以 `codex/0035-learning-loop` 为 base，仅展示本轮文档。该 PR 已触发远端 CI；发布事实更新后核对最新精确 head 的三项检查与原始任务日志，并在 PR 摘要记录，不把父阶段或旧 head 结果算作最新结果。尚未合入，0035 整体仍为 Approved。
 
 证据入口：`E:/YanOS/build/20261022-dsh-usage/` 中的 `chief-preflight.json`、`consumer-events.jsonl`、`consumer-retry-events.jsonl`、`chief-live-audit.json`、`live-preview.json`、`owner-confirmation.json`、`confirmed-commit-events.jsonl` 与 `persisted-check.json`。准备源码、独立审核及探针在隔离工作树 `build/20261022-dsh-usage/`；Guest 的实际 argv/stdout/stderr/rc 在其 `guest-readback/`。初次失败记录保留，后续重试与确认提交分别记录；没有复活归档实验或新增 Codex 子 Agent。
 
