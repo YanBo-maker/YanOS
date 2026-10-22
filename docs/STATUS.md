@@ -2,11 +2,11 @@
 
 ## 当前阶段
 
-当前推进 [Issue #61](https://github.com/YanBo-maker/YanOS/issues/61)：为 [0035](specs/0035-agent-writable-knowledge.md) 写工具参考增加自动核对，比较实际 MCP 工具列表与文档的参数、返回结构、注解和说明文字。新检查放在独立测试模块，既有测试只负责调用；生产工具、磁盘格式及 MCP 参数保持。
+本阶段为 [Issue #61](https://github.com/YanBo-maker/YanOS/issues/61)：为 [0035](specs/0035-agent-writable-knowledge.md) 写工具参考增加自动核对，比较实际 MCP 工具列表与文档的参数、返回结构、注解和说明文字。新检查放在独立测试模块，既有测试只负责调用；生产工具、磁盘格式及 MCP 参数保持。
 
-上一阶段 dsh 真实双库试用已发布为 [PR #86](https://github.com/YanBo-maker/YanOS/pull/86)，精确 head `135d272` 的远端检查与原始日志已核对通过。该 PR 与父 [PR #85](https://github.com/YanBo-maker/YanOS/pull/85) 尚未合入；本分支基于该 head。0035 整体仍为 Approved，实际检索、确认保存与读回的范围见 VERIFY，使用入口见 [dsh 双库接入](dsh-mcp-quickstart.md)。
+学习记录联合验收 [PR #85](https://github.com/YanBo-maker/YanOS/pull/85) 与 dsh 真实双库试用 [PR #86](https://github.com/YanBo-maker/YanOS/pull/86) 已于 2026-10-22 按 merge commit 合入 main（`3377a50`、`fae32e8`），阶段历史保留。两项精确 head 的远端检查与原始日志均已核对。0035 整体仍为 Approved，实际检索、确认保存与读回的范围见 VERIFY，使用入口见 [dsh 双库接入](dsh-mcp-quickstart.md)。
 
-本轮本地实现与验证已完成，原独立只读 dsh 与总审核完成对齐；本阶段已获准发布为 [PR #87](https://github.com/YanBo-maker/YanOS/pull/87)，暂以 PR #86 分支为 base。最新精确 head 的远端检查与原始日志见该 PR，合入状态单独跟踪。验证和审核状态记录在 0035 VERIFY。[0036](specs/0036-yanfs-multi-block-directory.md) R4/R6（[PR #81](https://github.com/YanBo-maker/YanOS/pull/81)）及 R7（[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)）仍待合入，本分支不含这些阶段。
+本轮实现、验证与独立审核已完成，对应 [PR #87](https://github.com/YanBo-maker/YanOS/pull/87) 已改以 main 为 base；原独立只读 dsh 与总审核负责对齐。本阶段的检查、原始日志与合入状态以该 PR 的实时记录为准。验证和审核状态记录在 0035 VERIFY。[0036](specs/0036-yanfs-multi-block-directory.md) R4/R6（[PR #81](https://github.com/YanBo-maker/YanOS/pull/81)）及 R7（[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)）仍待合入，本分支不含这些阶段。
 
 ## 已交付能力
 
