@@ -489,6 +489,24 @@ def test_r11(server, root):
         wire.close()
 
 
+def test_write_tool_docs(docs, server, root):
+    """issue61 / 0035 R2/R9 documentation alignment against real tools/list."""
+    global CASES
+    wire = Server(server, root / "docs.img", allow_write=True)
+    try:
+        wire.ident += 1
+        wire.wire.send("tools/list", ident=wire.ident)
+        reply = wire.wire.get()
+        assert reply["id"] == wire.ident, "typed id"
+        result = reply["result"]
+        assert isinstance(result, dict) and isinstance(result.get("tools"), list), \
+            ("tools/list result", result)
+        docs.compare_tools(result["tools"])
+        CASES += 1
+    finally:
+        wire.close()
+
+
 def main():
     if len(sys.argv) != 6:
         print("usage: mcp_note_checks.py YAN_MCP YAN_RUN GUEST_ELF "
@@ -499,8 +517,14 @@ def main():
     for path in (server, yan_run, guest_elf, probe_path, fault_lib):
         if not path.is_file():
             raise RuntimeError("FAIL fixture missing: " + str(path))
+    import mcp_write_docs
     with tempfile.TemporaryDirectory(prefix="yan-mcp-note-") as directory:
         root = Path(directory)
+        try:
+            test_write_tool_docs(mcp_write_docs, server, root)
+        except mcp_write_docs.DocsError as error:
+            print("FAIL write-tool documentation: %s" % error, file=sys.stderr)
+            return 1
         test_r3(server, root, probe_path)
         test_r4(server, root, probe_path)
         source = test_r10(server, root)

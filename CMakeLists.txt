@@ -874,6 +874,16 @@ if(BUILD_TESTING)
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_learning_note_gate.py")
         set_tests_properties(learning_note_gate PROPERTIES TIMEOUT 60
                              LABELS "0035-R10-AC2")
+        # issue61 / 0035 R2/R9 documentation alignment: the public write-tool
+        # document is compared with actual tools/list fields by an independent
+        # pure-Python checker, so every platform with Python can verify the
+        # checker's own controls. This supports the existing ACs; mcp_sdk
+        # remains the official-SDK acceptance for 0035-R2-AC1.
+        add_test(NAME mcp_write_docs
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mcp_write_docs.py")
+        set_tests_properties(mcp_write_docs PROPERTIES TIMEOUT 60
+                             LABELS "issue61;0035-doc-alignment")
         add_test(NAME note_blocks_mutation_gate
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_blocks_mutation_gate.py")
