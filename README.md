@@ -12,7 +12,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [YanFS](docs/specs/0021-yanfs.md) 已实现并验证格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收。初版采用单根目录、最多 63 文件和连续 extent；覆盖需要新旧内容同时容纳，碎片可能导致 NOSPACE。元数据写失败可能拒挂，不保证断电一致性，不自动修复。实现与验证已完成。
 
-[多块目录](docs/specs/0036-yanfs-multi-block-directory.md)已支持旧 v1 镜像和最多 4095 文件的 v2 镜像，新镜像默认容量为 1023。终端按镜像容量分配服务表；R8 的挂载、名称查找和查询传输优化已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 合入 main。本分支的 R4/R6 已将 Host 语义语料及 MCP 检索改为按镜像容量处理，正在完成验收；旧索引格式与来源身份保持，离线迁移留待 R7。
+[多块目录](docs/specs/0036-yanfs-multi-block-directory.md)已支持旧 v1 镜像和最多 4095 文件的 v2 镜像，新镜像默认容量为 1023。终端按镜像容量分配服务表；R8 的挂载、名称查找和查询传输优化已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 合入 main。本分支的 R4/R6 已将 Host 语义语料及 MCP 检索改为按镜像容量处理，正在与当前 main 整合验证；旧索引格式与来源身份保持，离线迁移留待 R7。
 
 [Guest 终端文件操作](docs/specs/0022-terminal-file-operations.md) 已实现并验证：独立应用提供 help、ls、stat、cat、create、write、rm 和 exit，使用 UART 中断等待输入，接入已有 YanFS 镜像。create 创建新文件，write 整文件覆盖；单行最多 1023 字节，超长或非法控制字节整行拒绝。cat 保留合法 UTF-8，并转义指定控制字节和非法编码。实现与验证完成。
 
@@ -207,6 +207,8 @@ stdio server的stdout只含协议，不是交互式命令行。调用方以子�
 
 通用stdio启动参数示例，字段对应SDK的启动配置；不同harness的注册位置由调用方适配，不自动修改全局配置：
 
+dsh 用户可按[双库接入示例](docs/dsh-mcp-quickstart.md)创建专用 profile，连接只读普通库和可写学习库。预览、确认与提交仍遵循下文的写入约定。
+
 ```json
 {
   "command": "/absolute/path/yan_mcp",
@@ -269,6 +271,16 @@ build/semantic/yan_mcp --allow-write \
 提交前先把 `dry_run` 设为 true。预览给出当前整库身份 `source_sha256`、将写入的 `text` 和行差异 `diff`。Agent 可以出题、核对、写 `log` 和 `unknown`，把条目移入 `known` 必须在同一会话里得到闫博明确确认。提交前，把预览的 `text` 和 `diff` 展示给闫博，在同一会话里得到明确确认后，才用同一 name、同一 text、预览返回的身份提交。学习与理解程度仍由项目所有者判断。
 
 学习笔记只放在学习镜像。正文用固定 ID 的五个具名块：`criteria`（学会标准，每条一行、可检查）、`known`（闫博确认已懂）、`unknown`（已知不懂）、`untouched`（还没碰过）、`log`（每次核对的日期、题目、回答要点、被指出的问题和 `[[NAME#ID]]` 原文出处）。写工具不检查这五个块是否齐全。
+
+[学习笔记示例](tests/learning-note/learning-note.md) 与[更新后的示例](tests/learning-note/learning-note-updated.md) 演示了五块格式、追加核对记录以及经模拟确认把一项从 `unknown` 移到 `known`。它们都是测试夹具，不代表闫博的真实理解。[原文夹具](tests/learning-note/notes/) 属于普通笔记库；在学习实例查这些引用会显示 `DANGLING_FILE`，调用方要到普通实例读取相应块，工具不会自动跨库解析。
+
+Linux/WSL 配置开启 `YAN_BUILD_TOOLS`、`YAN_BUILD_SEMANTIC`、`BUILD_TESTING` 且找到 RISC-V 交叉编译器后，[联合验收](tests/guest/run_learning_note.py) 随默认测试注册为 `guest_learning_note`。它通过真实 MCP 预览和提交两次，再重启 MCP、用生产 Guest 终端读回同一镜像，并核对普通笔记库没有变化。可在构建完成后单独运行：
+
+```sh
+ctest --test-dir build/semantic --no-tests=error -R '^guest_learning_note$' --output-on-failure
+```
+
+验收脚本只在临时测试镜像中模拟确认，不会记录或判断真实用户的学习状态。
 
 镜像旁边有 `<realpath(镜像)>.lock`。`yan_run --disk-image` 从启动到退出持有它；写工具在一次调用期间持有它，返回时放开。文件创建后留在原地，生产代码不删除。目录里还没有这个文件时，第一次 `dry_run` 也会创建它。拿不到锁时写工具返回 `{"code":"BUSY"}`，`yan_run` 打印锁冲突并以退出码 5 结束。等到持锁进程结束再试，不要删除锁文件。
 

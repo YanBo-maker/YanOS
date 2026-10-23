@@ -1,0 +1,5 @@
+@yan-note 1
+title: PLIC（普通笔记夹具）
+@end
+@block claim
+claim 读取返回待处理的中断源；处理完成后写 completion。
