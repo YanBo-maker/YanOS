@@ -392,15 +392,23 @@ def case_r4_ac1(args, work, fixture, image):
 
 def case_r4_ac3(args, work, image):
     commands = [b"block backlinks a.txt#x", b"backlinks a.txt"]
+    expected = [b"n%04d.txt" % i for i in range(20)]
     result = guest(args, work, image, commands, "r4-ac3")
     text, _ = interval(result, commands[0], "r4-ac3")
     rows = [line for line in text.split(b"\r\n") if line.startswith(b"BACKLINK ")]
     require(len(rows) == 20, "block backlinks displayed %d rows" % len(rows))
+    block_names = [row.split(b"source=", 1)[-1].split(b" ", 1)[0]
+                   for row in rows]
+    require(block_names == expected,
+            "block backlinks are not the ASCII-first 20: %r" % block_names)
     require(b"OK block backlinks total=1000 shown=20 skipped=0 target=OK" in text,
             "block backlinks total/shown differs: %r" % text[-120:])
     text, _ = interval(result, commands[1], "r4-ac3")
     rows = [line for line in text.split(b"\r\n") if line.startswith(b"BACKLINK ")]
     require(len(rows) == 20, "backlinks displayed %d rows" % len(rows))
+    file_names = [row[len(b"BACKLINK "):] for row in rows]
+    require(file_names == expected,
+            "backlinks are not the ASCII-first 20: %r" % file_names)
     match = re.search(rb"OK backlinks(?: total=(\d+))? shown=(\d+) "
                       rb"target=OK\r\n", text)
     require(match is not None, "backlinks receipt is malformed: %r"
@@ -409,7 +417,9 @@ def case_r4_ac3(args, work, image):
             "backlinks total is not 1000: %r" % text[-120:])
     require(match.group(2) == b"20",
             "backlinks shown is not 20: %r" % text[-120:])
-    return {"total": 1000, "shown": 20}
+    return {"total": 1000, "shown": 20,
+            "file_names": [name.decode("ascii") for name in file_names],
+            "block_names": [name.decode("ascii") for name in block_names]}
 
 
 def case_r4_ac2(args, work, fixture, ac1_image):
