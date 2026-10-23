@@ -126,6 +126,16 @@ class Lifecycle(unittest.TestCase):
                 return None
             time.sleep(.01)
 
+    def first_observer_hold(self, pid):
+        deadline = time.monotonic()+8
+        while True:
+            for line in self.observer_lines():
+                if len(line) == 2 and line[0] == 'hold' and int(line[1]) == pid:
+                    return
+            if time.monotonic() >= deadline:
+                raise RuntimeError('harness timeout waiting for block worker hold')
+            time.sleep(.01)
+
     def reply_code(self, reply):
         return json.loads(reply['result']['content'][0]['text'])
 
@@ -201,6 +211,7 @@ class Lifecycle(unittest.TestCase):
                        params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
         pid = self.first_observer_fork()
         self.assertIsNotNone(pid, 'block_worker_fork_observed')
+        self.first_observer_hold(pid)
         self.wire.send('tools/call', ident=8,
                        params={'name': 'yanos_block_list', 'arguments': {'name': 'blocks'}})
         r = self.wire.get()

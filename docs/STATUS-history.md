@@ -780,3 +780,28 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 
 本轮实现、验证与独立审核已完成，对应 [PR #87](https://github.com/YanBo-maker/YanOS/pull/87) 已改以 main 为 base；原独立只读 dsh 与总审核负责对齐。本阶段的检查、原始日志与合入状态以该 PR 的实时记录为准。验证和审核状态记录在 0035 VERIFY。[0036](specs/0036-yanfs-multi-block-directory.md) R4/R6（[PR #81](https://github.com/YanBo-maker/YanOS/pull/81)）及 R7（[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)）仍待合入，本分支不含这些阶段。
 
+
+
+
+## 2026-10-21 R4/R6 本机审核完成时的当前阶段（原文追加）
+
+[0036](specs/0036-yanfs-multi-block-directory.md) 进行中。多块目录、按容量分配服务表及默认 1023 文件镜像已随 [PR #62](https://github.com/YanBo-maker/YanOS/pull/62)、[PR #70](https://github.com/YanBo-maker/YanOS/pull/70)、[PR #76](https://github.com/YanBo-maker/YanOS/pull/76) 合入 main。R8 的排序、名称索引、传输与小文件读取优化已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 合入（`abbb151`）；命令、出处和磁盘格式保持。
+
+当前推进已批准的 R4＋R6，基线为 `abbb151`。本分支已将 Host 语义语料和 MCP 检索改为按镜像容量工作，普通 backlinks 改为前 20 项及完整 total；完整回归、实际变异和固定真实模型高槽位验证已通过，独立对齐与总审核已完成，尚未合入 main。终端、Host CLI 和 MCP 的大容量验收按 R4/R6 执行；R7 离线迁移留在后续阶段。0036 整体仍为 Approved。
+
+[0035](specs/0035-agent-writable-knowledge.md) 的规格头仍是 Approved（2026-10-20）。Host 侧镜像旁锁与原子写已随 [PR #52](https://github.com/YanBo-maker/YanOS/pull/52) 合入 main（4af3cfd）。`yanos_note_create`、`yanos_note_replace` 与 `--allow-write` 已随 [PR #55](https://github.com/YanBo-maker/YanOS/pull/55) 合入 main（2921fed）。`serverInfo.version` 为 `0035`（`tools/mcp_protocol.c` 的 `SERVER_INFO`）。
+
+Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `YAN_BUILD_SEMANTIC`，安装 curl、yyjson 和 `mcp==2.3.0`，并在测试前检查 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk` 的注册数为 4。windows-2022 仍只做 Debug，配置步骤不打开 `YAN_BUILD_SEMANTIC`，也不安装 RISC-V 工具链。
+
+规格 0035-R8 要求放在 `tests/` 的示例学习笔记夹具，2921fed 的树里还没有。各阶段验证明细仍只写在对应规格的 VERIFY 执行记录。
+
+
+
+## 当前阶段
+
+当前整合 [0036](specs/0036-yanfs-multi-block-directory.md) R4/R6 大容量检索：将 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81) 的已实现能力与 main `0948b94` 合并，核对终端、Host 与 MCP 按镜像实际容量工作。文件名、磁盘格式、出处身份、原有 MCP 参数和语义分段上限保持。
+
+主线已具备 [0035](specs/0035-agent-writable-knowledge.md) 学习记录联合验收、dsh 双库真实试用和写工具文档自动核对；[PR #85](https://github.com/YanBo-maker/YanOS/pull/85)、[PR #86](https://github.com/YanBo-maker/YanOS/pull/86)、[PR #87](https://github.com/YanBo-maker/YanOS/pull/87) 已合入，其精确提交的检查与原始日志已核对。接入入口见 [dsh 双库接入](dsh-mcp-quickstart.md)。
+
+本轮本地整合回归与独立对齐已完成，具体范围见 0036 VERIFY；本次整合的发布、远端检查和合入状态统一以 PR #81 的实际记录为准，不把旧 head 的 CI 作为新树的通过证据。R7 离线迁移仍在后续 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82)；0035、0036 整体状态仍为 Approved。
+

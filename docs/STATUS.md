@@ -2,11 +2,11 @@
 
 ## 当前阶段
 
-当前整合 [0036](specs/0036-yanfs-multi-block-directory.md) R4/R6 大容量检索：将 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81) 的已实现能力与 main `0948b94` 合并，核对终端、Host 与 MCP 按镜像实际容量工作。文件名、磁盘格式、出处身份、原有 MCP 参数和语义分段上限保持。
+当前整合 [0036](specs/0036-yanfs-multi-block-directory.md) R7 离线迁移：将 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82) 的原实现与已验证的父分支 `f10516e` 合并，核对迁移、附件清理、来源身份与当前检索、学习记录功能共同工作。旧镜像只读，目录槽号、名称和内容保持，盘上语义索引复用，内存词项索引重建后比较结果。
 
-主线已具备 [0035](specs/0035-agent-writable-knowledge.md) 学习记录联合验收、dsh 双库真实试用和写工具文档自动核对；[PR #85](https://github.com/YanBo-maker/YanOS/pull/85)、[PR #86](https://github.com/YanBo-maker/YanOS/pull/86)、[PR #87](https://github.com/YanBo-maker/YanOS/pull/87) 已合入，其精确提交的检查与原始日志已核对。接入入口见 [dsh 双库接入](dsh-mcp-quickstart.md)。
+主线已具备 [0035](specs/0035-agent-writable-knowledge.md) 学习记录联合验收、dsh 双库真实试用和写工具文档自动核对，接入见 [dsh 双库接入](dsh-mcp-quickstart.md)。大容量检索已完成整合并发布为 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81)，精确 head 的远端检查已通过，尚未合入 main。
 
-本轮本地整合回归与独立对齐已完成，具体范围见 0036 VERIFY；本次整合的发布、远端检查和合入状态统一以 PR #81 的实际记录为准，不把旧 head 的 CI 作为新树的通过证据。R7 离线迁移仍在后续 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82)；0035、0036 整体状态仍为 Approved。
+本地整合与验证已完成，补齐迁移旁锁保留和索引不改写断言，并修复测试夹具的 PID 发布与子进程就绪竞态；生产接口保持。独立对齐和总审状态见 0036 VERIFY。本轮更新尚未发布，不沿用旧 head 的 CI 结论；发布、远端检查和合入状态统一以 PR #82 为准。0035、0036 整体保持 Approved。
 
 ## 已交付能力
 
@@ -48,7 +48,9 @@
 
 - 0035 写工具参考自动核对已随 [PR #87](https://github.com/YanBo-maker/YanOS/pull/87) 合入 main：真实工具列表比较与纯检查器自测分别运行。[工具说明](mcp-write-tools.md)
 
-- 0036 多块目录与容量分配（R1–R3）、查询性能优化（R8）已在 main；R4/R6 大容量终端、Host 和 MCP 检索已实现并完成本轮本地整合验证。[0036](specs/0036-yanfs-multi-block-directory.md)，[PR #81](https://github.com/YanBo-maker/YanOS/pull/81)
+- 0036 多块目录与容量分配（R1–R3）、查询性能优化（R8）已在 main；R4/R6 大容量终端、Host 和 MCP 检索已实现并完成整合验证。[0036](specs/0036-yanfs-multi-block-directory.md)，[PR #81](https://github.com/YanBo-maker/YanOS/pull/81)
+
+- 0036 R7 离线迁移已实现并完成本地整合验证；可复制镜像和附件，保留槽号与库身份。[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)
 
 ## 覆盖边界与已知限制
 
@@ -61,7 +63,7 @@
 - `tests/official/run_act4.sh` 在 Sail 与 DUT 都没有签名时把用例记为 skipped；结束条件仍是 differed 为 0 且 matched 大于 0。跳过数大于 0 本身不使脚本失败。
 - CI 不打开 `YAN_ENABLE_MUTATION_TESTS`。默认套件里的 `*_mutation_gate` 纯门禁仍会注册。`guest_console_mutation_gate` 只在变异配置打开时注册（`CMakeLists.txt` 中该门禁与 `YAN_ENABLE_MUTATION_TESTS` 同支）。
 - Linux CI（`.github/workflows/build.yml`，2921fed）打开 `YAN_BUILD_SEMANTIC`，因此会构建 `yan_mcp`。`CMakeLists.txt` 在该开关下注册 `mcp_protocol`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk`、`mcp_faults` 等测试；`mcp_note` 还要求已有 `yan_mcp`、`yan_run`、`yanfs_terminal` 和 `note_read_probe`。workflow 在配置后检查 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk` 四项都已注册。`guest_note_blocks_host` 写在 `if(TARGET yan_mcp)` 里，Linux 打开该开关后满足条件。windows-2022 的配置不传 `YAN_BUILD_SEMANTIC`（默认 OFF），不构建 `yan_mcp`。不依赖该开关的 Host 侧测试仍会注册。`YAN_ENABLE_MUTATION_TESTS` 仍然不打开。
-- 没有 S/U 模式、`medeleg` / `mideleg`、虚拟内存分页和抢占式调度。YanFS 仍是单根目录、连续 extent；v1 最多 63 个文件，v2（0036）最多 4095 个。本分支的终端与 Host/MCP 检索按实际容量工作，Host 语义索引仍受 8192 段上限约束；R4/R6 尚未合入。元数据写失败可能拒挂，不保证断电一致性：v1 一次目录更新是一次块写入，v2 改动块 0 以外的目录项时是两次（先写该块，再写块 0 的 CRC），两次之间断电会让镜像 CRC 不符而被拒挂。
+- 没有 S/U 模式、`medeleg` / `mideleg`、虚拟内存分页和抢占式调度。YanFS 仍是单根目录、连续 extent；v1 最多 63 个文件，v2（0036）最多 4095 个。本分支的终端与 Host/MCP 检索按实际容量工作，Host 语义索引仍受 8192 段上限约束；R4/R6 尚未合入。R7 迁移要求源镜像及附件离线稳定，只接受普通附件文件和目录；清理失败时报告残留路径，保留旁锁，不提供断电恢复。元数据写失败可能拒挂，不保证断电一致性：v1 一次目录更新是一次块写入，v2 改动块 0 以外的目录项时是两次（先写该块，再写块 0 的 CRC），两次之间断电会让镜像 CRC 不符而被拒挂。
 
 - 学习笔记联合验收只在临时双镜像上模拟人工确认；它核对原文、引用位置、镜像隔离和持久化，不能判断项目所有者是否学会，也不能保证任意 Agent 都遵守确认约束。`guest_learning_note` 在 Linux 工具、semantic/MCP 与 Guest 目标齐备时随默认套件注册；Windows 只运行纯 Python 的 `learning_note_gate`。PR #85 精确 head `30916a6` 的远端 CI 已核对通过；实际 dsh 试用单独记录在 0035 VERIFY，不算默认 CI 覆盖。
 
