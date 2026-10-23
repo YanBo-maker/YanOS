@@ -510,6 +510,8 @@ class Harness:
         self.assert_unchanged(old, old_hash, "OLD")
         require(asset_manifest(assets_path(old)) == old_assets,
                 "OLD.assets changed")
+        require(os.path.lexists(Path(os.path.realpath(str(old)) + ".lock")),
+                "source .lock missing after migration")
         return new_image
 
     def migrate_fail(self, old: Path, new: Path, files: int,
@@ -529,6 +531,8 @@ class Harness:
         self.assert_unchanged(old, old_hash, "OLD")
         require(asset_manifest(assets_path(old)) == old_assets,
                 "OLD.assets changed")
+        require(os.path.lexists(Path(os.path.realpath(str(old)) + ".lock")),
+                "source .lock missing after failed migration")
         if no_residue:
             self.assert_absent(new, "NEW")
             self.assert_absent(assets_path(new), "NEW.assets")
@@ -1665,6 +1669,7 @@ def add_semantic_case(h: Harness, args: argparse.Namespace,
                 f"OLD semantic rebuild failed: {rebuilt.stderr.strip()[:400]}")
         require("OK rebuild" in rebuilt.stdout,
                 f"OLD semantic rebuild stdout: {rebuilt.stdout.strip()[:200]}")
+        index_before = sha256_file(index)
         new = out / "semantic-new.img"
         h.migrate_ok(old, new, 1023)
         status = h.run(base + ["status", "--disk-image", str(new)] + common,
@@ -1680,6 +1685,8 @@ def add_semantic_case(h: Harness, args: argparse.Namespace,
                 "semantic search failed")
         require(old_search.stdout == new_search.stdout,
                 "semantic search output differs between OLD and NEW")
+        require(sha256_file(index) == index_before,
+                "semantic index bytes changed during NEW status/search")
         require("MATCH " in old_search.stdout,
                 "semantic search produced no MATCH rows")
         match = re.search(r"OK search shown=(\d+)", old_search.stdout)

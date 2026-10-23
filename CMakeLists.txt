@@ -347,6 +347,9 @@ if(BUILD_TESTING)
             add_test(NAME large_capacity_gate COMMAND "${Python3_EXECUTABLE}" -B
                      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_large_capacity_gate.py")
             set_tests_properties(large_capacity_gate PROPERTIES TIMEOUT 30)
+            add_test(NAME semantic_runner_pid COMMAND "${Python3_EXECUTABLE}" -B
+                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_semantic_runner_pid.py")
+            set_tests_properties(semantic_runner_pid PROPERTIES TIMEOUT 30)
         endif()
         if(YAN_BUILD_SEMANTIC)
             add_executable(test_mcp_protocol tests/test_mcp_protocol.c tools/mcp_worker.c)
@@ -933,6 +936,24 @@ if(BUILD_TESTING)
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_blocks_guest_gate.py")
         set_tests_properties(note_blocks_guest_gate PROPERTIES TIMEOUT 180)
+        # 0035-R8 negative controls: wrong expected bytes, a mutated MCP
+        # response, and a missing fixture/binary must all fail before any
+        # cross toolchain check. Pure Python, so it stays in the default suite.
+        add_test(NAME learning_note_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_learning_note_gate.py")
+        set_tests_properties(learning_note_gate PROPERTIES TIMEOUT 60
+                             LABELS "0035-R10-AC2")
+        # issue61 / 0035 R2/R9 documentation alignment: the public write-tool
+        # document is compared with actual tools/list fields by an independent
+        # pure-Python checker, so every platform with Python can verify the
+        # checker's own controls. This supports the existing ACs; mcp_sdk
+        # remains the official-SDK acceptance for 0035-R2-AC1.
+        add_test(NAME mcp_write_docs
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mcp_write_docs.py")
+        set_tests_properties(mcp_write_docs PROPERTIES TIMEOUT 60
+                             LABELS "issue61;0035-doc-alignment")
         add_test(NAME note_blocks_mutation_gate
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_note_blocks_mutation_gate.py")
@@ -1009,6 +1030,19 @@ if(BUILD_TESTING)
                                 --guest "${YAN_TERMINAL_ELF}"
                                 --server "$<TARGET_FILE:yan_mcp>")
                     set_tests_properties(guest_note_blocks_host PROPERTIES TIMEOUT 600)
+                    # 0035-R8: real learning + ordinary MCP instances and the
+                    # same production Guest ELF. No skip code: the enclosing
+                    # targets already prove the toolchain exists.
+                    add_test(NAME guest_learning_note
+                        COMMAND "${Python3_EXECUTABLE}" -B
+                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_learning_note.py"
+                                --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                                --work "${CMAKE_BINARY_DIR}/guest-learning-note"
+                                --run "$<TARGET_FILE:yan_run>"
+                                --guest "${YAN_TERMINAL_ELF}"
+                                --server "$<TARGET_FILE:yan_mcp>")
+                    set_tests_properties(guest_learning_note PROPERTIES TIMEOUT 600
+                                         LABELS "0035-R8-AC1;0035-R8-AC2;0035-R10-AC3;0035-R11-AC4")
                 endif()
             endif()
             if(TARGET yanfs_terminal)

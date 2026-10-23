@@ -200,3 +200,109 @@ name 沿用 YanFS 名称规则；text 必须满足 0032 的文本资格，长度
 - （第三轮，答 #56）判定顺序：先判 unchanged（内容和现有完全相同就返回 unchanged:true，因为提交成功后再重试，expected_source 必然已经过期），然后判 STALE，最后做按笔记的检查（EXISTS 等）。
 - 镜像旁边还没有 `.lock` 文件时，允许 dry_run 创建它。锁文件是空文件，只用于部署，不算对知识库的写入。
 - spec 负责人 develop-gpt 批准 PR-B 的非测试代码超过 400 行（约 450 行），并同意把剩下的工作拆到 PR-C。
+
+
+## IMPLE PLAN：R8 学习笔记闭环（2026-10-21）
+
+项目所有者批准继续补齐既有 R8-AC1、R8-AC2。示例学习笔记和普通原文放在 `tests/` 下，由独立验收脚本创建一份普通镜像和两份学习镜像（AC1 只读夹具、AC2 写入流程）。先用普通实例读原文；学习实例按 R10 预览、模拟确认后提交创建与覆盖，再重启实例并通过生产 Guest 终端读回。学习镜像中的引用仍按 R8 报缺文件，由调用者选择普通实例定位依据；不扩展跨镜像解析。
+
+验收对比夹具原字节、五块及引用位置、预览不写、提交后身份、重启持久化和普通镜像不变，并核对 Guest 精确输出（含 `yanfs: exit`）与磁盘字节。测试仅模拟人工确认，不验证或推断项目所有者的真实理解。实现集中在测试夹具和独立脚本，CMake 只增加必要注册；没有新增生产接口或格式。独立 dsh 对照当前实现、测试与文档，总审核负责正式文档。
+
+## VERIFY 执行记录：R8 补齐
+
+本机实现与验证已完成，后续发布状态见本节末尾。独立 dsh 两轮技术核对已确认修复，文档对齐意见 M1–M4 由总审核落实；修订与新增验证记录已交回同一只读会话复核通过，不重开代码审核。报告与总审核证据保存在本阶段证据目录；规格整体仍为 Approved。
+
+- 新增 `tests/learning-note/learning-note.md`、`learning-note-updated.md` 与 `notes/{irq,plic,trap}`；具名块、原文和引用按 R8-AC1/AC2 验收。
+- 新增 `tests/guest/run_learning_note.py` 与 `tests/test_learning_note_gate.py`。生产 `yan_mcp`、`yan_run`、终端 ELF 和现有协议不变；CMake 仅增加测试注册和 AC 标签。双实例使用同一份普通笔记镜像，核对创建与覆盖预览不写镜像、模拟确认后的提交、身份、重启后的五块和引用，以及真实 Guest 的输出、exit 标记和磁盘原字节。普通库始终保持不变。
+- 第一轮 dsh 指出 Guest `exit` 标记未被独立断言，已补齐；同时采纳辅助文件输入清单、读取页范围、从预期字节预计算身份及示例陈述等改进。没有更改 R8 的行为或确认规则。
+
+总审核运行的默认回归（`-j 3`，全部零失败、零跳过）：
+
+| 配置 | 注册 / 通过 | CTest 实耗 |
+| --- | --- | --- |
+| Linux Release，tools、semantic/MCP、Guest 与 SDK 开启 | 140 / 140 | 290.59 s |
+| Linux Debug + ASan/UBSan，同上 | 140 / 140 | 394.37 s |
+| Windows MSVC Debug，semantic/MCP 与 Guest 关闭 | 77 / 77 | 193.93 s |
+| Linux Release，实际变异配置 | 注册 158，选择实际组 17 / 17 | 570.30 s |
+
+构建目录分别为 `build/20261021-learning-loop/chief-release`、`chief-asan`、`chief-windows`、`chief-mutation`。默认命令为 `ctest --test-dir <目录> -C <Release或Debug> --output-on-failure -j 3`；实际变异命令追加 `-R '_mutation$'`，不是运行全部 158 项。完整配置命令、CTest 汇总和注册清单保存在本阶段仓库外证据目录 `E:/YanOS/build/20261021-learning-loop/`，以 `verified-results.json` 关联原始日志。变异分类门禁保留在默认套件，受控坏接线不计入十七实际组。
+
+347 个非文档输入先冻结；完整回归启动后，修订限于新验收脚本、两份学习记录及 CMake AC 标签，其余 343 项（含全部生产代码）不变。修订完成后复验 `-R '^(learning_note_gate|guest_learning_note)$'`：Release 2/2（4.08 s）、ASan/UBSan 2/2（3.99 s）；Windows 复验 `-R '^learning_note_gate$'` 为 1/1（5.12 s），均零失败零跳过。最终输入逐项哈希复核；不把早期夹具或旧标签的日志称作最终修订结果。
+
+总审核另以真实进程做正负对照：正确工具链路返回 0；关闭 MCP 写入能力、让 Guest 执行器消费输入但返回空输出，两种坏接线均触发 `:FAIL:` 并返回 1，未输出通过标记。六项纯 Python 检查另守住错误预期、篡改预览、缺本地输入与不扫描无关目录。缺仓库输入和显式 ELF 必须失败；新联合验收不使用 77。
+
+限制：只验证所提供的固定学习记录与普通原文，测试中的确认和理解状态均为模拟；不证明真实用户理解、生成答案的忠实性或任意 Agent 的确认行为。块工具与写工具不启动模型，本阶段不做搜索质量验收。现有索引、磁盘格式、跨库解析和生产接口未扩展。Linux 默认 CI 会在满足现有构建条件时执行新验收；远端是否通过须核对 PR 当前精确 head 的实际日志，不能从本机结果推导。
+
+
+### R8 发布记录（2026-10-21）
+
+项目所有者已明确批准本阶段推送、创建 PR 和运行 CI。测试提交 `f93bcfd`、相邻文档提交 `0aee7d2` 已发布为 [PR #85](https://github.com/YanBo-maker/YanOS/pull/85)，base 为 main。功能与本机验证范围未变；发布事实文档更新后由远端再次验证最新 head。当前精确 head 的三项检查和原始任务日志在该 PR 记录，不以旧 head 结果冒充最新结果，不在执行结束前宣称全部通过。尚未合入，0035 整体保持 Approved。
+
+
+## VERIFY 执行记录：dsh 真实双库试用（2026-10-22）
+
+项目所有者选择先接 dsh，沿用既有 R8–R11、0031/0033 工具和格式。本轮没有修改生产代码、工具 schema 或模型服务；配置和试用镜像保存在本机任务目录中，不纳入版本控制，公开接入步骤见 [dsh 双库接入](../dsh-mcp-quickstart.md)。独立 dsh 对准备材料完成一轮只读审核，无当前试用阻塞项；总审核已修正试用脚本的空库容量、耗时和进程归属判断。正式文档与实际执行记录已由原独立只读 dsh 会话核对，总审核完成本地收口。
+
+- 环境：dsh `0.2.0-rc.2`，普通与学习实例分别命名 `yanos_notes`、`yanos_learning`。专用 profile 来自 headless 模板，通过任务 overlay 接入；原日常 profile、所有者未提交修改及生产输入保持。普通库使用仓库公开夹具；学习库初始为空且有可用数据空间。没有接入日常个人笔记库或新增生成模型。
+- 准备探针用官方 Python `mcp==2.3.0`，两实例实际协商 `2026-07-28`，分别列出六个只读工具和八个含写入工具；索引 READY、原文块和预览差异与独立字节预期相符。准备过程没有真实 dsh 消费者调用，不把它算作 harness 互操作。
+- 真实 dsh 首次调用成功完成 `index_status`、搜索“设备如何叫醒处理器”、列块与读取 `irq#entry`，随后在预览前退出 1，输出停在下一步开始，没有完成原因。总审核未确定退出原因；保留原始记录，仅复用同一会话重试一次，重试退出 0，重新读块后成功获得预览。没有以新会话替换失败记录。
+- 总审核逐项核对真实工具记录：只调用绑定的 MCP 工具，逐次等待；搜索返回的二十项原文与实际夹具字节范围、物理行号相符；`irq#entry` 为文件第 5 行、字节区间 `[74,157)`。本次不以固定样本结果宣称通用检索质量。
+- 预览为 `learning-note.md`，完整正文 470 UTF-8 字节、十三行，差异为第 1 行起全部新增、无删除；`known` 为空，引用只指向实际读取的 `[[irq#entry]]`。预览前后普通镜像、索引、学习镜像和已有旁锁的 SHA-256 与 mtime 均不变，且没有提交调用。
+- 总审核在当前会话提供完整正文与差异，闫博明确回答“确认保存这份试用记录（推荐）”。总审核将这条真实确认转交原 dsh 会话，用预览的同一 name、text 和 source 提交一次；不是夹具模拟，不是对“已学会”的确认。提交退出 0，工具报告 `note_create`、470 字节、新来源 `89b24c1653d53690e6339f36770cf50ba6b225535b365dcf8713bec7c38f2532`；随后读回五块，`known` 仍为空。
+- 关闭该进程后，总审核另启只读官方 SDK 会话，核对五块全文、来源和学习库断链状态，再用生产 `yan_run`、`yanfs_terminal.elf` 对同一学习镜像执行列块、cat 和 show log，并断言 `yanfs: exit` 与退出 0。新 SDK 读回耗时 0.656 s，Guest 读回 0.111 s。磁盘中的完整笔记逐字节等于已确认预览；Guest 查询前后镜像相同，普通镜像和原索引始终不变。
+
+本轮没有重新声称默认回归或实际变异通过；它们仍属于上节 R8 的既有提交与对应 CI。PR #85 精确 head `30916a6` 的三项原始任务日志已经总审核核对通过（运行 `39596620235`）；本轮接入文档提交 `a532995` 经所有者明确批准，已推送并创建 [PR #86](https://github.com/YanBo-maker/YanOS/pull/86)，暂以 `codex/0035-learning-loop` 为 base，仅展示本轮文档。该 PR 已触发远端 CI；发布事实更新后核对最新精确 head 的三项检查与原始任务日志，并在 PR 摘要记录，不把父阶段或旧 head 结果算作最新结果。尚未合入，0035 整体仍为 Approved。
+
+证据入口：`E:/YanOS/build/20261022-dsh-usage/` 中的 `chief-preflight.json`、`consumer-events.jsonl`、`consumer-retry-events.jsonl`、`chief-live-audit.json`、`live-preview.json`、`owner-confirmation.json`、`confirmed-commit-events.jsonl` 与 `persisted-check.json`。准备源码、独立审核及探针在隔离工作树 `build/20261022-dsh-usage/`；Guest 的实际 argv/stdout/stderr/rc 在其 `guest-readback/`。初次失败记录保留，后续重试与确认提交分别记录；没有复活归档实验或新增 Codex 子 Agent。
+
+限制：仅为独立样本库的一次真实确认新建，没有真实问答测验、理解验收、日常个人库迁移、客户端长期稳定性或真实确认覆盖写验收。引用仍按实例各自解析；这次确认不授权 Agent 自动标记已懂或跳过后续写入预览。
+
+
+## VERIFY 执行记录：写工具文档一致性检查（2026-10-22，Issue #61）
+
+本轮验证既有 R2/R9/R10 的文档与真实接口是否一致，没有新增需求或改变工具行为。新增独立纯 Python 检查器 `tests/mcp_write_docs.py`，从[写工具说明](../mcp-write-tools.md)读取两个工具参考段，与真实 `tools/list` 的名称、description、annotations、inputSchema、outputSchema 比较；create 的共享输入结构须有明确引用。对象键序和缩进不影响比较，嵌套字段、数组次序及类型纳入检查，布尔值不与数字相等。缺文档、坏 JSON 或字段不符均失败，不返回 77。
+
+`mcp_note` 在原写工具测试中接入真实进程核对；新检查使用不存在的镜像与依赖路径，只请求工具列表。检查器在 main 执行路径才导入，借用 Server 的学习记录验收不新增文档或 helper 依赖。`mcp_write_docs` 是配置找到 Python 时注册的纯检查器自测，不等同 R2-AC1 的官方 SDK 工具发现验收；后者继续由 `mcp_sdk` 负责。README 与其他用法段落不属于本检查器的覆盖范围，仍由独立文档审核对齐。
+
+总审核先独立采集真实服务的八工具列表，按当前文档逐字段核对两个写工具，基线一致；没有以此冒充新增自动检查已经通过。dsh 编码子任务与独立只读子任务各一，技术与文档统一审核最多两轮；重试复用原会话，不复活旧试用或归档实验。
+
+执行结果均为本轮重新运行，默认命令为 `ctest --test-dir <构建目录> -C <配置> --output-on-failure -j 3`；Linux 省略 `-C`，实际变异命令增加 `-R '_mutation$'`。F1 修补前的三平台默认回归与实际组选取均零失败、零跳过：
+
+| 配置 | 注册 / 本次选择并通过 | CTest 实耗 |
+| --- | --- | --- |
+| Linux Release，tools、semantic/MCP、Guest 与 SDK 开启 | 141 / 141 | 182.42 s |
+| Linux Debug + ASan/UBSan，同上 | 141 / 141 | 259.48 s |
+| Windows MSVC Debug，semantic/MCP 与 Guest 关闭 | 78 / 78 | 195.92 s |
+| Linux Release，实际变异配置 | 159 / 17 | 340.12 s |
+
+Linux 默认集合中的 `mcp_note`、`mcp_sdk`、`mcp_write_docs`、学习联合验收均实际 Passed；Windows 的 `mcp_write_docs` 实际 Passed。最终纯检查器含十八项自测，实际接口比较在原 `mcp_note` 中，不把纯检查器标签当作官方 SDK 的完整 R2-AC1 验收。
+
+总审核另按名复制所需文件，在临时副本运行真实写工具测试：正常接线退出 0，篡改 description、删除文档、删除 helper 分别退出 1；把比较器改为直接通过后，纯检查器负例退出 1。原仓库文件保持。这些是受控接线与检查器负例，不计入十七个既有实际变异组，也不证明所有读者文档已自动检查。
+
+构建目录复用 `build/20261021-learning-loop/chief-release`、`chief-asan`、`chief-windows`、`chief-mutation`，本轮重新配置、构建并生成日志。344 个代码与测试输入在完整回归期间保存哈希；当时修改文件的 mtime 均早于测试启动，完整回归完成后逐项保持。随后 F1 仅修改两个测试模块，其余 342 项逐项保持；最终两个模块另按下述定向检查验收。生产源码没有变化。原所有者修改、既有试用镜像和索引不属于本轮写入对象。
+
+证据入口：`E:/YanOS/build/20261022-mcp-doc-alignment/` 下的 `verified-results.json`、四份 `*-ctest.log`、`*-registration.log`、`frozen-inputs.json`、`chief-controls.json` 与对应原始输出。Windows 首次启动因当前 shell 的 PATH 无 cmake 而在配置前失败，未执行测试；随后使用原缓存指向的 Visual Studio CMake/CTest 绝对路径完成本表回归，未更改全局配置。
+
+独立审核第一轮确认当前文档与实际工具一致，并指出 create 小节若同时保留共享引用与另一份 inputSchema 声明，检查器会忽略后者。总审核将这一项提升为 F1：被检查字段的矛盾声明不能静默通过。原 dsh 编码会话只修补 `tests/mcp_write_docs.py` 和 `tests/test_mcp_write_docs.py`，遇到共享引用外的显式 inputSchema 声明即报歧义；不拒绝无关 JSON 示例，字段和实际 MCP 接口保持。
+
+总审核从修后代码移除该补丁，在私有副本精确还原旧 helper，并核对 SHA-256 等于完整回归时的冻结值。同一矛盾文档与实际工具列表在旧 helper 下误通过，在新 helper 下明确拒绝；正常文档与无关 JSON 示例均仍通过。证据 `post-f1-results.json`。修后只重跑受影响的检查，没有声称完整三平台回归和实际变异在新 helper 上重跑：
+
+| 修后配置 / 范围 | 实际通过 | CTest 实耗 |
+| --- | --- | --- |
+| Linux Release，mcp_note 与 mcp_write_docs | 2/2 | 0.70 s |
+| Linux ASan/UBSan，同上 | 2/2 | 2.64 s |
+| Windows Debug，mcp_write_docs | 1/1 | 0.29 s |
+
+上述检查均无失败或跳过，最终纯自测为十八项。原报告保持；文档派生的纯检查器正控只验证检查器，实际服务由 mcp_note 核对；额外展示字段如 title 不在所定义五字段范围内。这两项为已声明边界，不列作待修产品缺陷。第二轮仅复核 F1 及对应记录，无新完整审查轮次。
+
+审核状态：原独立只读 dsh 完成两轮核对，第二轮仅复核 F1 修补及对应记录，无剩余阻塞项；总审核九项提交前检查完成。
+
+本轮实现提交 `31a88e0`、文档提交 `12f9096` 经所有者明确批准，已推送并创建 [PR #87](https://github.com/YanBo-maker/YanOS/pull/87)，暂以 `codex/0035-dsh-usage` 为 base，仅展示本轮改动。远端 CI 已触发；发布事实更新后按最新精确 head 的实际检查及原始任务日志验收，结果记入 PR 摘要，不使用父 PR #86 或旧 head 的通过结果替代。尚未合入。0035 状态保持 Approved；README、规格索引、决策与既有工具说明约束未扩展。
+
+### PR #85/#86 合入与 PR #87 状态来源（2026-10-22）
+
+项目所有者明确批准按 #85 → #86 → #87 依次合入 main，并保留阶段提交。#85 已按 merge commit 合入（`3377a50`），随后 #86 改以 main 为 base 并合入（`fae32e8`）；两次合入后的文件树分别与已验证的 `30916a6`、`135d272` 完全一致。
+
+#87 已改以 main 为 base。已验证提交 `349896e` 的三项 CI 及原始日志已核对：Linux Debug ASan/UBSan 141/141（835.22 s）、Linux Release 141/141（356.88 s）、Windows Debug 78/78（318.42 s），均无失败或跳过；这是 F1 修补后的完整远端回归，先前本地 F1 前后记录保持原范围。后续提交的检查与合入状态以 [PR #87](https://github.com/YanBo-maker/YanOS/pull/87) 的实时记录为准；以上静态结果仅证明 `349896e`，不证明尚未运行的提交。
+
+上文各次“尚未合入”保留其发布时状态；#85/#86 已完成的合入由本节接续，#87 的当前状态通过该 PR 查阅。此次仅修正父 PR、目标分支及状态来源，不改实现或接口，0035 整体仍为 Approved；阶段合入后按 0034 R7 归档监控通道并保留入口。

@@ -367,3 +367,30 @@ dsh 本阶段复用同一协调会话及原编码/独立验收两个子任务，
 发布时三个远端任务已触发；当前精确 head 的完整远端 CI 记录（注册与通过数、CTest 耗时及原始任务日志）待 CI 完成后由总审核更新到 PR 与 MONITOR，不能由本机结果推定。工作流未配置 artifact 上传，不将本机日志冒充 CI artifact，也不把运行中的任务当成通过。R7 仍待合入，0036 保持 Approved。
 
 两个非阻塞后续项已实际建立并标记 `follow-up`：[EOF/EINTR #83](https://github.com/YanBo-maker/YanOS/issues/83)、[故障测试符号覆盖 #84](https://github.com/YanBo-maker/YanOS/issues/84)，均关联 PR #82。未把它们写成已修复功能；本次发布记录只更新真实 PR、CI 入口和后续项，源码、接口、验收行为及非文档输入保持。
+
+
+
+### R4/R6 与 0035 主线的整合验证（2026-10-23）
+
+本轮将 PR #81 的 `131a39b` 与 main `0948b94` 整合，复用原短期工作树，新建本地任务分支；不改变文件名、磁盘格式、来源身份或 MCP schema。生产源码与 `131a39b` 相同，主线的学习记录夹具、Guest 联合验收与写工具文档检查完整保留，CMake 同时注册两组能力。新主线 `0948b94` 的三项 CI 与实际任务日志已核对，该证据只证明主线基线，不代替本轮整合回归。
+
+首份候选树的当前实测如下，代码和测试输入共 354 项，在这些运行后逐项保持；旧的 2026-10-21 记录仍保留其原提交范围。
+
+| 首份候选配置 / 命令 | 注册 / 实际结果 | CTest 实耗 |
+| --- | --- | --- |
+| Linux Release，`ctest --test-dir <chief-release> --output-on-failure -j3` | 144 / 144 通过 | 547.75 s |
+| Linux Debug ASan/UBSan，同上 `<chief-asan>` | 144 / 143 通过，1 失败 | 911.56 s |
+| Windows MSVC Debug，同上 `<chief-windows> -C Debug` | 79 / 79 通过 | 197.50 s |
+| Linux Release 实际变异，`<chief-mutation> -R '_mutation$'` | 注册 162，选择并通过 17 | 584.44 s |
+
+均无跳过。首轮 ASan 的失败仅来自 `mcp_faults` 中 `test_block_busy_cancel_and_reuse` 等待 MCP 帧的 harness 超时，日志未报告 sanitizer 错误；其余 143 项和该配置下的六项大容量 AC 均通过，不能把这次运行写为全绿。没有改动 MCP 代码、测试或超时设置，单独复跑该套件 1/1（11.34 s）通过；诱因尚未确定，不宣称修复了该超时。另行执行仅在变异配置中注册的 `guest_console_mutation_gate`，1/1（86.76 s）通过，不计为第十八组实际变异。
+
+独立 dsh 的集成检查确认两个父分支的实现及测试均保留，未发现合并引入的生产代码缺陷。核对 R4-AC3 时发现大库检查只断言条数和 total，因此由原编码者在 `tests/run_large_capacity.py` 加入两类反链的实际名称序列断言：1000 个来源仍只输出 20 项，且必须依次为 `n0000.txt`…`n0019.txt`。保留原条数、total、shown 和回执检查，并在案例证据中保存实际名称。
+
+此次补强只改一个 Linux 验收脚本，其余 353 项输入保持，生产源码、CMake、Windows 输入及实际变异判据未改。总审核使用实际运行保存的输出，保持条数和 total，分别替换或倒序普通反链、块反链；精确原脚本对四种错误输出均接受，新脚本均在 ASCII-first 断言拒绝，正确输出两者均通过。它们是受控输出检查，不混算十七组实际变异。
+
+补强后的 Release 只复跑 `large_capacity_gate` 与 `yanfs_large_capacity`，2/2（88.78 s）通过，六项 R4/R6 案例和两组前 20 名称均已核对；随后对最终候选完整复跑 ASan/UBSan，144/144（365.03 s）通过，包含 mcp_faults 和新名称断言，均无失败或跳过；没有修改 MCP 代码、原测试或超时设置。首轮超时在单独和本次完整复验中均未重现，诱因仍未确定。默认验收使用确定性 provider 核对容量、结果和故障边界，本轮未启动真实模型；不把旧真实模型效果记录或上述故障重跑冒充新的完整模型验收。
+
+状态文档合并保留 main 历史全文前缀、PR #81 的独有历史追加和旧 main 当前阶段原文；不改写原历史标题。README 和 STATUS 保留 0035 已合入能力，说明本分支的大容量范围；0036 状态仍为 Approved，R7 仍在后续 PR #82。测试细节仅记在本节，STATUS 不新增套件数或耗时。
+
+证据位于 `E:/YanOS/build/20261023-r4-r6-integration/`：`initial-results.json` 与 `initial-*-ctest.log` 保留首轮结果；`isolated-mcp-faults.log`、`console-gate-ctest.log`、`post-release-ctest.log` 分别记录重跑范围；`post-asan-ctest.log` 与 `post-asan-LastTest.log` 记录最终完整复验；`ac3-detection.json`、`post-release-large-capacity-evidence.json` 和 `post-asan-large-capacity-evidence.json` 记录检测力与实际名称；`frozen-inputs.json`、`post-assertion-inputs.json` 划分修改前后输入。原独立只读 dsh 已完成对当前差异、实际源码与接口、当前验证证据和文档的对齐审核，无剩余阻塞项；原历史、首轮失败和重跑日志保持。总审核逐提交执行九项检查，合并原 main、补强测试和验证文档分别提交，保留两个父分支的已发布历史。本次整合的提交、发布、远端检查和合入状态统一以 PR #81 的实际记录为准，不以旧 head 的 CI 代替新提交检查。

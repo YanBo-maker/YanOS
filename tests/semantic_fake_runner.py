@@ -10,6 +10,14 @@ import time
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+
+def publish_pid(path):
+    target = Path(path)
+    temporary = target.with_name(target.name + '.tmp')
+    temporary.write_text(str(os.getpid()))
+    temporary.replace(target)
+
+
 if os.environ.get('YAN_TEST_CHILD_LOG'):
     with Path(os.environ['YAN_TEST_CHILD_LOG']).open('a') as log:
         log.write('version\n' if '--version' in sys.argv else 'server\n')
@@ -31,7 +39,7 @@ if '--version' in sys.argv:
     if version_mode == 'empty': raise SystemExit(0)
     if version_mode == 'long': print('x'*2048); raise SystemExit(0)
     if version_mode == 'timeout':
-        Path(os.environ['YAN_TEST_PID_FILE']).write_text(str(os.getpid()))
+        publish_pid(os.environ['YAN_TEST_PID_FILE'])
         def term(*_):
             Path(os.environ['YAN_TEST_PID_FILE']+'.term').write_text('TERM')
             raise SystemExit(0)
@@ -47,7 +55,7 @@ parser.add_argument('--api-key', required=True)
 args, _ = parser.parse_known_args()
 assert args.host == '127.0.0.1'
 if os.environ.get('YAN_TEST_SERVER_PID_FILE'):
-    Path(os.environ['YAN_TEST_SERVER_PID_FILE']).write_text(str(os.getpid()))
+    publish_pid(os.environ['YAN_TEST_SERVER_PID_FILE'])
 if os.environ.get('YAN_TEST_FORK_TREE'):
     child = os.fork()
     if child == 0:

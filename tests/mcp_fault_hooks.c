@@ -102,6 +102,7 @@ void *__wrap_calloc(size_t n,size_t size)
         }
         const char *hold=getenv("YAN_MCP_TEST_BLOCK_HOLD");
         if (hold) {
+            observer_append("hold %ld\n",(long)getpid());
             struct timespec pause={0,5*1000*1000};
             for (unsigned i=0;i<3000;++i) {
                 if (access(hold,F_OK)==0) break;

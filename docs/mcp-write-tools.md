@@ -2,6 +2,10 @@
 
 本文说明 `yan_mcp` 的 `--allow-write`、两个写工具、镜像旁的锁文件，以及 `notes.img` 和 `learning.img` 怎么各起一个进程。依据 main `2921fed98a55358bb97282b0181072a2769b4e76`（[PR #55](https://github.com/YanBo-maker/YanOS/pull/55) 的合并提交）。下面的 `inputSchema`、`outputSchema` 和 `annotations` 从 [`tools/mcp_note.c`](../tools/mcp_note.c) 的工具 JSON 解析得到，与源码逐字段相同。其余段落只说明这些字段怎么调用。
 
+`mcp_note` 在实际 `--allow-write` 服务上读取 `tools/list`，逐项比较本页两个工具的名称、description、annotations、inputSchema 和 outputSchema；字段或类型不同、文档缺失或 JSON 损坏都会让测试失败。检查器在 [`tests/mcp_write_docs.py`](../tests/mcp_write_docs.py)，文档中的 create 输入结构仍通过明确引用与 replace 共享。这次工具列表查询不打开镜像或模型。
+
+在 Linux semantic/MCP 与 Guest 测试目标齐备时，运行 `ctest --test-dir <构建目录> -R '^mcp_note$' --output-on-failure` 可核对真实接口。纯 Python 的 `mcp_write_docs` 测试在配置找到 Python 时注册，用篡改文档和返回值核对检查器；它也在 Windows 运行。官方 SDK 的工具发现验收仍是 `mcp_sdk`。本检查的执行记录见 0035 VERIFY，README、状态和用法说明继续由独立文档审核核对。
+
 规格见 [0035](specs/0035-agent-writable-knowledge.md)，并发裁定见 [0002](decisions/0002-B-write-concurrency.md)。只读六工具的协议见 [0031](specs/0031-mcp-retrieval-tools.md) 和 [0033](specs/0033-block-mcp-navigation.md)。
 
 ## `--allow-write`
@@ -95,6 +99,14 @@ Agent 可以出题、核对、写 `log` 和 `unknown`，把条目移入 `known` 
 5. 如果只是重试一份已经写进去的相同内容，第 1 步会返回 `unchanged: true`。收到它可以停止，不必再预览。
 
 `EXISTS` 表示新建时名字已被别的内容占用，应改用 `yanos_note_replace` 并重新预览。`NOT_FOUND` 表示覆盖时文件不在，应改用 `yanos_note_create` 并重新预览。
+
+## 学习记录的完整示例
+
+[`tests/learning-note/`](../tests/learning-note/) 提供初始学习记录、更新后的记录和普通笔记原文。初始记录的 `known` 为空；更新记录把 `unknown` 的一项移入 `known`，并在 `log` 追加一条明确标为模拟确认的核对记录。示例不表示项目所有者已经学会。
+
+使用时，调用方先在普通实例读取 `[[irq#entry]]` 等原文，再在学习实例预览完整记录，把预览内容与差异展示给用户。获得明确确认后，用同一名称、同一正文和预览返回的身份提交。修改已有记录也走相同流程。学习实例的引用仍显示 `DANGLING_FILE`：这表示目标文件不在当前镜像，调用方应选择普通实例读取依据。
+
+[`guest_learning_note`](../tests/guest/run_learning_note.py) 验收在临时双镜像上执行这条流程，核对重启 MCP 后的原文和生产 Guest 的读回结果。它只模拟确认，不证明真实用户理解，也不证明任意 Agent 都会遵守确认规则。注册条件和运行入口见 [README](../README.md#写入笔记)。
 
 ## 工具参考
 

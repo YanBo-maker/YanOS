@@ -1,0 +1,5 @@
+@yan-note 1
+title: 设备中断（普通笔记夹具）
+@end
+@block entry
+设备通过 PLIC 发出中断请求；CPU 在指令边界检查挂起的中断。
