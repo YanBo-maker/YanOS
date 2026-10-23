@@ -306,3 +306,8 @@ Linux 默认集合中的 `mcp_note`、`mcp_sdk`、`mcp_write_docs`、学习联�
 #87 已改以 main 为 base。已验证提交 `349896e` 的三项 CI 及原始日志已核对：Linux Debug ASan/UBSan 141/141（835.22 s）、Linux Release 141/141（356.88 s）、Windows Debug 78/78（318.42 s），均无失败或跳过；这是 F1 修补后的完整远端回归，先前本地 F1 前后记录保持原范围。后续提交的检查与合入状态以 [PR #87](https://github.com/YanBo-maker/YanOS/pull/87) 的实时记录为准；以上静态结果仅证明 `349896e`，不证明尚未运行的提交。
 
 上文各次“尚未合入”保留其发布时状态；#85/#86 已完成的合入由本节接续，#87 的当前状态通过该 PR 查阅。此次仅修正父 PR、目标分支及状态来源，不改实现或接口，0035 整体仍为 Approved；阶段合入后按 0034 R7 归档监控通道并保留入口。
+
+
+### PR #85／#86／#87 合入回执（2026-10-23 核对）
+
+GitHub 当前记录确认：PR #85 于 2026-10-22 以 `3377a50b743a57876ad249cf9f0142bed4cf2a20`、#86 以 `fae32e811060be0c9e066f60be24e93546bca2cf`、#87 以 `0948b94dfe54cc44006cb453c9e821400b0f01a2` 依次合入 main，保留阶段提交。#87 的核对记录接续上文发布快照，不改写过去的“尚未合入”。该历史随后保留在 `26c25fc` 的 main 中；新 main 的验证记录见 [0036 VERIFY](0036-yanfs-multi-block-directory.md#verify-执行记录)。本回执不扩展真实 dsh 试用范围，也不把 0035 整体提升为 Implemented。

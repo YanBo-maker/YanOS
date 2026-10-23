@@ -13,7 +13,7 @@
 
 ### 意图层
 
-- 每份 spec 头部有四个字段：意图（1–3 行，链接到决策记录）、状态（Draft / Approved / Implemented / Superseded）、supersedes、成功标准。
+- 每份新 spec 头部有四个字段：意图（1–3 行，链接到决策记录）、状态（Draft / Approved / Implemented / Superseded）、supersedes、成功标准。0034 之前的历史规格按 [0034 R9](docs/specs/0034-ci-guest-tests-and-status-archive.md#r9交付流程同步降低文档同步成本) 不回补头字段，状态以规格索引为准。
 - 索引表在 [docs/specs/README.md](docs/specs/README.md)。列是编号、标题、状态、supersedes、被谁取代。用它回答现在哪份 spec 定义了这个行为。
 - 交接实现时引用 spec 的意图字段和对应决策记录。
 

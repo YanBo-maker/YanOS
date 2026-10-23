@@ -805,3 +805,13 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 
 本轮本地整合回归与独立对齐已完成，具体范围见 0036 VERIFY；本次整合的发布、远端检查和合入状态统一以 PR #81 的实际记录为准，不把旧 head 的 CI 作为新树的通过证据。R7 离线迁移仍在后续 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82)；0035、0036 整体状态仍为 Approved。
 
+
+
+## 当前阶段
+
+当前整合 [0036](specs/0036-yanfs-multi-block-directory.md) R7 离线迁移：将 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82) 的原实现与已验证的父分支 `f10516e` 合并，核对迁移、附件清理、来源身份与当前检索、学习记录功能共同工作。旧镜像只读，目录槽号、名称和内容保持，盘上语义索引复用，内存词项索引重建后比较结果。
+
+主线已具备 [0035](specs/0035-agent-writable-knowledge.md) 学习记录联合验收、dsh 双库真实试用和写工具文档自动核对，接入见 [dsh 双库接入](dsh-mcp-quickstart.md)。大容量检索已完成整合并发布为 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81)，精确 head 的远端检查已通过，尚未合入 main。
+
+本地整合与验证已完成，补齐迁移旁锁保留和索引不改写断言，并修复测试夹具的 PID 发布与子进程就绪竞态；生产接口保持。独立对齐和总审状态见 0036 VERIFY。本轮更新尚未发布，不沿用旧 head 的 CI 结论；发布、远端检查和合入状态统一以 PR #82 为准。0035、0036 整体保持 Approved。
+
