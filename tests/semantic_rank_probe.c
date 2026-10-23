@@ -87,7 +87,7 @@ int main(void)
             memcpy(&fixture.vectors[i][j], &bits, 4);
         }
     if (fgetc(stdin) != EOF) return 1;
-    YanSemanticSource source = {&fixture, sizeof fixture, next, read_source};
+    YanSemanticSource source = {&fixture, sizeof fixture, next, read_source, 63u};
     YanSemanticProvider provider = {&fixture, sizeof fixture, okay, embed, okay};
     YanSemanticStore store = {&fixture, sizeof fixture, open_read, read_index, okay,
         begin, write_index, okay, publish, discard};

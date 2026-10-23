@@ -511,7 +511,9 @@ YanNoteResult yan_relation_backlinks(YanRelationContext *context,
     uint32_t shown = 0u;
     if (result == YAN_NOTE_OK) {
         sort_rows(context);
-        for (uint32_t i = 0u; i < context->row_count; ++i) {
+        const uint32_t limit = context->row_count < YAN_RELATION_BACKLINKS_SHOWN
+                                   ? context->row_count : YAN_RELATION_BACKLINKS_SHOWN;
+        for (uint32_t i = 0u; i < limit; ++i) {
             if (!sink(sink_context,
                       &context->rows[context->sort_index[i]])) {
                 result = YAN_NOTE_STOPPED;

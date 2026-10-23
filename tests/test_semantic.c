@@ -1,14 +1,20 @@
 #include "semantic.h"
 #include "unity.h"
+#include <stdio.h>
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
 
 #define BLOB_CAP (256u + 32u * 4160u)
+/* 0036-R6 capacity and skipped-header cases need more than the original 32
+ * fixture entries; the store blob stays small because only one deep entry and
+ * small indexes are byte-inspected. */
+#define FAKE_MAX 96u
 typedef struct {
-    char names[32][32];
-    const uint8_t *texts[32];
-    uint32_t sizes[32], slots[32], count;
+    char names[FAKE_MAX][32];
+    const uint8_t *texts[FAKE_MAX];
+    uint8_t repeated[FAKE_MAX];
+    uint32_t sizes[FAKE_MAX], slots[FAKE_MAX], count;
     uint32_t reads, nexts, closed, starts, embeds, stops, writes, publishes;
     uint32_t callbacks, sink_limit;
     bool source_fail, fail_after_query, query_done, source_is_closed;
@@ -16,6 +22,7 @@ typedef struct {
     YanSemanticResult start_error, embed_error, stop_error, close_error;
     YanSemanticResult read_close_error, begin_error, write_error, finish_error, publish_error;
     bool exists, reading, writing;
+    bool large_store; /* count record bytes without keeping the blob */
     size_t stored_size, temporary_size;
     uint8_t stored[BLOB_CAP], temporary[BLOB_CAP];
     YanSemanticRow rows[20];
@@ -47,7 +54,9 @@ static YanSemanticResult read_source(void *opaque, const char *name, uint32_t of
     for (uint32_t i = 0; i < f->count; ++i) {
         if (strcmp(name, f->names[i]) != 0) continue;
         if (off > f->sizes[i] || n > f->sizes[i] - off) return YAN_SEMANTIC_IO;
-        memcpy(bytes, f->texts[i] + off, n); return YAN_SEMANTIC_OK;
+        if (f->texts[i] != NULL) memcpy(bytes, f->texts[i] + off, n);
+        else memset(bytes, f->repeated[i], n);
+        return YAN_SEMANTIC_OK;
     }
     return YAN_SEMANTIC_IO;
 }
@@ -113,8 +122,12 @@ static YanSemanticResult write_index(void *opaque, const uint8_t *in, size_t n)
 {
     Fake *f = opaque; ++f->writes;
     if (f->write_error) return f->write_error;
-    if (!f->writing || n > BLOB_CAP - f->temporary_size) return YAN_SEMANTIC_IO;
-    memcpy(f->temporary + f->temporary_size, in, n); f->temporary_size += n;
+    if (!f->writing) return YAN_SEMANTIC_IO;
+    if (!f->large_store) {
+        if (n > BLOB_CAP - f->temporary_size) return YAN_SEMANTIC_IO;
+        memcpy(f->temporary + f->temporary_size, in, n);
+    }
+    f->temporary_size += n;
     return YAN_SEMANTIC_OK;
 }
 static YanSemanticResult finish_write(void *opaque)
@@ -126,7 +139,7 @@ static YanSemanticResult publish(void *opaque)
     Fake *f = opaque;
     if (f->publish_error) return f->publish_error;
     if (!f->source_is_closed) return YAN_SEMANTIC_IO;
-    memcpy(f->stored, f->temporary, f->temporary_size);
+    if (!f->large_store) memcpy(f->stored, f->temporary, f->temporary_size);
     f->stored_size = f->temporary_size; f->exists = true; ++f->publishes;
     return YAN_SEMANTIC_OK;
 }
@@ -159,15 +172,16 @@ static bool evidence_sink(void *opaque, const YanSemanticRow *row)
     TEST_ASSERT_EQUAL_UINT32(nexts, fake.nexts);
     return sink(opaque, row);
 }
-static YanSemanticResult bind(void)
+static YanSemanticResult bind_capacity(uint32_t capacity)
 {
-    YanSemanticSource source = {&fake, sizeof fake, next_file, read_source};
+    YanSemanticSource source = {&fake, sizeof fake, next_file, read_source, capacity};
     YanSemanticProvider provider = {&fake, sizeof fake, start, embed, stop};
     YanSemanticStore store = {&fake, sizeof fake, open_read, read_index, close_read,
         begin_write, write_index, finish_write, publish, discard};
     fake.source_is_closed = false; fake.query_done = false;
     return yan_semantic_init(&ctx, &source, &provider, &store, &identity, close_source);
 }
+static YanSemanticResult bind(void) { return bind_capacity(63u); }
 static void add(const char *name, const char *text)
 {
     uint32_t i = fake.count++;
@@ -724,6 +738,98 @@ static void test_evidence_old_new_agree_and_keep_score_precision(void)
     TEST_ASSERT_TRUE(score == fake.rows[0].score);
 }
 
+static void add_repeated(const char *name, uint32_t size, uint8_t byte)
+{
+    uint32_t i = fake.count++;
+    TEST_ASSERT_LESS_THAN_UINT32(FAKE_MAX, i);
+    memcpy(fake.names[i], name, strlen(name) + 1);
+    fake.texts[i] = NULL; fake.sizes[i] = size; fake.slots[i] = i;
+    fake.repeated[i] = byte;
+}
+/* 0036-R6: the index header's skipped field is bounded by the mounted image's
+ * runtime capacity. 64 skipped files are legal for N=1023 and must be accepted
+ * with a matching corpus skipped count (a v1 63 bound would reject the header). */
+static void test_index_skipped_uses_runtime_capacity(void)
+{
+    for (uint32_t i = 0; i < 64u; ++i) {
+        char name[8];
+        snprintf(name, sizeof name, "f%02u", (unsigned)i);
+        add(name, "\xff");
+    }
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind_capacity(1023u));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_rebuild(&ctx, &summary));
+    TEST_ASSERT_EQUAL_UINT32(0, summary.segments);
+    TEST_ASSERT_EQUAL_UINT32(64, summary.skipped);
+    TEST_ASSERT_EQUAL_UINT32(1, fake.publishes);
+    TEST_ASSERT_EQUAL_UINT8(64, fake.stored[20]);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind_capacity(1023u));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_status(&ctx, &summary));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INDEX_READY, summary.state);
+    TEST_ASSERT_EQUAL_UINT32(64, summary.skipped);
+}
+/* The same 64 skipped count is rejected when the mounted capacity is 63, and a
+ * 64th file is corrupt for a v1 image. */
+static void test_v1_capacity_rejects_skipped_64_and_64_files(void)
+{
+    add("bad", "\xff");
+    rebuild();
+    TEST_ASSERT_EQUAL_UINT32(1, summary.skipped);
+    fake.stored[20] = 64u;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind_capacity(63u));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_status(&ctx, &summary));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INDEX_CORRUPT, summary.state);
+
+    fake.count = 0;
+    for (uint32_t i = 0; i < 64u; ++i) {
+        char name[8];
+        snprintf(name, sizeof name, "g%02u", (unsigned)i);
+        add(name, "x");
+    }
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind_capacity(63u));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_CORRUPT, yan_semantic_rebuild(&ctx, &summary));
+}
+/* 0036-R6: exactly 8192 segments build, the 8193rd returns LIMIT, and a failed
+ * scan never touches the previously published index bytes. */
+static void test_segment_limit_exact_and_no_partial_index(void)
+{
+    add_repeated("huge", 512u + 8191u * 448u, 'x');
+    fake.large_store = true;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind());
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_rebuild(&ctx, &summary));
+    TEST_ASSERT_EQUAL_UINT32(8192, summary.segments);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INDEX_READY, summary.state);
+    TEST_ASSERT_EQUAL_UINT32(1, fake.publishes);
+    const size_t published_size = fake.stored_size;
+    const uint32_t publishes = fake.publishes;
+    const YanSemanticSummary before = summary;
+
+    fake.sizes[0] += 1u;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind());
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_LIMIT, yan_semantic_rebuild(&ctx, &summary));
+    TEST_ASSERT_EQUAL_UINT32(publishes, fake.publishes);
+    TEST_ASSERT_EQUAL_UINT64(published_size, fake.stored_size);
+    TEST_ASSERT_FALSE(fake.writing);
+    TEST_ASSERT_EQUAL_MEMORY(&before, &summary, sizeof summary);
+}
+static void test_segment_limit_8193_preserves_small_index(void)
+{
+    add("a", "a");
+    rebuild();
+    static uint8_t old[BLOB_CAP];
+    const size_t n = fake.stored_size;
+    memcpy(old, fake.stored, n);
+    fake.count = 0;
+    add_repeated("huge", 512u + 8191u * 448u + 1u, 'x');
+    const uint32_t publishes = fake.publishes;
+    const YanSemanticSummary before = summary;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, bind());
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_LIMIT, yan_semantic_rebuild(&ctx, &summary));
+    TEST_ASSERT_EQUAL_MEMORY(old, fake.stored, n);
+    TEST_ASSERT_EQUAL_UINT32(publishes, fake.publishes);
+    TEST_ASSERT_EQUAL_UINT64(n, fake.stored_size);
+    TEST_ASSERT_FALSE(fake.writing);
+    TEST_ASSERT_EQUAL_MEMORY(&before, &summary, sizeof summary);
+}
 int main(void)
 {
     UNITY_BEGIN();
@@ -749,5 +855,9 @@ int main(void)
     RUN_TEST(test_evidence_all_failures_preserve_entire_holder);
     RUN_TEST(test_evidence_empty_source_has_complete_identity);
     RUN_TEST(test_evidence_old_new_agree_and_keep_score_precision);
+    RUN_TEST(test_index_skipped_uses_runtime_capacity);
+    RUN_TEST(test_v1_capacity_rejects_skipped_64_and_64_files);
+    RUN_TEST(test_segment_limit_exact_and_no_partial_index);
+    RUN_TEST(test_segment_limit_8193_preserves_small_index);
     return UNITY_END();
 }

@@ -10,6 +10,8 @@ Agent 搜索到 irq.txt 后，能列出具名块、取 irq.txt#irq-entry 的完�
 
 ## SPEC
 
+> 后续扩展：[0036-R4/R6](0036-yanfs-multi-block-directory.md#0036-r4上层服务在大容量下行为正确) 将本节的最多 63 文件、slot<63 和计数容量约束扩展为镜像实际容量 N（最多 4095）。来源编码、分页、MCP schema 和其余校验保持；本节原文保留对应阶段范围，交付状态见 [STATUS](../STATUS.md)。
+
 1. 为现有 Linux/WSL stdio MCP 增加四个工具，排在原两个工具之后：yanos_block_list、yanos_block_read、yanos_block_refs、yanos_block_backlinks。list/refs 参数为 name，read/backlinks 参数为 name 与 block_id；均可带 expected_source（64个小写十六进制字符，沿0030 source身份）。未知字段、坏名称/ID/身份为 INVALID，零来源I/O。原工具参数、结果和排名保持。
 2. list返回声明顺序的全部块（最多64），包括ID、marker行、内容物理行及文件绝对半开字节范围。refs按源字节顺序、backlinks按ASCII文件名再位置，均前20处加全部次数；只有backlinks报告skipped非目标非文本文件数。目标状态区分存在、缺文件、缺块。行为和错误顺序沿0032；refs只校验显示的20个目标；backlinks允许缺目标。查询源或所校验目标为非文本时报INVALID_TEXT；backlinks扫描非目标非文本文件才跳过；坏头/坏块明确失败。
 3. read用可选offset指定块内字节偏移，默认0；固定每页最多65536原文字节，末尾退到完整UTF-8字符与CRLF边界。offset须在范围内且不落在UTF-8字符或CRLF内部；offset等于块长度允许空终页。offset>0时必须携带expected_source。结果带完整块范围、当前页绝对范围/物理行、原文、complete、next_offset（完成为null）。空页first/last为0。调用方按next_offset读取至complete，可拼回完整块，不隐式截断。物理行包含元数据头；页可从一条长行中间开始。

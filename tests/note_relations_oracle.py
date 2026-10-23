@@ -34,7 +34,7 @@ def reference(mode, target, files):
                         rows.append((name, 1, out, incoming, shared))
                 rows.sort(key=lambda r: (-(r[2]+r[3]), -r[4], r[0]))
         total = len(rows)
-        shown = rows[:20] if mode == 'related' else rows
+        shown = rows[:20] if mode in ('backlinks', 'related') else rows
         return 0, shown, (total, len(shown), int(target in names))
     except metadata.MetadataError:
         return 4, [], None

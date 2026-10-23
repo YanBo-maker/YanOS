@@ -98,10 +98,11 @@ static void expect_digest_failure(YanSemanticResult expected)
 void setUp(void)
 {
     memset(&fixture, 0, sizeof fixture);
-    memset(&corpus, 0, sizeof corpus);
-    source = (YanSemanticSource){&fixture, sizeof fixture, next_file, read_file};
+    yan_semantic_corpus_release(&corpus);
+    source = (YanSemanticSource){&fixture, sizeof fixture, next_file, read_file,
+                                  63u};
 }
-void tearDown(void) {}
+void tearDown(void) { yan_semantic_corpus_release(&corpus); }
 
 static void test_empty_and_order(void)
 {
@@ -367,6 +368,50 @@ static void test_digest_validation_and_unpublished_output(void)
     broken = source; broken.context_size = SIZE_MAX;
     TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_source_digest(&broken, out));
 }
+/* 0036-R6: slot bounds come from the source's runtime capacity, not a constant
+ * 63. A slot 1022 entry is legal for a 1023-capacity v2 image and corrupt for
+ * a v1 image. */
+static void test_runtime_capacity_source_slots(void)
+{
+    uint8_t out[32];
+    add("deep", 1022, "x\n");
+    source.file_capacity = 1023u;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_corpus_scan(&corpus, &source));
+    TEST_ASSERT_EQUAL_UINT32(1, corpus.file_count);
+    TEST_ASSERT_EQUAL_UINT32(1022, corpus.files[0].file.slot);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, out));
+
+    /* The 4095 hard ceiling is a legal runtime capacity too. */
+    fixture.entries[0].file.slot = 4094u;
+    source.file_capacity = 4095u;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_corpus_scan(&corpus, &source));
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_OK, yan_semantic_source_digest(&source, out));
+
+    source.file_capacity = 63u;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_CORRUPT, yan_semantic_corpus_scan(&corpus, &source));
+    memset(out, 0xa5, sizeof out);
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_CORRUPT, yan_semantic_source_digest(&source, out));
+    for (unsigned i = 0; i < sizeof out; ++i)
+        TEST_ASSERT_EQUAL_UINT8(0xa5, out[i]);
+}
+/* Invalid capacity (0, above 4095) is INVALID; a slot at or above the runtime
+ * capacity is CORRUPT. Neither may silently fall back to 63. */
+static void test_invalid_and_out_of_range_capacity(void)
+{
+    add("a", 0, "a\n");
+    source.file_capacity = 0u;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_corpus_scan(&corpus, &source));
+    expect_digest_failure(YAN_SEMANTIC_INVALID);
+
+    source.file_capacity = 4096u;
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_INVALID, yan_semantic_corpus_scan(&corpus, &source));
+    expect_digest_failure(YAN_SEMANTIC_INVALID);
+
+    source.file_capacity = 1023u;
+    add("edge", 1023, "b\n");
+    TEST_ASSERT_EQUAL(YAN_SEMANTIC_CORRUPT, yan_semantic_corpus_scan(&corpus, &source));
+    expect_digest_failure(YAN_SEMANTIC_CORRUPT);
+}
 int main(void)
 {
     UNITY_BEGIN();
@@ -383,5 +428,7 @@ int main(void)
     RUN_TEST(test_digest_matches_scan_and_tracks_source);
     RUN_TEST(test_digest_ignores_bad_header_and_segment_limit);
     RUN_TEST(test_digest_validation_and_unpublished_output);
+    RUN_TEST(test_runtime_capacity_source_slots);
+    RUN_TEST(test_invalid_and_out_of_range_capacity);
     return UNITY_END();
 }

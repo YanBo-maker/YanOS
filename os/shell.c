@@ -2085,7 +2085,9 @@ static YanShellResult run_relation(YanShell *shell, const uint8_t *line,
         return YAN_SHELL_OK;
     }
     if (command == RELATION_CMD_BACKLINKS) {
-        if (!shell_puts(shell, "OK backlinks shown=") ||
+        if (!shell_puts(shell, "OK backlinks total=") ||
+            !shell_put_decimal(shell, summary.total) ||
+            !shell_puts(shell, " shown=") ||
             !shell_put_decimal(shell, summary.shown) ||
             !shell_puts(shell, " target=") ||
             !shell_puts(shell, summary.target_exists ? "OK\r\n"

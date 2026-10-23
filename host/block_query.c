@@ -173,7 +173,8 @@ static YanBlockQueryResult observe(YanBlockQuery *query, uint8_t digest[32])
     if (result != YAN_FS_OK) return map_fs(result);
     if (cancelled(query->cancel)) return YAN_BLOCK_QUERY_CANCELLED;
     CancelSource context = {&query->source, query->cancel};
-    YanSemanticSource source = {&context, sizeof context, cancel_next, cancel_read};
+    YanSemanticSource source = {&context, sizeof context, cancel_next, cancel_read,
+                                query->source.file_capacity};
     YanSemanticResult semantic = yan_semantic_source_digest(&source, digest);
     if (semantic != YAN_SEMANTIC_OK)
         return map_semantic(semantic, query->cancel);

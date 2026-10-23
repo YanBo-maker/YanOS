@@ -37,19 +37,25 @@ static YanSemanticResult hash_identity(YanSemanticSha256 *hash,
     if (r == YAN_SEMANTIC_OK) r = hash_u32(hash, file->size);
     return r;
 }
+static bool capacity_valid(const YanSemanticSource *source)
+{
+    return source->file_capacity >= 1u &&
+           source->file_capacity <= YAN_SEMANTIC_CAPACITY_MAX;
+}
 static bool source_ready(const YanSemanticSource *source)
 {
     return source->next != NULL && source->read != NULL &&
-           span(source->context, source->context_size);
+           span(source->context, source->context_size) &&
+           capacity_valid(source);
 }
 /* The shared logical view: strictly increasing physical cursor, slot/name
- * validity, no duplicate slot or name, files in slots 0..62 (at most 63
- * files), ASCII name order. Physical directory order is not identity; sorted
- * order is. */
+ * validity, no duplicate slot or name, files in slots below the source's
+ * runtime capacity (at most that many files), ASCII name order. Physical
+ * directory order is not identity; sorted order is. */
 static YanSemanticResult collect_files(const YanSemanticSource *source,
-                                       YanSemanticFile files[YAN_SEMANTIC_FILE_MAX],
-                                       uint32_t *count)
+                                       YanSemanticFile *files, uint32_t *count)
 {
+    const uint32_t capacity = source->file_capacity;
     uint32_t cursor = 0, used = 0;
     for (;;) {
         YanSemanticFile file;
@@ -57,8 +63,8 @@ static YanSemanticResult collect_files(const YanSemanticSource *source,
         YanSemanticResult r = source->next(source->context, &cursor, &file);
         if (r == YAN_SEMANTIC_MISSING) break;
         if (r != YAN_SEMANTIC_OK) return r;
-        if (cursor <= previous || file.slot >= YAN_SEMANTIC_FILE_MAX ||
-            used >= YAN_SEMANTIC_FILE_MAX) return YAN_SEMANTIC_CORRUPT;
+        if (cursor <= previous || file.slot >= capacity ||
+            used >= capacity) return YAN_SEMANTIC_CORRUPT;
         const char *end = memchr(file.name, 0, sizeof file.name);
         if (end == NULL || !yan_note_name_valid((const uint8_t *)file.name,
                                                 (uint32_t)(end - file.name)))
@@ -106,16 +112,32 @@ YanSemanticResult yan_semantic_corpus_scan(YanSemanticCorpus *corpus,
         overlaps(corpus, sizeof *corpus, source->context, source->context_size))
         return YAN_SEMANTIC_INVALID;
     corpus->file_count = corpus->segment_count = corpus->skipped = 0;
-    YanSemanticFile files[YAN_SEMANTIC_FILE_MAX];
+    free(corpus->files);
+    corpus->files = NULL;
+    /* Both the canonical list and the per-file entries are sized by the
+     * mounted image's runtime capacity, never by the 4095 hard ceiling. */
+    const uint32_t capacity = source->file_capacity;
+    YanSemanticCorpusFile *entries = calloc(capacity, sizeof *entries);
+    YanSemanticFile *files = calloc(capacity, sizeof *files);
+    if (entries == NULL || files == NULL) {
+        free(entries);
+        free(files);
+        return YAN_SEMANTIC_NOSPACE;
+    }
+    corpus->files = entries;
     uint32_t file_count = 0;
     YanSemanticResult r = collect_files(source, files, &file_count);
-    if (r != YAN_SEMANTIC_OK) return r;
+    if (r != YAN_SEMANTIC_OK) {
+        free(files);
+        return r;
+    }
     corpus->file_count = file_count;
     for (uint32_t i = 0; i < file_count; ++i) {
         YanSemanticCorpusFile *entry = &corpus->files[i];
         memset(entry, 0, sizeof *entry);
         entry->file = files[i];
     }
+    free(files);
     r = yan_semantic_sha256_init(&corpus->hasher);
     if (r != YAN_SEMANTIC_OK) return r;
     /* Complete classification of every file before metadata/chunks. Hash the
@@ -188,6 +210,14 @@ YanSemanticResult yan_semantic_corpus_scan(YanSemanticCorpus *corpus,
     return YAN_SEMANTIC_OK;
 }
 
+void yan_semantic_corpus_release(YanSemanticCorpus *corpus)
+{
+    if (corpus == NULL) return;
+    free(corpus->files);
+    corpus->files = NULL;
+    corpus->file_count = corpus->segment_count = corpus->skipped = 0;
+}
+
 YanSemanticResult yan_semantic_source_digest(const YanSemanticSource *source,
                                              uint8_t out[32])
 {
@@ -199,31 +229,36 @@ YanSemanticResult yan_semantic_source_digest(const YanSemanticSource *source,
         overlaps(out, YAN_SEMANTIC_SHA256_DIGEST_SIZE,
                  source->context, source->context_size))
         return YAN_SEMANTIC_INVALID;
-    YanSemanticFile files[YAN_SEMANTIC_FILE_MAX];
+    YanSemanticFile *files = calloc(source->file_capacity, sizeof *files);
+    /* The block-read seam maps allocation failures to IO (0033); NOSPACE
+     * would be interpreted as a content LIMIT by that caller. */
+    if (files == NULL) return YAN_SEMANTIC_IO;
     uint32_t count = 0;
     YanSemanticResult r = collect_files(source, files, &count);
-    if (r != YAN_SEMANTIC_OK) return r;
-    YanSemanticSha256 hasher = {0};
-    r = yan_semantic_sha256_init(&hasher);
-    if (r != YAN_SEMANTIC_OK) return r;
-    uint8_t bytes[4096], digest[32];
-    for (uint32_t i = 0; i < count; ++i) {
-        r = hash_identity(&hasher, &files[i]);
-        if (r != YAN_SEMANTIC_OK) return r;
-        for (uint32_t offset = 0; offset < files[i].size;) {
-            uint32_t amount = files[i].size - offset;
-            if (amount > sizeof bytes) amount = sizeof bytes;
-            r = source->read(source->context, files[i].name, offset, bytes, amount);
-            if (r == YAN_SEMANTIC_OK)
-                r = yan_semantic_sha256_update(&hasher, bytes, amount);
-            if (r != YAN_SEMANTIC_OK) return r;
-            offset += amount;
+    if (r == YAN_SEMANTIC_OK) {
+        YanSemanticSha256 hasher = {0};
+        r = yan_semantic_sha256_init(&hasher);
+        uint8_t bytes[4096], digest[32];
+        for (uint32_t i = 0; r == YAN_SEMANTIC_OK && i < count; ++i) {
+            r = hash_identity(&hasher, &files[i]);
+            for (uint32_t offset = 0; r == YAN_SEMANTIC_OK &&
+                                      offset < files[i].size;) {
+                uint32_t amount = files[i].size - offset;
+                if (amount > sizeof bytes) amount = sizeof bytes;
+                r = source->read(source->context, files[i].name, offset,
+                                  bytes, amount);
+                if (r == YAN_SEMANTIC_OK)
+                    r = yan_semantic_sha256_update(&hasher, bytes, amount);
+                offset += amount;
+            }
+        }
+        /* Publish only after every read and final succeeded; every failure
+         * above leaves all 32 caller bytes untouched. */
+        if (r == YAN_SEMANTIC_OK) {
+            r = yan_semantic_sha256_final(&hasher, digest);
+            if (r == YAN_SEMANTIC_OK) memcpy(out, digest, sizeof digest);
         }
     }
-    /* Publish only after every read and final succeeded; a failure above
-     * leaves all 32 caller bytes untouched. */
-    r = yan_semantic_sha256_final(&hasher, digest);
-    if (r != YAN_SEMANTIC_OK) return r;
-    memcpy(out, digest, sizeof digest);
-    return YAN_SEMANTIC_OK;
+    free(files);
+    return r;
 }

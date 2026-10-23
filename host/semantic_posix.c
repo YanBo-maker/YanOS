@@ -292,7 +292,8 @@ static YanSemanticResult publish_index(void *opaque)
 }
 void yan_semantic_posix_bind_source(YanSemanticPosix *p, YanSemanticSource *source)
 {
-    *source = (YanSemanticSource){p, sizeof *p, next_file, read_file};
+    *source = (YanSemanticSource){p, sizeof *p, next_file, read_file,
+                                  p->fs.entry_capacity};
 }
 void yan_semantic_posix_bind(YanSemanticPosix *p, YanSemanticSource *source, YanSemanticStore *store)
 {

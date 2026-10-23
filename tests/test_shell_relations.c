@@ -582,12 +582,12 @@ static void shell_backlinks_exact_golden(void)
         "BACKLINK alpha.txt\r\n"
         "BACKLINK ghost.txt\r\n"
         "BACKLINK zeta.txt\r\n"
-        "OK backlinks shown=3 target=OK\r\n",
+        "OK backlinks total=3 shown=3 target=OK\r\n",
         "backlinks_golden_bytes");
     output_reset();
     TEST_ASSERT_EQUAL_INT_MESSAGE(YAN_SHELL_OK, run("backlinks absent.txt"),
                                   "backlinks_dangling_status");
-    assert_output_tagged("OK backlinks shown=0 target=DANGLING\r\n",
+    assert_output_tagged("OK backlinks total=0 shown=0 target=DANGLING\r\n",
                          "backlinks_dangling_receipt");
 }
 

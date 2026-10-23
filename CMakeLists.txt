@@ -304,6 +304,14 @@ if(BUILD_TESTING)
     target_compile_options(test_semantic_corpus PRIVATE ${YAN_WARNINGS})
     add_test(NAME semantic_corpus COMMAND test_semantic_corpus)
     set_tests_properties(semantic_corpus PROPERTIES TIMEOUT 30)
+    add_executable(test_semantic_digest_alloc tests/test_semantic_digest_alloc.c)
+    target_include_directories(test_semantic_digest_alloc PRIVATE host)
+    target_link_libraries(test_semantic_digest_alloc PRIVATE
+                          yan_semantic_text yan_note_format unity::framework)
+    target_compile_options(test_semantic_digest_alloc PRIVATE ${YAN_WARNINGS})
+    add_test(NAME semantic_digest_alloc COMMAND test_semantic_digest_alloc)
+    set_tests_properties(semantic_digest_alloc PROPERTIES TIMEOUT 30
+                        LABELS "0036-R4-AC4;0036-R6-AC1")
 
     add_executable(test_semantic tests/test_semantic.c)
     target_link_libraries(test_semantic PRIVATE yan_semantic_core unity::framework)
@@ -329,6 +337,11 @@ if(BUILD_TESTING)
         add_test(NAME semantic_mutation_gate COMMAND "${Python3_EXECUTABLE}" -B
                  "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_semantic_mutation_gate.py")
         set_tests_properties(semantic_mutation_gate PROPERTIES TIMEOUT 120)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME large_capacity_gate COMMAND "${Python3_EXECUTABLE}" -B
+                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_large_capacity_gate.py")
+            set_tests_properties(large_capacity_gate PROPERTIES TIMEOUT 30)
+        endif()
         if(YAN_BUILD_SEMANTIC)
             add_executable(test_mcp_protocol tests/test_mcp_protocol.c tools/mcp_worker.c)
             target_link_libraries(test_mcp_protocol PRIVATE yan_mcp_protocol yan_block_query
@@ -1094,6 +1107,27 @@ if(BUILD_TESTING)
                     set_tests_properties(yanfs_r8_performance PROPERTIES
                                          SKIP_RETURN_CODE 77 TIMEOUT 900
                                          LABELS "0036-R8-AC4")
+                    if(TARGET yan_mcp)
+                        add_executable(large_terms_probe tests/large_terms_probe.c)
+                        target_link_libraries(large_terms_probe PRIVATE yan_semantic_posix yan_search_terms)
+                        target_compile_options(large_terms_probe PRIVATE ${YAN_WARNINGS})
+                        add_test(NAME yanfs_large_capacity
+                            COMMAND "${Python3_EXECUTABLE}" -B
+                                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_large_capacity.py"
+                                    --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                                    --work "${CMAKE_BINARY_DIR}/yanfs-large-capacity"
+                                    --cc "${CMAKE_C_COMPILER}"
+                                    --mkfs "$<TARGET_FILE:yan_mkfs>"
+                                    --run "$<TARGET_FILE:yan_run>"
+                                    --guest "${YAN_TERMINAL_ELF}"
+                                    --semantic "$<TARGET_FILE:yan_semantic>"
+                                    --mcp "$<TARGET_FILE:yan_mcp>"
+                                    --terms-probe "$<TARGET_FILE:large_terms_probe>"
+                                    --semantic-runner "${CMAKE_CURRENT_SOURCE_DIR}/tests/large_semantic_runner.py")
+                        set_tests_properties(yanfs_large_capacity PROPERTIES
+                            SKIP_RETURN_CODE 77 TIMEOUT 1200
+                            LABELS "0036-R4-AC1;0036-R4-AC2;0036-R4-AC3;0036-R4-AC4;0036-R6-AC1;0036-R6-AC2")
+                    endif()
                     add_test(NAME arena_accounting
                         COMMAND "${Python3_EXECUTABLE}" -B
                                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_arena_accounting.py"

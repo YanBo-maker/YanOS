@@ -11,7 +11,8 @@
  * declarations that 0027 stores in a note's header.
  *
  * The behavioural contract is docs/specs/0028-knowledge-relations.md,
- * "公共服务与接口责任". This header fixes the public seam that the later shell
+ * "公共服务与接口责任", extended by 0036-R4 (runtime capacity and backlinks
+ * top20/full total). This header fixes the public seam that the later shell
  * binding and the native/oracle suites share:
  *
  *   - yan_relation_links: the declared outgoing links of one existing source,
@@ -54,6 +55,7 @@
 #define YAN_RELATION_PREFIX_BYTES UINT32_C(4096)
 #define YAN_RELATION_MAX_SHARED_TAGS UINT32_C(16)
 #define YAN_RELATION_RELATED_SHOWN UINT32_C(20)
+#define YAN_RELATION_BACKLINKS_SHOWN UINT32_C(20)
 #define YAN_RELATION_MAX_ROWS YAN_FS_MAX_FILES
 
 /* One synchronised relation row. Every field is deterministic on every result
@@ -77,9 +79,9 @@ typedef struct {
 /* Result summary, published only on YAN_NOTE_OK.
  *
  *   links      total == shown, each <= 16, target_exists = true
- *   backlinks  total == shown, each <= 63, target_exists = the directory
+ *   backlinks  total is every source, shown == min(total, 20), target_exists = the directory
  *              observation of the cited name (false is a normal dangling name)
- *   related    total <= 62 is every candidate, shown == min(total, 20),
+ *   related    total is every candidate except self, shown == min(total, 20),
  *              target_exists = true */
 typedef struct {
     uint32_t total;
