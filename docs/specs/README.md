@@ -37,6 +37,6 @@
 | [0031](0031-mcp-retrieval-tools.md) | 面向Agent的只读MCP检索工具 | Implemented | 无 | 无 |
 | [0032](0032-block-references.md) | 具名块与精确正文引用 | Implemented | 无 | 无 |
 | [0033](0033-block-mcp-navigation.md) | Agent 的只读块导航 | Implemented | 无 | [0036-R4/R6](0036-yanfs-multi-block-directory.md#0036-r4上层服务在大容量下行为正确)（仅文件容量） |
-| [0034](0034-ci-guest-tests-and-status-archive.md) | CI 运行 Guest 默认测试与 STATUS 归档 | Approved | 无 | 无 |
+| [0034](0034-ci-guest-tests-and-status-archive.md) | CI 运行 Guest 默认测试与 STATUS 归档 | Implemented | 无 | 无 |
 | [0035](0035-agent-writable-knowledge.md) | Agent 可写的知识工具 | Approved | 无 | 无 |
 | [0036](0036-yanfs-multi-block-directory.md) | YanFS 多块目录 | Approved | 无整份替代；局部扩展见规格头 | 无 |

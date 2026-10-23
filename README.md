@@ -12,7 +12,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [YanFS](docs/specs/0021-yanfs.md) 已实现并验证格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收。初版采用单根目录、最多 63 文件和连续 extent；覆盖需要新旧内容同时容纳，碎片可能导致 NOSPACE。元数据写失败可能拒挂，不保证断电一致性，不自动修复。实现与验证已完成。
 
-[多块目录](docs/specs/0036-yanfs-multi-block-directory.md)已支持旧 v1 镜像和最多 4095 文件的 v2 镜像，新镜像默认容量为 1023。终端按镜像容量分配服务表；R8 的挂载、名称查找和查询传输优化已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 合入 main。R4/R6 的 Host 语义语料与 MCP 大容量检索已完成整合验收，发布与合入状态见 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81)。R7 离线迁移工具已在 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82) 实现，可复制旧镜像及附件并保留槽号和来源身份；本地整合验证已完成，旧索引格式保持；本轮更新尚未发布，远端检查与合入状态见该 PR。
+[多块目录](docs/specs/0036-yanfs-multi-block-directory.md)支持旧 v1 镜像和最多 4095 文件的 v2 镜像，新镜像默认容量为 1023。终端按镜像容量分配服务表；R8 的挂载、名称查找和查询传输优化已随 [PR #80](https://github.com/YanBo-maker/YanOS/pull/80) 合入 main。R4/R6 的 Host 语义语料与 MCP 大容量检索已随 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81) 合入（`79c8e44`）。R7 离线迁移工具已随 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82) 合入（`26c25fc`），可复制旧镜像及附件，保留槽号和来源身份并复用原盘上语义索引。
 
 [Guest 终端文件操作](docs/specs/0022-terminal-file-operations.md) 已实现并验证：独立应用提供 help、ls、stat、cat、create、write、rm 和 exit，使用 UART 中断等待输入，接入已有 YanFS 镜像。create 创建新文件，write 整文件覆盖；单行最多 1023 字节，超长或非法控制字节整行拒绝。cat 保留合法 UTF-8，并转义指定控制字节和非法编码。实现与验证完成。
 
@@ -38,7 +38,7 @@ YanCPU 已实现 RV32IM 整数指令、CSR、M-mode 异常与中断；平台包�
 
 [具名块与精确正文引用](docs/specs/0032-block-references.md)整体方案已于2026-10-17获批准，工程规格于2026-10-18锁定并提交`2f1d07c`。纯格式、只读FS服务及shell/app接入已编写，原生定向和新增变异组通过；新Guest健康/故障/API及Linux/Windows完整默认回归已通过；统一17实际组亦已通过，独立第3轮已恢复完成集成技术审核，第4轮精确树冻结对齐及F4-D1修后复核已通过，精确树九项总审通过；功能提交`11b0c247`已建立[PR #36](https://github.com/YanBo-maker/YanOS/pull/36)，对应功能head三项远端默认CI通过，项目所有者于2026-10-18批准，经PR #36按merge commit合入main（`d8804be`），阶段历史保留。能力采用文件内显式ID定位正文块、观察精确引用与出现位置反链；改名会断旧地址，不自动修链，旧整文件关系和Host/MCP schema保持。
 
-S/U 模式、虚拟内存分页与抢占式调度尚未实现。覆盖边界、实测与用户审查状态见 [STATUS](docs/STATUS.md)。
+S/U 模式、虚拟内存分页与抢占式调度尚未实现。当前能力与覆盖边界见 [STATUS](docs/STATUS.md)，阶段验证和审查记录见对应规格的 VERIFY 与 [状态历史](docs/STATUS-history.md)。
 
 ## 构建与测试
 
@@ -60,7 +60,7 @@ GCC / Clang 的 Unix 构建可在配置时添加 `-DYAN_ENABLE_SANITIZERS=ON`，
 
 构建 Guest 验证工具可添加 `-DYAN_BUILD_TOOLS=ON`。`yan_run` 支持 RV32 ELF、最大步数、`tohost` 退出、签名区导出和逐条架构状态记录；`yan_difftest` 让 YanCPU 与外部参考模型逐条比较架构状态；`yan_gen` 生成随机 RV32IM 指令流。
 
-Linux 工具配置另提供 `yan_mkfs`，排他创建新 YanFS 镜像，已有文件或链接会被拒绝。`--files N` 取 63…4095，缺省 1023（目录占 16 块）；`--blocks` 必须大于目录块数，因此下面的示例用 64 块：
+Linux 工具配置另提供 `yan_mkfs`，排他创建新 YanFS 镜像，已有文件或链接会被拒绝。`--files N` 取 63…4095，缺省 1023（目录占 16 块）；目录块数 D 为 1 时 `--blocks` 至少为 1，D 大于 1 时必须大于 D；默认镜像至少需要 17 块，下面的示例用 64 块：
 
 ```sh
 cmake -S . -B build/yanfs -DYAN_BUILD_TOOLS=ON
@@ -190,7 +190,7 @@ build/semantic/yan_semantic search --disk-image notes.img --index notes.index --
 build/semantic/yan_semantic status --disk-image notes.img --index notes.index --model model.gguf --runner /path/to/llama-server
 ```
 
-运行前停止使用该镜像的Guest，并保持镜像、模型、runner和索引稳定；工具不下载模型或自动格式化。旁置索引在来源或模型身份变化后STALE，须显式rebuild。结果是原文候选，不生成答案；没有相关内容的问题也可能返回20段。首次加载、每次完整身份校验与模型内存有成本，固定小语料复验不代表任意知识库质量。实现与验证边界见[0029](docs/specs/0029-host-semantic-search.md)和[STATUS](docs/STATUS.md)。
+运行前停止使用该镜像的Guest，并保持镜像、模型、runner和索引稳定；工具不下载模型或自动格式化。旁置索引在来源或模型身份变化后STALE，须显式rebuild。结果是原文候选，不生成答案；没有相关内容的问题也可能返回20段。首次加载、每次完整身份校验与模型内存有成本，固定小语料复验不代表任意知识库质量。实现与真实模型验证边界见[0029 VERIFY](docs/specs/0029-host-semantic-search.md#verify)，当前能力见[STATUS](docs/STATUS.md)。
 
 search省略格式或使用`--format text`保持人读输出；`--format json`输出完整命中原文、物理行号与半开字节范围，以及同次来源、模型、runner和配置四身份。只有search接受该参数。调用方先检查退出码为0，再完整解析JSON；输出失败可能留下前缀，不能仅凭文件存在或JSON可解析就消费。接口与契约见[0030](docs/specs/0030-retrieval-context-json.md)及[host/semantic.h](host/semantic.h)。
 
@@ -214,7 +214,7 @@ build/semantic/yan_mcp --disk-image /absolute/path/notes.img \
   --runner /absolute/path/llama-server
 ```
 
-stdio server的stdout只含协议，不是交互式命令行。调用方以子进程连接；0031/0032已交付基线提供yanos_search与yanos_index_status。0033增加yanos_block_list、yanos_block_read、yanos_block_refs和yanos_block_backlinks，已完成本机验收并随 [PR #38](https://github.com/YanBo-maker/YanOS/pull/38) 合入 main（75e057a）。四个启动路径参数仍必需；块工具只读取镜像，不要求索引、模型或runner文件存在，也不启动模型。工具参数不能指定Host路径或执行命令。来源镜像须停止Guest并在调用期间保持稳定；旧搜索工具的索引需预先用yan_semantic显式rebuild。服务不自动重建索引，也不生成回答。不带 `--allow-write` 时，服务不写笔记；带上该开关后，只有 `yanos_note_create` 和 `yanos_note_replace` 写入启动时指定的那一个镜像。`serverInfo.version` 一律是 `0035`。取消与EOF会停止当前任务并回收本服务拥有的后代，kernel I/O阻塞不承诺固定总回收时限。兼容范围与既有工具schema见[0031](docs/specs/0031-mcp-retrieval-tools.md)，新块工具结果与分页见[0033](docs/specs/0033-block-mcp-navigation.md)，写入开关、锁文件和两个镜像的启动见[写入类 MCP 工具](docs/mcp-write-tools.md)（依据 main `2921fed`）。
+stdio server的stdout只含协议，不是交互式命令行。调用方以子进程连接；0031已交付基线提供yanos_search与yanos_index_status；0032提供Guest具名块服务，未扩展MCP。0033增加yanos_block_list、yanos_block_read、yanos_block_refs和yanos_block_backlinks，已完成本机验收并随 [PR #38](https://github.com/YanBo-maker/YanOS/pull/38) 合入 main（75e057a）。四个启动路径参数仍必需；块工具只读取镜像，不要求索引、模型或runner文件存在，也不启动模型。工具参数不能指定Host路径或执行命令。来源镜像须停止Guest并在调用期间保持稳定；旧搜索工具的索引需预先用yan_semantic显式rebuild。服务不自动重建索引，也不生成回答。不带 `--allow-write` 时，服务不写笔记；带上该开关后，只有 `yanos_note_create` 和 `yanos_note_replace` 写入启动时指定的那一个镜像。`serverInfo.version` 一律是 `0035`。取消与EOF会停止当前任务并回收本服务拥有的后代，kernel I/O阻塞不承诺固定总回收时限。兼容范围与既有工具schema见[0031](docs/specs/0031-mcp-retrieval-tools.md)，新块工具结果与分页见[0033](docs/specs/0033-block-mcp-navigation.md)，写入开关、锁文件和两个镜像的启动见[写入类 MCP 工具](docs/mcp-write-tools.md)（依据 main `2921fed`）。
 
 通用stdio启动参数示例，字段对应SDK的启动配置；不同harness的注册位置由调用方适配，不自动修改全局配置：
 
@@ -258,7 +258,7 @@ async def main():
 asyncio.run(main())
 ```
 
-Agent/harness取得完整原文、出处和四身份后自行回答；引用存在不证明答案内容真实。官方SDK是显式集成验收依赖，不是生产C工具或默认核心构建依赖。当前本机全量及真实模型验收进度见[STATUS](docs/STATUS.md)，不由上述用法示例推导已完成覆盖。
+Agent/harness取得完整原文、出处和四身份后自行回答；引用存在不证明答案内容真实。官方SDK是显式集成验收依赖，不是生产C工具或默认核心构建依赖。对应基线的本机全量、SDK及真实模型验收记录见[0031 VERIFY](docs/specs/0031-mcp-retrieval-tools.md#verify)，后续阶段验证见各规格的 VERIFY，不由上述用法示例推导已完成覆盖。
 
 ### 写入笔记
 
@@ -297,7 +297,7 @@ ctest --test-dir build/semantic --no-tests=error -R '^guest_learning_note$' --ou
 
 `expected_source` 与当前整库身份不一致、并且这次的 `text` 与已有文件内容不同时，工具返回 `{"code":"STALE"}`，镜像不变。调用方再做一次不带旧身份的预览，把新的 `text` 和 `diff` 给闫博确认，然后用新的 `source_sha256` 提交。文件内容已经等于 `text` 时，提交成功并带 `"unchanged": true`，这时不返回 STALE。参数与错误码见[写入类 MCP 工具](docs/mcp-write-tools.md)。
 
-变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 在Linux工具/provider开启配置可注册十七组（0032统一执行结果另见 [STATUS-history](docs/STATUS-history.md)）：`note_blocks_mutation`、`mcp_mutation`、`semantic_mutation`、`note_relations_mutation`、`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `note_blocks_mutation_gate`、`mcp_mutation_gate`、`semantic_mutation_gate`、`note_relations_mutation_gate`、`note_metadata_mutation_gate`、`search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，当前计数与测量日期见 [STATUS](docs/STATUS.md)。
+变异检查默认关闭。启用工具与所需依赖后，添加 `-DYAN_ENABLE_MUTATION_TESTS=ON` 在Linux工具/provider开启配置可注册十七组（0032统一执行结果另见 [STATUS-history](docs/STATUS-history.md)）：`note_blocks_mutation`、`mcp_mutation`、`semantic_mutation`、`note_relations_mutation`、`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`。默认套件中的 `note_blocks_mutation_gate`、`mcp_mutation_gate`、`semantic_mutation_gate`、`note_relations_mutation_gate`、`note_metadata_mutation_gate`、`search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_gate` 和 `terminal_mutation_gate` 检查分类器判据，随默认回归运行；用 `-E '_mutation$'` 运行默认套件，`-R '_mutation$'` 选择实际变异。NEMU 差分变异组按外部参考模型依赖另行注册。运行要求见 [开发准则](CONTRIBUTING.md)，各阶段的实际计数与测量日期见对应规格的 VERIFY，本次主线合入见 [0036 VERIFY](docs/specs/0036-yanfs-multi-block-directory.md#verify-执行记录)。
 
 开启变异配置后还会注册 `guest_console_mutation_gate`：它检查共享的真实Bash判定函数，并运行实际编译控制，不属于上述十个puregate，也不替代十七组实际变异。
 

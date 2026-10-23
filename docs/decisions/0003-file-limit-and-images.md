@@ -48,7 +48,7 @@
 4. v1 镜像不迁移也能继续用；迁移是离线复制，原镜像不改。
 5. 子目录主要解决「分类」，而现有的标签、链接和两个镜像已经可以分类。
 
-## 图片：存放位置和流程（详见 0037）
+## 图片：存放位置和流程（计划中的 0037，尚未入库或实现）
 
 - 图片文件放在 Host 上，**跟着各自的镜像走**：`notes.img` 的图片放在 `notes.img.assets/img/`，`learning.img` 的放在 `learning.img.assets/img/`（路径是 `realpath(image)` 加 `.assets/img/`）。两个镜像各管各的，和 0035 一样不跨镜像解析。
 - 每个镜像里有一个 YanFS 文本文件 `img.index`，每张已登记的图片一行：`名称 字节数 sha256`。Guest 看不到 Host 上的目录，只能靠这个文件判断图片在不在：引用的名称不在 `img.index` 里，就显示 DANGLING。
@@ -72,7 +72,7 @@
 ## 追加裁定（闫博 2026-10-20）
 
 - YanFS 文件硬上限现在就提到 4095（`YAN_FS_MAX_DIR_BLOCKS` = 64），取代上文的 2047；`--files` 缺省仍为 1023。
-- 模拟器 RAM 定为 64 MiB，Guest 可用满 32 MiB（`__yan_arena_end = 0x80000000 + 32 MiB`），原「五个 context ≤ 2 MiB」预算由 0039 的 32 MiB 预算取代。
+- 模拟器 RAM 定为 64 MiB，Guest 可用满 32 MiB（`__yan_arena_end = 0x80000000 + 32 MiB`），原「五个 context ≤ 2 MiB」预算由 [0036](../specs/0036-yanfs-multi-block-directory.md) 的 Guest 整体 32 MiB 预算取代。
 - 4095 下的 O(N²) 由 0040 处理；0040-P1 实测与 Q2（全库操作超 5×10⁷ 步时怎么办）仍待定。
 
 ## R7 迁移边界澄清（闫博 2026-10-21 批准）

@@ -22,7 +22,7 @@
 
 ## 两个镜像各起一个进程
 
-每个 `yan_mcp` 只接受一个 `--disk-image`。普通笔记和学习笔记分成两个进程，在客户端里配成两个 server。锁文件和整库身份都按这个镜像的 `realpath` 分开。两个进程的 `--disk-image` 指向同一个文件时，`realpath` 相同，共用一把锁，调用按单镜像处理。
+每个 `yan_mcp` 只接受一个 `--disk-image`。普通笔记和学习笔记分成两个进程，在客户端里配成两个 server。锁文件按镜像的 `realpath` 区分；整库身份 `source_sha256` 按目录槽号、名称、大小和全部文件内容计算，不包含镜像路径。保留这些信息的副本可以有相同身份。两个进程的 `--disk-image` 指向同一个文件时，`realpath` 相同，共用一把锁，调用按单镜像处理。
 
 ```sh
 build/semantic/yan_mcp --allow-write \
@@ -73,7 +73,7 @@ Agent 可以出题、核对、写 `log` 和 `unknown`，把条目移入 `known` 
 
 确认之后再调同一个工具：`dry_run` 为 false 或不传，`expected_source` 填预览返回的 `source_sha256`，`name` 和 `text` 与预览时相同。成功响应里 `source_sha256` 是写后的整库身份；`previous_source_sha256` 在新建时为 null，在覆盖时为写前身份。只有目标文件已经存在且与 `text` 逐字节相同时，响应才多一个 `"unchanged": true`，并且不写盘（[`tools/mcp_note.c`](../tools/mcp_note.c) 的 `encode_commit`）。
 
-`diff` 去掉新旧内容相同的前缀行和后缀行。每行带上结尾的 LF；末尾没有 LF 的一段也算一行。完全相同时 `start_line` 为 0，`removed` 和 `added` 都是空数组。新建时旧内容是零行，`start_line` 为 1。[`tests/mcp_note_checks.py`](../tests/mcp_note_checks.py) 的预览用例固定了四组结果，例如旧内容 `x\ny\nz\n`、新内容 `x\nY\nz\n` 时，`diff` 为 `{"start_line":2,"removed":["y\n"],"added":["Y\n"]}`。
+`diff` 去掉新旧内容相同的前缀行和后缀行。每行带上结尾的 LF；末尾没有 LF 的一段也算一行。完全相同时 `start_line` 为 0，`removed` 和 `added` 都是空数组。新建时旧内容是零行；新内容非空时 `start_line` 为 1，新内容也为空时为 0，两个行数组均为空。[`tests/mcp_note_checks.py`](../tests/mcp_note_checks.py) 的预览用例固定了四组结果，例如旧内容 `x\ny\nz\n`、新内容 `x\nY\nz\n` 时，`diff` 为 `{"start_line":2,"removed":["y\n"],"added":["Y\n"]}`。
 
 名称在 schema 里是 1–31 个字符。真正写入前还要过 YanFS 名称规则：只含 `A-Za-z0-9._-`，拒绝 `.` 和 `..`（[`os/note_metadata_format.c`](../os/note_metadata_format.c) 的 `yan_note_name_valid`）。正文长度不超过 16384 字节，并且要通过 0032 的文本检查（[`host/note_write.c`](../host/note_write.c) 的 `yan_note_write_check`）。不合格时工具错误为 `{"code":"INVALID"}`，不打开镜像。
 
