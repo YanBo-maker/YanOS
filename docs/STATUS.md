@@ -6,7 +6,7 @@
 
 主线已具备 [0035](specs/0035-agent-writable-knowledge.md) 学习记录联合验收、dsh 双库真实试用和写工具文档自动核对；[PR #85](https://github.com/YanBo-maker/YanOS/pull/85)、[PR #86](https://github.com/YanBo-maker/YanOS/pull/86)、[PR #87](https://github.com/YanBo-maker/YanOS/pull/87) 已合入，其精确提交的检查与原始日志已核对。接入入口见 [dsh 双库接入](dsh-mcp-quickstart.md)。
 
-本轮在独立任务分支完成整合，当前回归和独立 dsh 对齐进行中；尚未发布本次更新，原 PR #81 的旧 CI 不作新整合树的通过证据。R7 离线迁移仍在后续 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82)；0035、0036 整体状态仍为 Approved。
+本轮本地整合回归与独立对齐已完成，具体范围见 0036 VERIFY；本次整合的发布、远端检查和合入状态统一以 PR #81 的实际记录为准，不把旧 head 的 CI 作为新树的通过证据。R7 离线迁移仍在后续 [PR #82](https://github.com/YanBo-maker/YanOS/pull/82)；0035、0036 整体状态仍为 Approved。
 
 ## 已交付能力
 
@@ -48,7 +48,7 @@
 
 - 0035 写工具参考自动核对已随 [PR #87](https://github.com/YanBo-maker/YanOS/pull/87) 合入 main：真实工具列表比较与纯检查器自测分别运行。[工具说明](mcp-write-tools.md)
 
-- 0036 多块目录与容量分配（R1–R3）、查询性能优化（R8）已在 main；R4/R6 大容量终端、Host 和 MCP 检索已实现，当前分支进行整合验证。[0036](specs/0036-yanfs-multi-block-directory.md)，[PR #81](https://github.com/YanBo-maker/YanOS/pull/81)
+- 0036 多块目录与容量分配（R1–R3）、查询性能优化（R8）已在 main；R4/R6 大容量终端、Host 和 MCP 检索已实现并完成本轮本地整合验证。[0036](specs/0036-yanfs-multi-block-directory.md)，[PR #81](https://github.com/YanBo-maker/YanOS/pull/81)
 
 ## 覆盖边界与已知限制
 
