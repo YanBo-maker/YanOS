@@ -394,3 +394,37 @@ dsh 本阶段复用同一协调会话及原编码/独立验收两个子任务，
 状态文档合并保留 main 历史全文前缀、PR #81 的独有历史追加和旧 main 当前阶段原文；不改写原历史标题。README 和 STATUS 保留 0035 已合入能力，说明本分支的大容量范围；0036 状态仍为 Approved，R7 仍在后续 PR #82。测试细节仅记在本节，STATUS 不新增套件数或耗时。
 
 证据位于 `E:/YanOS/build/20261023-r4-r6-integration/`：`initial-results.json` 与 `initial-*-ctest.log` 保留首轮结果；`isolated-mcp-faults.log`、`console-gate-ctest.log`、`post-release-ctest.log` 分别记录重跑范围；`post-asan-ctest.log` 与 `post-asan-LastTest.log` 记录最终完整复验；`ac3-detection.json`、`post-release-large-capacity-evidence.json` 和 `post-asan-large-capacity-evidence.json` 记录检测力与实际名称；`frozen-inputs.json`、`post-assertion-inputs.json` 划分修改前后输入。原独立只读 dsh 已完成对当前差异、实际源码与接口、当前验证证据和文档的对齐审核，无剩余阻塞项；原历史、首轮失败和重跑日志保持。总审核逐提交执行九项检查，合并原 main、补强测试和验证文档分别提交，保留两个父分支的已发布历史。本次整合的提交、发布、远端检查和合入状态统一以 PR #81 的实际记录为准，不以旧 head 的 CI 代替新提交检查。
+
+
+### R7 与新父分支的整合验证（2026-10-23）
+
+本轮将原 R7 `37be40d` 与已验证的父分支 `f10516e` 整合，保留两个已发布父历史。迁移模块、薄 CLI 及已有生产源码均与原 R7 相同，保留新主线的 0035 学习记录、写工具文档核对及父分支大容量验收；不改变磁盘格式、来源身份、MCP schema 或迁移边界。旧 R7 和 R4/R6 VERIFY 原文保留，各自只证明对应历史树。
+
+首份候选冻结 360 项非文档输入。Release 为 145/146（362.41 s），`mcp_sdk` 在 PID 文件已创建而内容尚未写完时读取空串失败；同次实际变异为 16/17（491.95 s），`mcp_mutation` 的生命周期检查发生帧等待超时，按 harness error 处理，不能记为检测成功。先补 SDK 读取等待及子进程 hold 就绪同步后，中间候选 Release 146/146（311.43 s）通过，实际变异仍为 16/17（439.40 s）：另一个消费者在 `test_crashed_worker_reaps_all_generations` 读取同一测试 runner 的空 PID。两次实际变异均未全绿，后续控制台门禁当时未执行。原始失败及中间结果全部保留。
+
+最终采用共同生产者修复：`tests/semantic_fake_runner.py` 的两处 PID 发布均先在同目录临时文件写完整内容，再替换最终路径；SDK 的临时读取补丁撤回，恢复两个父版本的原文件，避免在消费者中重复等待逻辑。新增 Linux 默认测试 `semantic_runner_pid` 实际运行版本探测和服务启动入口，在文件打开后、字节写入前检查最终 PID 路径不可见，并核对完整 PID 和临时文件清理。精确旧 runner 在该断言失败，当前 runner 通过；该测试不启动 HTTP 服务或真实模型。缺少测试夹具明确失败。
+
+子进程就绪问题另有受控复现：旧测试仅见父进程 fork 记录便发送请求并取消，子进程可能尚未进入 hold；注入 50 ms 子进程延迟时，旧测试在后续请求等待中超时。故障 hook 现在在实际进入 hold 后记录该子进程 PID，测试等到此标记才继续原 BUSY、取消和回收检查；相同延迟下当前测试连续三次通过。原请求、取消与帧等待时限保持，不修改 MCP 生产代码。此控制解释了可复现的同类竞态，不将所有历史超时追认成同一原因。
+
+R7 验收补齐两类真实断言：正常迁移及已进入来源锁路径的失败后，`realpath(OLD)+".lock"` 必须保留；OLD rebuild 后的盘上语义索引 SHA-256 在 NEW status 及 OLD/NEW search 后必须保持。总审核用实际 CLI 包装候选删除旁锁、用实际查询候选保持输出却改写索引尾字节；精确旧验收脚本接受三种坏候选，新脚本分别拒绝，正确候选两者均接受。这些定向控制不计入十七组实际变异，迁移矩阵仍为 74 项。
+
+最终冻结 361 项非文档输入；相对首份候选，355 项不变，五个已有输入修订，新增一个测试。生产源码全部保持。下列完整运行全部使用最终输入，不把首轮、中间候选和定向复跑拼成最终通过数。
+
+| 最终配置 / 命令 | 实际结果 | CTest 实耗 |
+| --- | --- | --- |
+| Linux Release，`ctest --test-dir <chief-release> -C Release --output-on-failure -j3 -E '_mutation$'` | 147/147，零失败、零跳过 | 359.09 s |
+| Linux Debug ASan/UBSan，`ctest --test-dir <chief-asan> -C Debug --output-on-failure -j3 -E '_mutation$'` | 147/147，零失败、零跳过 | 389.97 s |
+| Windows MSVC Debug，`ctest --test-dir <chief-windows> -C Debug --output-on-failure -j3 -E '_mutation$'` | 79/79，零失败、零跳过 | 177.48 s |
+| Linux 实际变异，`ctest --test-dir <chief-mutation> --output-on-failure -j3 -R '_mutation$'` | 17/17，零失败、零跳过 | 509.18 s |
+
+Linux 默认注册 147 项，变异配置总注册 165 项、只选择十七个实际组；Windows 注册 79 项，不运行 Linux 迁移工具。额外执行 `guest_console_mutation_gate`，1/1（143.98 s）通过，不计为第十八组实际变异。ASan/UBSan 在其他本轮完整运行结束后单独启动。Release 和 ASan 的迁移矩阵均为 74 PASS / 0 FAIL / 0 SKIP，工作目录门禁、六项 R4/R6 大库案例及反链前 20 名称断言均通过，学习记录、文档核对、官方 SDK 与生命周期测试均在完整默认套件中实际执行。工作目录门禁内部的可选基础子集不冒充完整迁移验收。
+
+R7-AC1 仍逐项比较 OLD/NEW 的槽号、名称、字节内容、空槽、尾零和来源摘要；内存词项索引在新进程重建后比较真实查询结果，盘上语义索引在 NEW 为 READY 且无需重建。R7-AC2 继续核对预存目标保护、特殊附件拒绝、创建后各阶段故障和清理残留路径。默认语义验收使用确定性 provider；本轮没有新增真实模型效果验收，历史固定语料的真实索引复用记录保持原范围。另用 `YAN_BUILD_TOOLS=ON / YAN_BUILD_SEMANTIC=OFF / BUILD_TESTING=OFF` 构建当前 `yan_migrate` 并检查动态依赖，迁移目标不依赖模型、HTTP 或 JSON 库；此构建检查不冒充完整 AC1。
+
+文档合并保留父分支历史全文前缀、R7 独有历史，以及父分支旧「当前阶段」原文；0036 保留 R7 全文前缀及父分支独有 VERIFY 后追加本节。README 与 STATUS 仅更新当前整合状态、能力及边界，不复写本节计数与耗时。0035、0036 保持 Approved；[EOF/EINTR #83](https://github.com/YanBo-maker/YanOS/issues/83) 与[故障符号覆盖 #84](https://github.com/YanBo-maker/YanOS/issues/84) 仍为后续项。离线稳定、普通附件及无断电恢复的已批准边界保持。
+
+证据位于 `E:/YanOS/build/20261023-r7-integration/`：`initial-*`、`intermediate-*` 保留失败与中间运行；`release/asan/windows/mutation-ctest.log`、各自 `*-LastTest.log`、`*-registration.json`、`*-execution.json` 及 `verified-results.json` 对应最终完整结果。`release/asan-large-capacity-evidence.json` 保存实际大库案例，`mutation-console-gate.log` 单列控制台门禁。`pid-publication-old/new.json`、`block-diagnostic-delayed-old/new-results.json`、`migration-detection-old/new.json` 保存定向检测力；`frozen-inputs.json`、`final-inputs.json`、`document-merge.json` 划分输入与历史保留范围。
+
+本轮 dsh 使用同一协调器、一个编码者及一个独立只读审核者，最多三个会话；正式审核上限两轮，传输重试上限一次且已在准备阶段使用，不重启旧实验。编码者未修改正式文档，文档始终由总审核修改；角色边界与任务目录检查记在本轮总审材料。
+
+独立只读 dsh 已用同一会话完成一轮正式冻结审核，核对当前源码、接口、AC 断言、实际运行证据及文档，无剩余阻塞项；提交前九项总审核已逐项签署。必要测试修复随两父整合提交，验证文档同批相邻提交，不产生已知失败的测试中间树。本轮更新尚未发布，新 head 的远端 CI 尚未运行，PR #81 与 #82 尚未合入；不归档或重置监控通道。

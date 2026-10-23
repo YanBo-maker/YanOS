@@ -6,7 +6,7 @@
 
 主线已具备 [0035](specs/0035-agent-writable-knowledge.md) 学习记录联合验收、dsh 双库真实试用和写工具文档自动核对，接入见 [dsh 双库接入](dsh-mcp-quickstart.md)。大容量检索已完成整合并发布为 [PR #81](https://github.com/YanBo-maker/YanOS/pull/81)，精确 head 的远端检查已通过，尚未合入 main。
 
-本轮正在处理文档冲突并重新验证；不以 R7 原 head 的旧 CI 代替整合后的结果。实现、验证和独立对齐的实际进度见 0036 VERIFY；本轮发布、远端检查和合入状态统一以 PR #82 为准。0035、0036 整体保持 Approved。
+本地整合与验证已完成，补齐迁移旁锁保留和索引不改写断言，并修复测试夹具的 PID 发布与子进程就绪竞态；生产接口保持。独立对齐和总审状态见 0036 VERIFY。本轮更新尚未发布，不沿用旧 head 的 CI 结论；发布、远端检查和合入状态统一以 PR #82 为准。0035、0036 整体保持 Approved。
 
 ## 已交付能力
 
@@ -50,7 +50,7 @@
 
 - 0036 多块目录与容量分配（R1–R3）、查询性能优化（R8）已在 main；R4/R6 大容量终端、Host 和 MCP 检索已实现并完成整合验证。[0036](specs/0036-yanfs-multi-block-directory.md)，[PR #81](https://github.com/YanBo-maker/YanOS/pull/81)
 
-- 0036 R7 离线迁移已实现，当前分支正在整合复验；可复制镜像和附件，保留槽号与库身份。[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)
+- 0036 R7 离线迁移已实现并完成本地整合验证；可复制镜像和附件，保留槽号与库身份。[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)
 
 ## 覆盖边界与已知限制
 
