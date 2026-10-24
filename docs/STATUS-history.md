@@ -815,3 +815,13 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 
 本地整合与验证已完成，补齐迁移旁锁保留和索引不改写断言，并修复测试夹具的 PID 发布与子进程就绪竞态；生产接口保持。独立对齐和总审状态见 0036 VERIFY。本轮更新尚未发布，不沿用旧 head 的 CI 结论；发布、远端检查和合入状态统一以 PR #82 为准。0035、0036 整体保持 Approved。
 
+
+
+## 当前阶段
+
+[0036](specs/0036-yanfs-multi-block-directory.md) R4/R6 大容量检索与 R7 离线迁移已合入 main：[PR #81](https://github.com/YanBo-maker/YanOS/pull/81) 的 merge commit 为 `79c8e44`，[PR #82](https://github.com/YanBo-maker/YanOS/pull/82) 为 `26c25fc`，保留已发布阶段历史。`26c25fc` 的文件树与已审核的 `1150c9a` 相同，该 main 提交的三项 CI 均已通过；验证明细见 0036 VERIFY。
+
+主线包含 [0035](specs/0035-agent-writable-knowledge.md) 学习记录联合验收、dsh 双库真实试用和写工具文档自动核对，接入见 [dsh 双库接入](dsh-mcp-quickstart.md)。本轮总审核根据 dsh 全面文档核查修正合入状态、接口说明及证据入口，生产代码和测试输入保持。
+
+0034 按自身 AC9.6 更新为 Implemented；0035、0036 整体保持 Approved。R8 跨版本对比的仓库内重跑入口与 4095 档性能验收分别跟踪于 [#89](https://github.com/YanBo-maker/YanOS/issues/89)、[#90](https://github.com/YanBo-maker/YanOS/issues/90)，不以容量支持代替性能验收。
+
