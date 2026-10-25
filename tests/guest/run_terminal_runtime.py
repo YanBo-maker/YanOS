@@ -459,7 +459,8 @@ def run_fixture(driver, elf, work, scenario):
 
 def run_production(driver, args, work, image, stdin_bytes, label, fault,
                    corrupt_response, tx_fault_at, baseline=None,
-                   expect_tohost=None, max_steps=PRODUCTION_STEPS):
+                   expect_tohost=None, max_steps=PRODUCTION_STEPS,
+                   timeout=TIMEOUT):
     case_dir = work / ("production-" + label)
     disk = case_dir / (label + ".img")
     stdin_path = case_dir / (label + ".stdin")
@@ -478,7 +479,7 @@ def run_production(driver, args, work, image, stdin_bytes, label, fault,
         argv += ["--baseline", str(baseline)]
     if expect_tohost is not None:
         argv += ["--expect-tohost", "0x%08x" % expect_tohost]
-    result = run(argv)
+    result = run(argv, timeout)
     record(case_dir, label, argv, result)
     return result, status, disk, capture
 

@@ -2,11 +2,11 @@
 
 ## 当前阶段
 
-[0036](specs/0036-yanfs-multi-block-directory.md) R4/R6 大容量检索与 R7 离线迁移已合入 main：[PR #81](https://github.com/YanBo-maker/YanOS/pull/81) 的 merge commit 为 `79c8e44`，[PR #82](https://github.com/YanBo-maker/YanOS/pull/82) 为 `26c25fc`，保留已发布阶段历史。`26c25fc` 的文件树与已审核的 `1150c9a` 相同，该 main 提交的三项 CI 均已通过；验证明细见 0036 VERIFY。
+当前补齐 [0036](specs/0036-yanfs-multi-block-directory.md) R8 历史行为对比的仓库内重跑入口，跟踪于 [#89](https://github.com/YanBo-maker/YanOS/issues/89)。入口从固定的 R8 前基线与 R8 候选重新构建，以同一组生成镜像比较终端、MCP 和镜像字节；本地分支已完成实现与本机验证，审核状态与收口结论见本轮交付材料；本阶段尚未发布。
 
-主线包含 [0035](specs/0035-agent-writable-knowledge.md) 学习记录联合验收、dsh 双库真实试用和写工具文档自动核对，接入见 [dsh 双库接入](dsh-mcp-quickstart.md)。本轮总审核根据 dsh 全面文档核查修正合入状态、接口说明及证据入口，生产代码和测试输入保持。
+[PR #91](https://github.com/YanBo-maker/YanOS/pull/91) 文档核查已按所有者授权合入 main，merge commit 为 `9d8cf9b`，该提交的 CI 已核对通过。主线已具备大容量检索、离线迁移、学习记录联合验收和 dsh 双库试用，接入见 [dsh 双库接入](dsh-mcp-quickstart.md)。本轮验证明细与历史对比边界见 [0036 VERIFY](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)。
 
-0034 按自身 AC9.6 更新为 Implemented；0035、0036 整体保持 Approved。R8 跨版本对比的仓库内重跑入口与 4095 档性能验收分别跟踪于 [#89](https://github.com/YanBo-maker/YanOS/issues/89)、[#90](https://github.com/YanBo-maker/YanOS/issues/90)，不以容量支持代替性能验收。
+0035、0036 整体保持 Approved；4095 档性能验收继续跟踪于 [#90](https://github.com/YanBo-maker/YanOS/issues/90)。本轮新增入口的发布、远端 CI 和合入状态随关联 PR 记录。
 
 ## 已交付能力
 
@@ -52,7 +52,11 @@
 
 - 0036 R7 离线迁移已随 PR #82 合入 main（`26c25fc`）；可复制镜像和附件，保留槽号与库身份。[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)
 
+- 0036 R8 历史行为对比重跑入口已在本分支完成实现与本机验证；完整历史比较由操作员运行，默认门禁核对夹具和判定器。[入口](../tests/guest/run_yanfs_r8_parity.py)，[验证记录](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)
+
 ## 覆盖边界与已知限制
+
+- R8 历史对比固定于 `4c5e0ab` 与 `2b82d17`。完整重跑由操作员显式执行，默认 CTest 的 `yanfs_r8_parity_harness` 检查夹具与判定器反例；历史 v2 MCP 的 CORRUPT 表示当时的错误保持，不作为当前大容量检索成功证据。
 
 - 写工具文档核对只覆盖 `mcp-write-tools.md` 的两个工具参考段；Linux 的 `mcp_note` 比较实际工具列表，纯 Python 的 `mcp_write_docs` 在配置找到 Python 时注册，Windows 也运行。README、STATUS 与其余用法段落仍需独立文档审核。
 

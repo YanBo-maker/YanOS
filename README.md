@@ -318,6 +318,20 @@ ctest --test-dir build --output-on-failure
 
 分层、覆盖边界与退出码见 [CPU 验证规格](docs/specs/0011-cpu-validation.md)。
 
+## R8 历史版本对比
+
+[重跑入口](tests/guest/run_yanfs_r8_parity.py)在 Linux/WSL 从本地 Git 对象重新构建 `4c5e0ab` 与 `2b82d17`，用生成的 63、1023、2047 文件镜像比较 R8 优化前后的行为。需要 Host C 编译器、RISC-V 交叉编译器、CMake，以及包含 CURL/yyjson CMake package 的依赖前缀：
+
+```sh
+python3 -B tests/guest/run_yanfs_r8_parity.py --source . \
+  --work build/r8-parity --cc cc --gcc riscv64-linux-gnu-gcc \
+  --deps /path/to/deps
+```
+
+`--work` 指向空目录或尚不存在的目录。两个固定提交须已存在于本地；入口生成自己的镜像和构建产物，在工作目录保存原始输出、来源与产物身份及最终 `manifest.json`。完整执行的实测与覆盖边界见 [0036 VERIFY](docs/specs/0036-yanfs-multi-block-directory.md#verify-执行记录)。
+
+默认 CTest 的 `yanfs_r8_parity_harness` 运行轻量的夹具、比较器及失败判据检查。完整历史对比由上述命令执行；历史 v2 MCP 的预期结果为 CORRUPT，当前主线的大容量行为由现有 R4/R6 回归核验。
+
 ## 设计
 
 YanCPU 使用 C17 编写，在本机命令行运行。初始目标为 RV32IM_Zicsr，采用 32 位、小端、单核和 M-mode 配置。模拟器关注指令执行后的状态变化，电路时序和微架构留待后续探索。

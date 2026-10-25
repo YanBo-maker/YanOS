@@ -872,6 +872,15 @@ if(BUILD_TESTING)
     # builds anything; registering it here puts it in the default suite as well.
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
+        # issue #89: harness controls only. The historical cross-version run is
+        # operator-explicit; this gate proves the fixture/comparator checks
+        # without Git history, a cross compiler, a model, or MCP dependencies.
+        add_test(NAME yanfs_r8_parity_harness
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_yanfs_r8_parity.py")
+        set_tests_properties(yanfs_r8_parity_harness PROPERTIES
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1" TIMEOUT 60
+            LABELS "issue89;0036-R8-AC1-harness")
         # Independent Unicode/regex reference checks complete rows, scores,
         # snippets and summaries. The warm index case also bounds disk reads;
         # it cannot pass by silently choosing the linear backend.

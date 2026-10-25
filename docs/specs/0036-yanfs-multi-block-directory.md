@@ -457,3 +457,49 @@ R8-AC1 的历史全量跨版本比较已实际执行，但 `ring_copy`／`os_mem
 
 
 独立只读 dsh 复用原协调器与两名审核者完成两轮；第二轮仅复核首轮发现及修正，无剩余阻塞项。总审核完成九项提交前检查。全部生产及测试输入保持，本轮仅提交文档修正；该文档提交与其后发布、远端检查状态另记，不把 main 的 CI 结果冒充未发布文档分支 CI。
+
+
+### PR #91 文档核查合入回执（2026-10-23）
+
+项目所有者直接授权后，文档修正 PR #91 以 merge commit `9d8cf9bc848b5a594acf12649dfebafeaaf3ae37` 合入 main，保留 `ec5b497` 的历史；merge 的 tree `6ed767868ea55c2e4fabe14d39516972f7c10221` 与该已审文档提交相同。上文“本轮仅提交文档”的待发布口径保留为当时记录。
+
+该精确 main 的 [Actions 39960213984](https://github.com/YanBo-maker/YanOS/actions/runs/39960213984) 已核对成功：Linux Release 147/147（544.92 s）、Linux Debug ASan/UBSan 147/147（1339.56 s）、Windows Debug 79/79（237.67 s），均零失败、零跳过；两个 Linux 任务各额外 MCP 四项通过。检出提交、测试名和原始日志摘要已核对。此记录对应主线基线，后续 #89 的本机验证另列。
+
+### R8-AC1 仓库内重跑入口（#89，2026-10-23–24）
+
+本轮补齐上文“当前库内缺少该全量重跑入口”所述的当时缺口，沿既有 R8-AC1 增加受跟踪的入口，不改变生产代码、盘上格式、文件命令或 MCP schema。基线固定为 `4c5e0ab1a036e845123e304333d363478243c146`（tree `eb284e7cf94c2e4e7aa442583004f1041e8beb6f`），R8 候选固定为 `2b82d17065bbd5b83e2d5e2f201f37f5308dedf5`（tree `a6daeffc8a713dfaf3ca1b249a43f7d6aa14d953`）。后续 R4 的普通 backlinks 输出与 R6 的 v2 Host 支持沿各自已批准规格；本入口的 `current_main_compared` 为 false。
+
+实现分为纯 Python 夹具/比较器 `tests/yanfs_r8_parity.py`、Linux/WSL 操作员入口 `tests/guest/run_yanfs_r8_parity.py`、默认纯控制 `tests/test_yanfs_r8_parity.py`。已有终端 runner 仅增加可选末尾 timeout 参数，原默认值保持；CMake 只新增 `yanfs_r8_parity_harness`，标签为 `issue89;0036-R8-AC1-harness`，原组件标签保持。
+
+入口定义 24 组正常终端比较、6 组 CRC 有效的重名/重叠拒挂比较、3 组 MCP 比较，共 33 对、66 次产品执行；首尾相接的 extent 由正常满目录挂载与独立解码检查共同覆盖。每份镜像的物理文件名顺序为 f0000 后接其余名字的逆序，物理中间槽保存 60 个 a，其余文件保存既有 65 字节笔记。普通 related/块反链按 ASCII 文件名检查；search 沿 0026 的同分物理槽、行号规则，显示前十个物理文件各两行，共二十行。夹具编码、CRC、数据内容、连续 extent 和名字排列均检查；新夹具哈希与旧的顺序排列私有夹具不同。
+
+终端完整原始输出逐字节比较，同时核对正确命令回执、返回码、Guest tohost、交付字节数和前后完整镜像；MCP 比较原始单行字节并核对结构、真实来源名和物理位置。N=63 的 MCP 应成功，total=62、shown=20；N=1023/2047 的两次历史 MCP 比较应均为 CORRUPT，归类为错误保持。目录与模型身份变化后的当前主线行为不由这组旧版本比较推定。
+
+缺命名仓库输入、固定提交、成员清单或生成夹具自检不符返回 1；外部工具或 CURL/yyjson 缺失返回 77 并记录 NOT VERIFIED；构建、超时、信号或 sanitizer/runtime-error 诊断属于 harness 失败 2。普通 stderr 文本保留，不单独判失败。终端每次执行默认 900 s、最多 3,000,000,000 步；MCP 帧等待 60 s，正常关闭等待 12 s，终止后再等待至多 5 s。工作目录须为空或不存在，拒绝既有目录时不改写原 manifest。入口从固定 Git 归档重新构建，不复用历史 ELF；保存工具版本、源码和产物身份、命令、已返回进程的原始输出与退出状态，以及失败时已完成范围。构建子进程在返回前超时仍归为 harness 失败并记录原因，此时没有该次构建的完成行。
+
+以下全量结果对应 schema 错误路径修补前冻结的 364 项非 Markdown 输入。Linux Release 默认 CTest 为 148/148（221.16 s），Debug ASan/UBSan 为 148/148（1043.40 s），Windows MSVC Debug 为 80/80（143.26 s），均零失败、零跳过；新增默认门禁包含 28 项纯控制。实际命令与原始记录在 `E:/YanOS/build/20261023-r8-parity-repro/` 的各配置 execution、registration、ctest 和 LastTest 文件中。
+
+本轮受控反例覆盖两边同错、空输出、错误回执/返回/状态、改镜像、错误 MCP 字段或字节格式、缺命名输入、不完整/重复矩阵及已有工作目录保护。另以真实 MCP 包装程序注入预设诊断：最终 dsh 草稿接受该反例，总审核修复 stderr 提前读取绕过检查的问题后，响应前与退出时的诊断均归为 harness 失败，原始 stderr 保留。此控制只验证判定器，不是产品出现 sanitizer 错误；来源与前后字节记录位于本轮私有交付材料。
+
+完整历史命令为 `python3 -B tests/guest/run_yanfs_r8_parity.py --source . --work <fresh-work> --cc cc --gcc riscv64-linux-gnu-gcc --deps <local-prefix>`。本次从固定 Git 对象重新归档、构建后，33 对 / 66 次执行全部通过，耗时 2294.68 s；24 对正常终端、6 对拒挂、3 对 MCP 的确切集合、原始输出和镜像字节均核对。MCP 为一档成功和两档预期错误保持，来源/产物身份取自本次 manifest；没有使用旧私有捕获或其哈希作为通过常量。manifest 的 SHA-256 为 `3e289f1453edf48795bc094cb774969536a5a2542a4577ff23a2343d3e2c14d0`。
+
+| 本轮命令 / 配置 | 实际选择与结果 | 实耗 |
+| --- | --- | --- |
+| Linux Release，`ctest --test-dir <root-release> -C Release -j3 -E '_mutation$' --output-on-failure` | 148/148，零失败、零跳过 | 221.16 s |
+| Linux Debug ASan/UBSan，`ctest --test-dir <root-asan> -C Debug -j1 -E '_mutation$' --output-on-failure` | 148/148，零失败、零跳过 | 1043.40 s |
+| Windows MSVC Debug，`ctest --test-dir <root-windows> -C Debug -j3 -E '_mutation$' --output-on-failure` | 80/80，零失败、零跳过 | 143.26 s |
+| Linux 实际变异，`ctest --test-dir <root-mutation> -j3 -R '_mutation$' --output-on-failure` | 17/17 实际组，零失败、零跳过 | 491.01 s |
+| 同一变异配置，`ctest --test-dir <root-mutation> -R '^guest_console_mutation_gate$' --output-on-failure` | 单独 1/1；不计为第十八个实际组 | 132.56 s |
+
+变异配置实际注册 166 项，上表只选择十七个实际组并另跑控制台门禁；没有声称完整运行该配置的全部默认项。各组最终 footer 与指定 owner/断言、基线/no-effect/错误 owner 等控制均核对，存活为零；timeout、信号、sanitizer、构建失败不计检出。默认门禁和实际变异保留独立范围。Release/ASan 各自的迁移验收仍为 74 PASS / 0 FAIL / 0 SKIP，现有大容量、学习记录、官方 SDK、生命周期和写工具文档测试均在本次完整套件中执行。默认语义测试沿用确定性 provider，本轮历史 MCP 比较不使用模型，也不新增真实模型效果结论。
+
+上述全量运行均使用修补前同一份已冻结的 364 项非 Markdown 输入。ASan 在 Release/Windows 完成后以单个 CTest 任务运行，历史比较仍有一个执行进程；本轮实际变异在 ASan 结束后启动。实耗只记录本次运行成本，不作为 Host 性能基准。另对实际命令入口验证已有 manifest 的零改写、缺仓库输入先于外部依赖失败，以及外部缺失的 NOT VERIFIED 清单。补充 Linux 实进程检查确认缺 Host 编译器、缺依赖前缀均返回 77、完成数为零；未单独模拟前缀存在但内部 CMake package 缺失。本次使用显式 Git 工作树定位，未另行全量验证默认 .git 解析入口。原始日志、注册集合、每项通过名、产物与输入摘要已相互核对；未将首轮红色控制、历史私有结果和当前通过数拼接。
+
+仓库内的完整证据在 `build/20261023-r8-parity-repro/root-full-historical/` 的 manifest、归档源码、构建日志及 runs/cases 原始文件中；本轮总审材料在 `E:/YanOS/build/20261023-r8-parity-repro/`，包括 `verified-results.json`、`historical-green-verified.json`、各配置原始 CTest/LastTest/execution/registration、`candidate-frozen-inputs.json`、`entry-controls-verified.json` 和受控诊断的前后记录。旧 R8 私有材料中的候选产物曾被后续构建覆盖，本轮重新建立固定提交到新产物、输入和输出的证据链；上文历史结论原文保持。
+
+本轮只读独立审核复用原 dsh 会话，上限两轮，核对当前差异、实际源码/接口、上述本轮证据与文档；结论与总审核九项检查随私有交付材料记录。总审核独占正式文档修改权，旧「当前阶段」原字节追加到 STATUS-history，历史规格与历史 VERIFY 前缀保持。本阶段尚未发布，远端检查与合入状态以关联 PR 为准；0035、0036 整体保持 Approved，#90 的 4095 档性能范围保持。
+
+
+总审随后以真实 stdio 子进程返回 `{}`、`[]` 和缺 result 的 JSON，发现共享 schema 辅助函数的 KeyError/TypeError 会逃出入口，虽不误报通过，却未形成最终失败清单。原 dsh 编码会话将这些 schema 异常限定转换为 MCP_SCHEMA，补充跨平台控制并保留原始响应、stderr、退出状态；sanitizer 与传输故障优先级保持。最终仅 `tests/guest/run_yanfs_r8_parity.py` 与 `tests/test_yanfs_r8_parity.py` 两项非 Markdown 输入相对上述全量冻结有变化。
+
+修后在 Release、ASan、Windows 三个已有配置分别定向运行 `yanfs_r8_parity_harness`，各 1/1，门禁含 29 项纯控制；另经真实异常响应及受控 main 路径核对 MCP_SCHEMA、exit 1 与部分失败 manifest，并重验早/晚诊断。使用全量运行产物中已核对哈希的两个固定历史 MCP 二进制，修后重新执行三档 MCP，共 3 对 / 6 次，均符合 v1 成功、v2 错误保持。此为定向后验，不是重新构建的完整 33 对，也不替代修补前的三平台完整回归或十七组实际变异。修后源码摘要、命令和原始记录见 `post-schema-verification.json`、`r1-boundaries-post2/` 与 `post-schema-mcp-v2/`；先前日志与 manifest 原样保留。
