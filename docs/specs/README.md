@@ -40,4 +40,4 @@
 | [0034](0034-ci-guest-tests-and-status-archive.md) | CI 运行 Guest 默认测试与 STATUS 归档 | Implemented | 无 | 无 |
 | [0035](0035-agent-writable-knowledge.md) | Agent 可写的知识工具 | Approved | 无 | 无 |
 | [0036](0036-yanfs-multi-block-directory.md) | YanFS 多块目录 | Approved | 无整份替代；局部扩展见规格头 | 无 |
-| [0040](0040-4095-file-performance.md) | 4095 文件性能验收与局部优化 | Approved | 承接0036的4095性能验收；澄清0032的有效块结果范围 | 无 |
+| [0040](0040-4095-file-performance.md) | 4095 文件性能验收与局部优化 | Implemented | 承接0036的4095性能验收；澄清0032的有效块结果范围 | 无 |

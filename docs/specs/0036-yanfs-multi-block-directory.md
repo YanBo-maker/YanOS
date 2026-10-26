@@ -507,3 +507,27 @@ R8-AC1 的历史全量跨版本比较已实际执行，但 `ring_copy`／`os_mem
 总审随后以真实 stdio 子进程返回 `{}`、`[]` 和缺 result 的 JSON，发现共享 schema 辅助函数的 KeyError/TypeError 会逃出入口，虽不误报通过，却未形成最终失败清单。原 dsh 编码会话将这些 schema 异常限定转换为 MCP_SCHEMA，补充跨平台控制并保留原始响应、stderr、退出状态；sanitizer 与传输故障优先级保持。最终仅 `tests/guest/run_yanfs_r8_parity.py` 与 `tests/test_yanfs_r8_parity.py` 两项非 Markdown 输入相对上述全量冻结有变化。
 
 修后在 Release、ASan、Windows 三个已有配置分别定向运行 `yanfs_r8_parity_harness`，各 1/1，门禁含 29 项纯控制；另经真实异常响应及受控 main 路径核对 MCP_SCHEMA、exit 1 与部分失败 manifest，并重验早/晚诊断。使用全量运行产物中已核对哈希的两个固定历史 MCP 二进制，修后重新执行三档 MCP，共 3 对 / 6 次，均符合 v1 成功、v2 错误保持。此为定向后验，不是重新构建的完整 33 对，也不替代修补前的三平台完整回归或十七组实际变异。修后源码摘要、命令和原始记录见 `post-schema-verification.json`、`r1-boundaries-post2/` 与 `post-schema-mcp-v2/`；先前日志与 manifest 原样保留。
+
+
+### 2026-10-27：Issue #88 镜像符号链接入口的附件定位验收
+
+本轮为既有0036-R7及2026-10-21附件澄清补直接测试，依据仍是`realpath(OLD) + ".assets"`与[0003决策](../decisions/0003-file-limit-and-images.md)。分支基于main `552dcde`；生产C、公开接口、Guest、磁盘格式及原错误边界保持。附件EOF/EINTR修复位于独立的[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)，不将其新增用例计入本轮。
+
+新增`tests/run_yanfs_migrate_symlink.py`复用原独立Python镜像解码与附件oracle，通过真实`yan_migrate`执行三个场景：相对链接指向v1镜像、绝对链接指向含slot 1000的v2镜像、真实附件缺省但入口旁存在诱饵。前两者逐字节及目录结构比较真实附件，第三者要求目标没有附件目录；同时核对slot/name/size/content、0033来源身份、源镜像与两份附件保持、链接目标保持，以及真实路径旁锁存在而入口旁无锁。CMake在既有Linux工具条件下注册`yanfs_migrate_symlink`，标签为R7-AC1和issue88；它不直接验收AC2错误清理，没有SKIP_RETURN_CODE。Windows不执行此Linux迁移场景。
+
+正确生产CLI的三个新场景共61项检查通过。实际私有错误候选仅将附件选择从`old_real`改为`from`，编译成功，三次迁移均以0退出且打印正常成功信息；新runner分别由`assets.canonical-manifest-equal`（两次）与`assets.target-absent`（一次）拒绝。该路径在首个附件断言停止，已执行35项检查；其后来源保持与锁断言没有执行，不能记为通过。这是错误成功输出的实际检测证据，不把构建失败、超时或信号当检出，也不称原生产实现存在RED故障。缺显式CLI或oracle的控制硬失败，且未创建工作目录；总审核另以缺CLI和缺oracle命令独立核对退出1与零工作目录。
+
+最终370项非Markdown输入在各配置的配置、构建、注册与执行前后均一致；配置/执行原argv、原始日志和总审核验保存在`E:/YanOS/build/20261027-migration-symlink/`的`*-execution.json`、`*-root-verified.json`与`handoff-root-verified.json`。本机最终结果：
+
+| 配置 | 注册数 | 选中并通过 | CTest耗时 |
+| --- | ---: | ---: | ---: |
+| Linux Release | 151 | 151/151 | 396.82s |
+| Linux Debug ASan/UBSan | 151 | 151/151 | 1291.19s |
+| Windows MSVC Debug | 81 | 81/81 | 152.00s |
+| Linux Release 实际变异 | 169 | 17/17 | 626.21s |
+
+以上最终执行均零失败、零CTest跳过。两个Linux默认配置均开启TOOLS/SEMANTIC，保留原74项迁移专项的完整通过结果，新三个场景单独统计；Windows为MSVC Debug。十七组实际变异之外，`guest_console_mutation_gate`另以串行入口通过1/1（131.41s），不计第十八组。旧1023/2047门槛及4095默认性能门禁随完整Linux回归执行；未重跑真实模型效果或历史全量对比。
+
+默认回归命令为`ctest --test-dir BUILD -C CONFIG --no-tests=error --output-on-failure -E '_mutation$'`（Release/Windows为-j3，ASan为-j1）；实际变异使用`-R '_mutation$' -j3`，其后单选console门禁。初次构建及后续依赖检查出现未来mtime警告；三个Linux构建在各自测试完成后复核一次没有重新编译或链接，比对清单内的目标产物SHA-256保持一致，警告原文与产物比对记录在`*-build-root-verified.json`及其原始日志中，不宣称警告已消失。最初dsh的tools-only试跑保留了一个语义用例SKIP，不把该次试跑宣称为完整通过；最终SEMANTIC开启的完整迁移矩阵单独记录。
+
+独立只读dsh正式R1针对冻结树`70d3fa513e36e38899ee2ef9036ac1337542a8dc`完成源码、接口、实测与文档对齐，PASS且零阻塞，无需R2；报告为本轮工作区`build/20261027-migration-symlink/formal-r1-report.md`，SHA-256为`269a722d9bcda35c45fc538d4a34b70a5872cb96c5a2658154b7f06c153e27d9`。协调器随后修正私有报告中对坏候选后续锁检查的过度概括，正式文档原已明确该限制；编码与审查子会话均inactive，headless已退出。总审核九项检查通过，记录见仓库外本阶段`audit-code-nine-checks.json`与`audit-docs-nine-checks.json`。正式审核后的改动仅同步上述已核实结论、补列由总审核独立完成的缺oracle控制并统一“总审核”称谓，源码与测试保持冻结。本轮尚未推送、创建PR或运行新的远端CI。旧阶段结论与此前VERIFY均原样保留。

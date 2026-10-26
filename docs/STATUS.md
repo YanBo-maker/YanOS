@@ -2,11 +2,11 @@
 
 ## 当前阶段
 
-[PR #92](https://github.com/YanBo-maker/YanOS/pull/92)已按所有者授权合入main（d28c729），保留历史；完整历史比较仍由操作员显式运行。
+[0040](specs/0040-4095-file-performance.md)的4095文件性能验收已获所有者认可，经[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`）；精确main的三项CI和原始日志已核对通过，验收边界见该规格VERIFY。
 
-当前[Issue #90](https://github.com/YanBo-maker/YanOS/issues/90)的[0040实现](specs/0040-4095-file-performance.md)已完成本机验收：固定4095满库夹具的九项操作均达到所有者要求，原1023/2047门槛保留。实现与验证状态见[0040 VERIFY](specs/0040-4095-file-performance.md#verify-执行记录)。独立代码与文档审核及总审已通过，已获所有者批准发布至[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)；最新CI结果与原始工件见该PR，本阶段尚未合入main。
+当前处理[Issue #88](https://github.com/YanBo-maker/YanOS/issues/88)：为镜像符号链接入口补齐附件定位验收，核对真实附件、入口旁诱饵、来源身份和旁锁位置。dsh编码、本机完整回归、实际变异、独立dsh正式审核与总审核已完成；本轮尚未推送、建立PR或运行远端CI。沿用0036-R7已批准行为，生产实现与接口保持。
 
-0035、0036及0040整体保持Approved。主线已有大容量检索、离线迁移、学习记录联合验收和dsh双库试用，接入见[dsh双库接入](dsh-mcp-quickstart.md)。
+附件末尾探测的EINTR修复单独位于[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)，三项CI已核对通过，仍待合入；本轮直接基于main开发。0035、0036整体保持Approved，0040为Implemented。双库接入见[dsh试用说明](dsh-mcp-quickstart.md)。
 
 ## 已交付能力
 
@@ -52,9 +52,11 @@
 
 - 0036 R7 离线迁移已随 PR #82 合入 main（`26c25fc`）；可复制镜像和附件，保留槽号与库身份。[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)
 
+- 0036 R7 镜像符号链接入口已有默认测试，检查真实附件、诱饵隔离、来源身份与旁锁位置。[测试入口](../tests/run_yanfs_migrate_symlink.py)，[验收依据](specs/0036-yanfs-multi-block-directory.md#0036-r7离线迁移库身份不变)
+
 - 0036 R8 历史行为对比重跑入口已随[PR #92](https://github.com/YanBo-maker/YanOS/pull/92)合入main（`d28c729`）；完整历史比较由操作员运行，默认门禁核对夹具和判定器。[入口](../tests/guest/run_yanfs_r8_parity.py)，[验证记录](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)
 
-- 0040 4095性能门禁与局部优化已在任务分支实现并完成本机验收，已发布[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)，等待维护者合入。[0040](specs/0040-4095-file-performance.md)
+- 0040 4095性能门禁与局部优化已随[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`），阶段历史保留。[0040](specs/0040-4095-file-performance.md)
 
 ## 覆盖边界
 
@@ -71,7 +73,7 @@
 - `tests/official/run_act4.sh` 在 Sail 与 DUT 都没有签名时把用例记为 skipped；结束条件仍是 differed 为 0 且 matched 大于 0。跳过数大于 0 本身不使脚本失败。
 - CI 不打开 `YAN_ENABLE_MUTATION_TESTS`。默认套件里的 `*_mutation_gate` 纯门禁仍会注册。`guest_console_mutation_gate` 只在变异配置打开时注册（`CMakeLists.txt` 中该门禁与 `YAN_ENABLE_MUTATION_TESTS` 同支）。
 - Linux CI（`.github/workflows/build.yml`，2921fed）打开 `YAN_BUILD_SEMANTIC`，因此会构建 `yan_mcp`。`CMakeLists.txt` 在该开关下注册 `mcp_protocol`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk`、`mcp_faults` 等测试；`mcp_note` 还要求已有 `yan_mcp`、`yan_run`、`yanfs_terminal` 和 `note_read_probe`。workflow 在配置后检查 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk` 四项都已注册。`guest_note_blocks_host` 写在 `if(TARGET yan_mcp)` 里，Linux 打开该开关后满足条件。windows-2022 的配置不传 `YAN_BUILD_SEMANTIC`（默认 OFF），不构建 `yan_mcp`。不依赖该开关的 Host 侧测试仍会注册。`YAN_ENABLE_MUTATION_TESTS` 仍然不打开。
-- 没有 S/U 模式、`medeleg` / `mideleg`、虚拟内存分页和抢占式调度。YanFS 仍是单根目录、连续 extent；v1 最多 63 个文件，v2（0036）最多 4095 个。主线的终端与 Host/MCP 检索按实际容量工作，Host 语义索引仍受 8192 段上限约束。R7 迁移要求源镜像及附件离线稳定，只接受普通附件文件和目录；清理失败时报告残留路径，保留旁锁，不提供断电恢复。元数据写失败可能拒挂，不保证断电一致性：v1 一次目录更新是一次块写入，v2 改动块 0 以外的目录项时是两次（先写该块，再写块 0 的 CRC），两次之间断电会让镜像 CRC 不符而被拒挂。
+- 没有 S/U 模式、`medeleg` / `mideleg`、虚拟内存分页和抢占式调度。YanFS 仍是单根目录、连续 extent；v1 最多 63 个文件，v2（0036）最多 4095 个。主线的终端与 Host/MCP 检索按实际容量工作，Host 语义索引仍受 8192 段上限约束。R7 迁移要求源镜像及附件离线稳定，只接受普通附件文件和目录；镜像符号链接入口的附件定位测试仅在Linux/WSL执行；清理失败时报告残留路径，保留旁锁，不提供断电恢复。元数据写失败可能拒挂，不保证断电一致性：v1 一次目录更新是一次块写入，v2 改动块 0 以外的目录项时是两次（先写该块，再写块 0 的 CRC），两次之间断电会让镜像 CRC 不符而被拒挂。
 
 - 学习笔记联合验收只在临时双镜像上模拟人工确认；它核对原文、引用位置、镜像隔离和持久化，不能判断项目所有者是否学会，也不能保证任意 Agent 都遵守确认约束。`guest_learning_note` 在 Linux 工具、semantic/MCP 与 Guest 目标齐备时随默认套件注册；Windows 只运行纯 Python 的 `learning_note_gate`。PR #85 精确 head `30916a6` 的远端 CI 已核对通过；实际 dsh 试用单独记录在 0035 VERIFY，不算默认 CI 覆盖。
 
