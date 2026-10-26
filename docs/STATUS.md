@@ -2,11 +2,9 @@
 
 ## 当前阶段
 
-[0040](specs/0040-4095-file-performance.md)的4095文件性能验收已获所有者认可，经[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`）；精确main的三项CI和原始日志已核对通过，验收边界见该规格VERIFY。
+0036-R7迁移可靠性收口：附件末尾EOF探测的EINTR修复已随[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)以merge commit `203825a`合入main，保留原阶段提交；镜像符号链接入口的附件定位验收见[PR #95](https://github.com/YanBo-maker/YanOS/pull/95)。所有者已明确批准两项合入；整合核验、最新合入提交与CI入口随PR #95维护。既有接口、磁盘格式、来源身份、旁锁和失败清理契约保持，详见[0036 VERIFY](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)。
 
-当前处理[Issue #88](https://github.com/YanBo-maker/YanOS/issues/88)：为镜像符号链接入口补齐附件定位验收，核对真实附件、入口旁诱饵、来源身份和旁锁位置。dsh编码、本机完整回归、实际变异、独立dsh正式审核与总审核已完成；所有者已批准推送、创建PR并运行CI；发布与最新检查见该Issue关联PR。沿用0036-R7已批准行为，生产实现与接口保持。
-
-附件末尾探测的EINTR修复单独位于[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)，三项CI已核对通过，仍待合入；本轮直接基于main开发。0035、0036整体保持Approved，0040为Implemented。双库接入见[dsh试用说明](dsh-mcp-quickstart.md)。
+[0040](specs/0040-4095-file-performance.md)的4095文件性能验收已获所有者认可，已随[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`）。0035、0036整体保持Approved，0040为Implemented；各阶段验证范围分别记录，不将一次PR结果当作另一整合树的验证。现有dsh双库接入见[试用说明](dsh-mcp-quickstart.md)。
 
 ## 已交付能力
 
@@ -52,7 +50,9 @@
 
 - 0036 R7 离线迁移已随 PR #82 合入 main（`26c25fc`）；可复制镜像和附件，保留槽号与库身份。[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)
 
-- 0036 R7 镜像符号链接入口已有默认测试，检查真实附件、诱饵隔离、来源身份与旁锁位置。[测试入口](../tests/run_yanfs_migrate_symlink.py)，[验收依据](specs/0036-yanfs-multi-block-directory.md#0036-r7离线迁移库身份不变)
+- 0036 R7附件EOF探测的EINTR修复已随[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)合入main（`203825a`）；只重试受中断的单次读取，原错误分类与清理保持。[验证记录](specs/0036-yanfs-multi-block-directory.md#r7-issue-83附件eof探测的eintr处理2026-10-27)
+
+- 0036 R7镜像符号链接入口的默认测试检查真实附件、诱饵隔离、来源身份与旁锁位置。[PR #95](https://github.com/YanBo-maker/YanOS/pull/95)，[测试入口](../tests/run_yanfs_migrate_symlink.py)，[验收依据](specs/0036-yanfs-multi-block-directory.md#0036-r7离线迁移库身份不变)
 
 - 0036 R8 历史行为对比重跑入口已随[PR #92](https://github.com/YanBo-maker/YanOS/pull/92)合入main（`d28c729`）；完整历史比较由操作员运行，默认门禁核对夹具和判定器。[入口](../tests/guest/run_yanfs_r8_parity.py)，[验证记录](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)
 

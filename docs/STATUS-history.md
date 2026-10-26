@@ -845,3 +845,27 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 
 0035、0036及0040整体保持Approved。主线已有大容量检索、离线迁移、学习记录联合验收和dsh双库试用，接入见[dsh双库接入](dsh-mcp-quickstart.md)。
 
+
+
+### 2026-10-27：PR #94 合入前当前阶段快照
+
+## 当前阶段
+
+[0040](specs/0040-4095-file-performance.md)的4095文件性能验收已获所有者认可，并通过[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`），保留阶段提交。合并代码树与已审核且三项CI通过的PR树一致；精确main提交的[独立CI](https://github.com/YanBo-maker/YanOS/actions/runs/40361835398)也已完成，三项结果及原始日志均核对通过。验证范围与原始工件见[0040 VERIFY](specs/0040-4095-file-performance.md#verify-执行记录)。
+
+当前处理[Issue #83](https://github.com/YanBo-maker/YanOS/issues/83)：补齐离线迁移附件末尾探测的EINTR处理。dsh负责编码和独立只读审核，总审核负责整合验证及正式文档；本地实现、完整验证、独立dsh复核及总审核已完成，所有者已批准推送、创建PR并运行CI；发布与远端检查见该Issue关联PR。原错误分类、清理行为、只读来源和磁盘格式保持。
+
+0035、0036整体保持Approved，0040为Implemented。主线已有大容量检索、离线迁移、学习记录联合验收和dsh双库试用，接入见[dsh双库接入](dsh-mcp-quickstart.md)。
+
+
+
+### 2026-10-27：PR #95 合入前当前阶段快照
+
+## 当前阶段
+
+[0040](specs/0040-4095-file-performance.md)的4095文件性能验收已获所有者认可，经[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`）；精确main的三项CI和原始日志已核对通过，验收边界见该规格VERIFY。
+
+当前处理[Issue #88](https://github.com/YanBo-maker/YanOS/issues/88)：为镜像符号链接入口补齐附件定位验收，核对真实附件、入口旁诱饵、来源身份和旁锁位置。dsh编码、本机完整回归、实际变异、独立dsh正式审核与总审核已完成；所有者已批准推送、创建PR并运行CI；发布与最新检查见该Issue关联PR。沿用0036-R7已批准行为，生产实现与接口保持。
+
+附件末尾探测的EINTR修复单独位于[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)，三项CI已核对通过，仍待合入；本轮直接基于main开发。0035、0036整体保持Approved，0040为Implemented。双库接入见[dsh试用说明](dsh-mcp-quickstart.md)。
+
