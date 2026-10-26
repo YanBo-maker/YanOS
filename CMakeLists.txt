@@ -488,9 +488,9 @@ if(BUILD_TESTING)
             target_compile_options(yanfs_migrate_fault PRIVATE ${YAN_WARNINGS})
             target_link_options(yanfs_migrate_fault PRIVATE
                 -Wl,--wrap=open -Wl,--wrap=openat -Wl,--wrap=pwrite
-                -Wl,--wrap=pread -Wl,--wrap=write -Wl,--wrap=fsync
-                -Wl,--wrap=close -Wl,--wrap=mkdirat -Wl,--wrap=unlinkat
-                -Wl,--wrap=readdir)
+                -Wl,--wrap=pread -Wl,--wrap=read -Wl,--wrap=write
+                -Wl,--wrap=fsync -Wl,--wrap=close -Wl,--wrap=mkdirat
+                -Wl,--wrap=unlinkat -Wl,--wrap=readdir)
             add_executable(yanfs_migrate_terms_probe tests/yanfs_migrate_terms_probe.c)
             target_link_libraries(yanfs_migrate_terms_probe PRIVATE
                                   yan_semantic_posix yan_search_terms)
@@ -528,6 +528,17 @@ if(BUILD_TESTING)
                     --work "${CMAKE_BINARY_DIR}/yanfs-migrate-gate")
             set_tests_properties(yanfs_migrate_work_gate PROPERTIES TIMEOUT 300
                 LABELS "0036-R7-AC2")
+            # Issue #83: deterministic post-copy asset EOF probe matrix.  The
+            # old-RED mode is baseline evidence only and is deliberately not
+            # registered here.
+            add_test(NAME yanfs_migrate_eintr
+                COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_yanfs_migrate_eintr.py"
+                    --migrate $<TARGET_FILE:yan_migrate>
+                    --fault $<TARGET_FILE:yanfs_migrate_fault>
+                    --work "${CMAKE_BINARY_DIR}/yanfs-migrate-eintr")
+            set_tests_properties(yanfs_migrate_eintr PROPERTIES TIMEOUT 300
+                LABELS "0036-R7-AC1;0036-R7-AC2")
         endif()
 
         if(Python3_Interpreter_FOUND AND TARGET yan_run AND TARGET yan_mkfs

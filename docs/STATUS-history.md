@@ -835,3 +835,13 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 
 0035、0036 整体保持 Approved；4095 档性能验收继续跟踪于 [#90](https://github.com/YanBo-maker/YanOS/issues/90)。本轮新增入口的发布、远端 CI 和合入状态随关联 PR 记录。
 
+
+
+## 当前阶段
+
+[PR #92](https://github.com/YanBo-maker/YanOS/pull/92)已按所有者授权合入main（d28c729），保留历史；完整历史比较仍由操作员显式运行。
+
+当前[Issue #90](https://github.com/YanBo-maker/YanOS/issues/90)的[0040实现](specs/0040-4095-file-performance.md)已完成本机验收：固定4095满库夹具的九项操作均达到所有者要求，原1023/2047门槛保留。实现与验证状态见[0040 VERIFY](specs/0040-4095-file-performance.md#verify-执行记录)。独立代码与文档审核及总审已通过，已获所有者批准发布至[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)；最新CI结果与原始工件见该PR，本阶段尚未合入main。
+
+0035、0036及0040整体保持Approved。主线已有大容量检索、离线迁移、学习记录联合验收和dsh双库试用，接入见[dsh双库接入](dsh-mcp-quickstart.md)。
+

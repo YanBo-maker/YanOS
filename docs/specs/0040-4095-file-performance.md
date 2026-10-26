@@ -1,7 +1,7 @@
 # 0040：4095 文件性能验收与局部优化
 
 - **意图**：在4095篇笔记的满库夹具上，让常用终端操作达到统一指令步数门槛，并提供可重跑的正确性、计步和任务栈证据。依据：[0004 决策](../decisions/0004-4095-performance-budget.md)。
-- **状态**：Approved（所有者2026-10-25批准严格门槛、有效范围补充与整体方案）；实现、本机验收和独立审核已完成，已获批准发布至[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)，最新CI及维护者验收状态见该PR。
+- **状态**：Implemented；所有者于2026-10-27认可意图与成功标准并授权合入，[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)以merge commit `552dcde`进入main，保留阶段历史。验收范围见VERIFY。
 - **supersedes**：承接0036-R5-AC1引用的4095性能验收；不取代0036的1023/2047要求、历史结果或其余文件系统契约；澄清0032解析器仅blocks[0..block_count)为有效结果。
 - **成功标准**：4095档九项均达到门槛；三档同时复测，输出、统计、分配位置、错误与镜像符合现行规格；任务栈与整体内存保持预算；实际验收入口及检测力可由其他检出重跑。
 
@@ -137,3 +137,13 @@
 所有者随后明确批准推送、创建PR与运行CI；原两个阶段提交已推送，已创建[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)。本节只补发布事实，生产代码和已验证输入保持；后续提交仅同步文档状态。此前“未推送/未运行远端CI”描述保留为本地交付时的记录，不代表当前发布状态。
 
 本PR的CI结果、精确提交及test-evidence工件以PR最新检查为准；各Linux任务将运行真实4095性能门禁，并保存完整回归日志副本和原始27项记录。总审核需核实实际上传及内容，不能把工作流静态通过当作远端验收完成。所有者意图验收与合入仍待完成，0040保持Approved。
+
+### 2026-10-27：远端核验与合入
+
+最终head `d2113d8`的[Actions 40321753303](https://github.com/YanBo-maker/YanOS/actions/runs/40321753303)三项CI均成功：Linux Release默认150/150（744.59s）、Linux Debug ASan/UBSan默认150/150（1391.25s）、Windows Debug默认81/81（296.08s），均零失败、零CTest跳过。Linux完整日志副本与后续MCP四项日志分别保留；十七组实际变异仍属本机证据。本次未重跑历史全量比较或真实模型效果。
+
+总审核独立核对三个ZIP的API摘要、大小与下载SHA-256，并读取两个Linux工件各27次真实运行的输入、输出、镜像和计步；共54次均满足既有断言，数值与上表一致，4095最大49,782,383步。实际检出提交`7db207c`的父提交为`d28c729`与`d2113d8`，tree为`eb7a818cb742cf84866be4de018c221916870c8b`，与已审head相同。工件保留了driver及filler字节；生产Guest ELF和yan_mkfs仅有同次manifest身份，其二进制不在上传范围，未声称从下载中重新核验。原始ZIP、日志及核验结果保存在`E:/YanOS/build/20261025-4095-performance/`，入口为`ci-final-root-verified.json`与`ci-windows-root-verified.json`。
+
+所有者认可0040意图与成功标准并直接授权总审核合入后，PR #93于2026-10-27以`552dcde6ffe8efd1ee098c02bb88ae09be3aa0db`合入main，父提交为`d28c729`与`d2113d8`，保留三个阶段提交。合并tree与上述已审tree完全相同。main的[Actions 40361835398](https://github.com/YanBo-maker/YanOS/actions/runs/40361835398)当时仍在运行，不把PR CI追认为本次main运行结果。合入后按0034归档MONITOR通道，复制后SHA-256为`6fb5af086da68e78b1036f390a0f66809bdd1aeb509cc86fc3f9d4e2d0009fe1`，再重置原通道头；回执见本阶段`merged-receipt.json`。此前待发布、待验收及待合入文字保留为对应时间的历史快照，0040现为Implemented，0035、0036整体状态保持。
+
+随后精确main `552dcde`的Actions 40361835398完成，总审核下载并核对三份原始任务日志：Linux Release默认150/150（724.37s）、Linux Debug ASan/UBSan默认150/150（1398.56s）、Windows Debug默认81/81（224.24s），零失败、零CTest跳过。两个Linux任务后续MCP四项均4/4，三项工件上传步骤均成功；原始日志含本次main检出SHA，证据在本阶段`main-ci/verified-3.json`及三份任务日志。此处只核对本次main日志与上传步骤，未再下载并逐项重验main工件内容；前述54项原始记录和ZIP摘要的重验来自精确PR run，两个范围分开记录。上段“当时仍在运行”保留为合入时的事实。

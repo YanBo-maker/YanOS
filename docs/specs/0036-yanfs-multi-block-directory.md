@@ -507,3 +507,39 @@ R8-AC1 的历史全量跨版本比较已实际执行，但 `ring_copy`／`os_mem
 总审随后以真实 stdio 子进程返回 `{}`、`[]` 和缺 result 的 JSON，发现共享 schema 辅助函数的 KeyError/TypeError 会逃出入口，虽不误报通过，却未形成最终失败清单。原 dsh 编码会话将这些 schema 异常限定转换为 MCP_SCHEMA，补充跨平台控制并保留原始响应、stderr、退出状态；sanitizer 与传输故障优先级保持。最终仅 `tests/guest/run_yanfs_r8_parity.py` 与 `tests/test_yanfs_r8_parity.py` 两项非 Markdown 输入相对上述全量冻结有变化。
 
 修后在 Release、ASan、Windows 三个已有配置分别定向运行 `yanfs_r8_parity_harness`，各 1/1，门禁含 29 项纯控制；另经真实异常响应及受控 main 路径核对 MCP_SCHEMA、exit 1 与部分失败 manifest，并重验早/晚诊断。使用全量运行产物中已核对哈希的两个固定历史 MCP 二进制，修后重新执行三档 MCP，共 3 对 / 6 次，均符合 v1 成功、v2 错误保持。此为定向后验，不是重新构建的完整 33 对，也不替代修补前的三平台完整回归或十七组实际变异。修后源码摘要、命令和原始记录见 `post-schema-verification.json`、`r1-boundaries-post2/` 与 `post-schema-mcp-v2/`；先前日志与 manifest 原样保留。
+
+### R7 Issue #83：附件EOF探测的EINTR处理（2026-10-27）
+
+本次修复沿用已批准R7的成功比对和失败清理契约，跟踪于[Issue #83](https://github.com/YanBo-maker/YanOS/issues/83)。附件按已知长度比对后，原两次1字节EOF探测把信号中断也判为VERIFY。`host/image_migrate.c`现通过局部静态助手，仅对`read`返回`-1/EINTR`重试同一fd的一次读取；返回0才算EOF，尾字节与其他读取错误仍为`YAN_IMAGE_MIGRATE_VERIFY`，保留`asset '<name>' size changed during verification`及既有清理。依据[Linux read(2)](https://man7.org/linux/man-pages/man2/read.2.html)，EINTR发生在读出任何数据之前。接口、错误分类、格式、来源身份、旁锁和写行为保持；没有增加整次迁移重试、快照或回滚。
+
+本节取代2026-10-21记录中“附件末尾EOF探测遇EINTR可保守失败”的当前限制；原文及后续待办记录保留为当时的历史事实。0036整体保持Approved，故障符号覆盖[#84](https://github.com/YanBo-maker/YanOS/issues/84)和并发干扰、断电恢复不在本次范围。
+
+独立默认测试`yanfs_migrate_eintr`使用实际源/目标附件目录树、精确文件名、验证阶段、单字节读取和`offset==st_size`锚定故障，不按全局读取次数猜测。标记带角色、阶段、偏移、大小和注入次数；未命中或次数不符必须失败。固定附件包含空文件和20000字节文件。修后专项共22项：健康CLI一次、EINTR后EOF成功八项、直接尾字节/EIO失败八项、EINTR后尾字节/EIO失败四项、标记缺失负控一项。故障驱动器断言库结果VERIFY（枚举8）及其退出码9；它没有覆盖真实CLI同类故障的stderr前缀，真实CLI只在健康案例及原迁移矩阵中运行。
+
+先使用精确`d2113d8:host/image_migrate.c`构建旧实现，八项EINTR案例均复现原VERIFY/9及目标清理；这是预期RED，不是当前正常回归失败。修后22项通过，原迁移矩阵在语义配置下74 PASS / 0 FAIL / 0 SKIP，最终定向CTest三项通过（24.86s）。最初未开启语义组件的运行是73 PASS / 1 SKIP，仅保留为诊断；初期夹具与标记判据修订前的日志也保留，不拼入最终通过数。原74项与新增22项分别计数。
+
+总审核重读原始RED/GREEN退出状态、消息、故障标记、二进制摘要和实际镜像/附件，确认成功内容一致，失败目标及附件清理，OLD字节和旁锁保持。另在build下的独立目录生成两个实际坏候选：只重试一次被四个连续中断断言拒绝；把非EINTR错误当EOF被六个EIO断言拒绝。两者均构建成功、以具名断言失败退出1；不把构建失败、超时、信号或sanitizer当检出，也不计为第十八组实际变异。
+
+<!-- issue83-current-validation -->
+当前冻结实现的完整本机验证如下，均零失败、零跳过；每次配置、构建及执行前后核对同一370项非Markdown输入，未发生变化。
+
+| 配置 | 注册数 | 实际通过 | CTest实耗 |
+| --- | ---: | ---: | ---: |
+| Linux Release | 151 | 151/151 | 326.03s |
+| Linux Debug ASan/UBSan | 151 | 151/151 | 1196.69s |
+| Windows MSVC Debug | 81 | 81/81 | 136.60s |
+| Linux实际变异 | 169 | 17/17 | 593.15s |
+
+Linux开启TOOLS/SEMANTIC，默认选择`ctest -E '_mutation$' --no-tests=error --output-on-failure`（Release -j3，ASan -j1）；Windows为MSVC Debug、无Linux工具，-j3。实际变异配置注册169项，只选择`-R '_mutation$' -j3`的十七个实际组，不宣称运行该配置全部默认项。另单独串行运行`guest_console_mutation_gate`，1/1（137.76s）通过，不计为第十八个实际组。新专项的22项、原迁移74项、两个坏候选及17组实际变异各自保留范围；真实模型效果、历史R8全量比较未重跑。
+
+保留的验证诊断包括：首批Release/Windows提前配置时最终测试脚本仍修改，两者均被输入守卫中止，只完成配置、未执行测试；总审核随后误重复启动已包含在原脚本中的控制台门禁，停止重复任务，保留终止和重叠记录，再完成上述独立串行复核。原17组LastTest在额外门禁之前已复制保留；重叠门禁日志不作为最终证据，终止记录不算产品回归失败，也不算检出。最终控制台证据仅为`final/console-serial-*`。
+
+dsh协调器使用一名编码者与一名独立只读审查者，最多三个会话；编码者已完成实现并停止写入。独立预检不算正式审核；同一只读审查者已完成正式R1，PASS且零阻塞，未使用第二轮或传输重试；原两个子任务已inactive，协调headless已退出，不重启归档实验。本轮四项0040合入文档同步由总审核落笔，dsh发现这些并发改动后保持原样；新阶段旧STATUS当前段落原字节追加到历史。实现/测试与文档按同批相邻提交收口，具体提交以本轮交付材料为准；尚未推送、创建本次PR或运行新head远端CI。
+
+证据入口：`E:/YanOS/build/20261027-migration-eintr/`的`handoff-root-verified.json`、`detection-root-verified.json`、`final/*-execution.json`、`final/*-root-verified.json`和原始CTest/LastTest/注册集合；当前检出`build/20261027-migration-eintr/`保留dsh的`implementation-ready.md`、`manifest.json`、`issue83/red/`、`issue83/green/`、`issue83/green-semantic-ctest-final.log`及两次协调器重跑。真实模型效果、历史R8全量对比未重跑。旧验证日志只证明各自历史树，本次未把它们计入新结果。
+
+总审核按独立结论完成审核状态的机械同步，生产与测试370项输入保持；R1报告为当前检出`build/20261027-migration-eintr/formal-r1-report.md`，SHA-256为`19d1fc0c3677b5e320ddf76a28eaf74195304e6d88848317456684336cc9522d`。本次提交前九项总审核与文件归属见本阶段`audit-code-nine-checks.json`及`audit-docs-nine-checks.json`；审核前的冻结文档摘要保留于`final-delivery-inputs.json`，状态同步另记于`closeout-document-state.json`。
+
+本轮本地实现/测试提交为`85ef0395b5282070731cc0ab709caec1300cab91`，文档与其同批相邻提交；提交状态以交付材料为准，尚未发布。
+
+2026-10-27所有者随后批准推送`codex/83-migration-eintr`、创建PR与运行远端CI。实现/测试`85ef039`和文档`db62cd6`保持，发布状态同步仅记录此次授权；实际PR及其CI、可用工件见[Issue #83的关联PR](https://github.com/YanBo-maker/YanOS/issues/83)。此前“尚未发布/推送”的文字保留为本机收口时的快照，不能用0040的CI代替本次新head检查。本次仍沿0036-R7规格通道修复实现，EINTR从误拒绝变为重试成功是可见修复，不归入“不改用户可见行为”的轻量通道；没有新增接口或改变R7不变量。
