@@ -528,6 +528,13 @@ if(BUILD_TESTING)
                     --work "${CMAKE_BINARY_DIR}/yanfs-migrate-gate")
             set_tests_properties(yanfs_migrate_work_gate PROPERTIES TIMEOUT 300
                 LABELS "0036-R7-AC2")
+            add_test(NAME yanfs_migrate_symlink
+                COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_yanfs_migrate_symlink.py"
+                    --migrate $<TARGET_FILE:yan_migrate>
+                    --work "${CMAKE_BINARY_DIR}/yanfs-migrate-symlink")
+            set_tests_properties(yanfs_migrate_symlink PROPERTIES TIMEOUT 180
+                LABELS "0036-R7-AC1;issue88")
         endif()
 
         if(Python3_Interpreter_FOUND AND TARGET yan_run AND TARGET yan_mkfs
