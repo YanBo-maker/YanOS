@@ -4,7 +4,7 @@
 
 [PR #92](https://github.com/YanBo-maker/YanOS/pull/92)已按所有者授权合入main（d28c729），保留历史；完整历史比较仍由操作员显式运行。
 
-当前[Issue #90](https://github.com/YanBo-maker/YanOS/issues/90)的[0040实现](specs/0040-4095-file-performance.md)已完成本机验收：固定4095满库夹具的九项操作均达到所有者要求，原1023/2047门槛保留。实现与验证状态见[0040 VERIFY](specs/0040-4095-file-performance.md#verify-执行记录)。独立代码与文档审核已通过，本阶段尚未推送、运行远端CI或合入main。
+当前[Issue #90](https://github.com/YanBo-maker/YanOS/issues/90)的[0040实现](specs/0040-4095-file-performance.md)已完成本机验收：固定4095满库夹具的九项操作均达到所有者要求，原1023/2047门槛保留。实现与验证状态见[0040 VERIFY](specs/0040-4095-file-performance.md#verify-执行记录)。独立代码与文档审核及总审已通过，已获所有者批准发布至[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)；最新CI结果与原始工件见该PR，本阶段尚未合入main。
 
 0035、0036及0040整体保持Approved。主线已有大容量检索、离线迁移、学习记录联合验收和dsh双库试用，接入见[dsh双库接入](dsh-mcp-quickstart.md)。
 
@@ -54,11 +54,11 @@
 
 - 0036 R8 历史行为对比重跑入口已随[PR #92](https://github.com/YanBo-maker/YanOS/pull/92)合入main（`d28c729`）；完整历史比较由操作员运行，默认门禁核对夹具和判定器。[入口](../tests/guest/run_yanfs_r8_parity.py)，[验证记录](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)
 
-- 0040 4095性能门禁与局部优化已在任务分支实现并完成本机验收，发布和合入待完成。[0040](specs/0040-4095-file-performance.md)
+- 0040 4095性能门禁与局部优化已在任务分支实现并完成本机验收，已发布[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)，等待维护者合入。[0040](specs/0040-4095-file-performance.md)
 
 ## 覆盖边界
 
-- 4095文件容量已支持，0040固定短文本夹具已完成本机性能验收；任意长正文或其他语料的耗时仍随内容增长。本阶段远端CI与合入待完成，实测不代替发布状态。
+- 4095文件容量已支持，0040固定短文本夹具已完成本机性能验收；任意长正文或其他语料的耗时仍随内容增长。CI与合并状态见[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)，固定夹具的实测范围保持。
 
 - R8 历史对比固定于 `4c5e0ab` 与 `2b82d17`。完整重跑由操作员显式执行，默认 CTest 的 `yanfs_r8_parity_harness` 检查夹具与判定器反例；历史 v2 MCP 的 CORRUPT 表示当时的错误保持，不作为当前大容量检索成功证据。
 
