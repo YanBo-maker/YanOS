@@ -572,3 +572,16 @@ dsh协调器使用一名编码者与一名独立只读审查者，最多三个�
 ### 2026-10-27：Issue #88 发布授权
 
 所有者明确批准推送`codex/88-migration-symlink`、创建PR并运行远端CI；总审核据此执行发布。此前“尚未发布/未运行远端CI”保留为本地交付时的快照。此处仅同步授权事实，370项非Markdown输入和原独立dsh R1所审实现保持；没有新增行为或新的dsh审核结论。发布、精确head检查与原始工件入口随[Issue #88](https://github.com/YanBo-maker/YanOS/issues/88)关联PR维护，远端结果与上述本机实测分开记录。
+
+
+### 2026-10-27：PR #94／#95 合入整合
+
+所有者在核对两项PR状态后明确要求完成合并。附件EOF/EINTR修复[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)已以merge commit `203825a7dcc099c0029da3e82e688656d9c14bbf`合入main，父提交为`552dcde`与已审head `eb9cbd9`，合并tree与该head相同，原实现、文档和发布提交均保留。[PR #95](https://github.com/YanBo-maker/YanOS/pull/95)在此基础上整合镜像链接入口验收，合入授权覆盖这两项；先前本地交付及发布快照保持原文，最新合入记录见对应PR。
+
+整合不新增产品行为。CMake冲突由本轮dsh编码者解决：在相同既有条件内保留两组原测试注册、超时、标签和命令，各出现一次。总审核逐字节确认，相对PR #94仅增加原PR #95的七行注册；生产源码、EOF专项与故障驱动器均等于已审PR #94，新链接专项等于已审PR #95。两边规格追加段落完整保留；STATUS当前阶段同步，两个PR合入前的完整当前阶段分别原字节追加到历史一次。README、开发流程、0040及其索引无需新行为修订。
+
+对同一371项非Markdown输入重新配置、构建并执行Linux Release完整默认套件：注册152项，152/152通过，CTest实耗283.07s，零失败、零跳过。配置开启TOOLS/SEMANTIC，命令为`cmake --build BUILD --config Release --parallel 3`及`ctest --test-dir BUILD -C Release --no-tests=error --output-on-failure -j3 -E '_mutation$'`。当前完整LastTest与注册集合逐名匹配；原迁移74项、EOF22项、链接3例61项分别通过，两个迁移二进制摘要与同次专项输出相符。4095默认性能门禁在本次完整套件中运行，未把旧性能数值当作新测量。
+
+证据在`E:/YanOS/build/20261027-migration-merge/`：`source-union-proof.json`、`frozen-source.json`、`integration-execution.json`、`integration-registration.json`、原始`integration-ctest.log`／`integration-LastTest.log`、`integration-verified.json`及`verify-integration.py`。旧PR #94／#95精确head各自的三项CI和工件已有独立核验；本次新整合head的CI、精确检出与原始工件另随PR #95维护。本机只新跑上述Release套件，不将旧ASan、Windows、实际十七组、真实模型或历史全量比较说成当前整合树的新执行。
+
+本轮dsh协调器与窄范围编码者的整合预检不计正式轮次。独立只读审核者针对冻结树`9ef6bd6699a105434c4be157cad59ef21e7a14d7`完成正式R1，PASS且零阻塞；上限两轮，未用R2或启动恢复。报告为当前检出`build/20261027-migration-merge/formal-r1-report.md`，SHA-256为`43d51932500243e75cea2ccba057304a903b956f55836b62fe747c547def97bd`；核对实际源码、接口、原始证据和文档，编码者与审核者均inactive，协调headless已退出。九项总审核通过，见本轮`audit-nine-checks.json`。审核后仅由总审核机械填入上述已核实结论，371项源码输入保持冻结，不宣称新增dsh轮次或新测试。新整合head仍须单独通过CI；PR #95合入后按0034-R7归档监控通道并保留入口，归档回执在本轮交付材料中记录。
