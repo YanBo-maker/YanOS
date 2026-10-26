@@ -2,11 +2,11 @@
 
 ## 当前阶段
 
-当前补齐 [0036](specs/0036-yanfs-multi-block-directory.md) R8 历史行为对比的仓库内重跑入口，跟踪于 [#89](https://github.com/YanBo-maker/YanOS/issues/89)。入口从固定的 R8 前基线与 R8 候选重新构建，以同一组生成镜像比较终端、MCP 和镜像字节；本地分支已完成实现与本机验证，审核状态与收口结论见本轮交付材料；本阶段尚未发布。
+[PR #92](https://github.com/YanBo-maker/YanOS/pull/92)已按所有者授权合入main（d28c729），保留历史；完整历史比较仍由操作员显式运行。
 
-[PR #91](https://github.com/YanBo-maker/YanOS/pull/91) 文档核查已按所有者授权合入 main，merge commit 为 `9d8cf9b`，该提交的 CI 已核对通过。主线已具备大容量检索、离线迁移、学习记录联合验收和 dsh 双库试用，接入见 [dsh 双库接入](dsh-mcp-quickstart.md)。本轮验证明细与历史对比边界见 [0036 VERIFY](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)。
+当前[Issue #90](https://github.com/YanBo-maker/YanOS/issues/90)的[0040实现](specs/0040-4095-file-performance.md)已完成本机验收：固定4095满库夹具的九项操作均达到所有者要求，原1023/2047门槛保留。实现与验证状态见[0040 VERIFY](specs/0040-4095-file-performance.md#verify-执行记录)。独立代码与文档审核已通过，本阶段尚未推送、运行远端CI或合入main。
 
-0035、0036 整体保持 Approved；4095 档性能验收继续跟踪于 [#90](https://github.com/YanBo-maker/YanOS/issues/90)。本轮新增入口的发布、远端 CI 和合入状态随关联 PR 记录。
+0035、0036及0040整体保持Approved。主线已有大容量检索、离线迁移、学习记录联合验收和dsh双库试用，接入见[dsh双库接入](dsh-mcp-quickstart.md)。
 
 ## 已交付能力
 
@@ -52,9 +52,13 @@
 
 - 0036 R7 离线迁移已随 PR #82 合入 main（`26c25fc`）；可复制镜像和附件，保留槽号与库身份。[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)
 
-- 0036 R8 历史行为对比重跑入口已在本分支完成实现与本机验证；完整历史比较由操作员运行，默认门禁核对夹具和判定器。[入口](../tests/guest/run_yanfs_r8_parity.py)，[验证记录](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)
+- 0036 R8 历史行为对比重跑入口已随[PR #92](https://github.com/YanBo-maker/YanOS/pull/92)合入main（`d28c729`）；完整历史比较由操作员运行，默认门禁核对夹具和判定器。[入口](../tests/guest/run_yanfs_r8_parity.py)，[验证记录](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)
 
-## 覆盖边界与已知限制
+- 0040 4095性能门禁与局部优化已在任务分支实现并完成本机验收，发布和合入待完成。[0040](specs/0040-4095-file-performance.md)
+
+## 覆盖边界
+
+- 4095文件容量已支持，0040固定短文本夹具已完成本机性能验收；任意长正文或其他语料的耗时仍随内容增长。本阶段远端CI与合入待完成，实测不代替发布状态。
 
 - R8 历史对比固定于 `4c5e0ab` 与 `2b82d17`。完整重跑由操作员显式执行，默认 CTest 的 `yanfs_r8_parity_harness` 检查夹具与判定器反例；历史 v2 MCP 的 CORRUPT 表示当时的错误保持，不作为当前大容量检索成功证据。
 

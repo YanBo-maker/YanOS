@@ -146,6 +146,10 @@ search（线性与索引）、带标签的 search、`links`、`backlinks`、`rel
 - 0036-R5-AC1：Given N=1023 和 N=2047 两个装满文件的镜像（N=4095 的步数由 0040-R5-AC1 验收；1023/2047 的达标手段见 0036-R8），When 在 Guest 中分别执行挂载、create、`list`、`backlinks`、`related`、`block backlinks`，Then 每个操作的 Guest 步数都 ≤ 5×10⁷（PR 中记录实测值）；任务 0 的实测栈用量 ≤ 4 KiB。create 的测法是在装满的镜像里先删除 slot N/2 上的文件，再 create 一个同样大小的文件，确保真的走到 extent 分配；计步从命令行输入完成开始，到输出提示符为止。
 - 0036-R5-AC2：When 用 `-fstack-usage` 构建 RV32，Then `allocate_extent` 的栈帧不随 N 增长（N=63 和 N=4095 时帧大小相同）。
 
+2026-10-25后续规划：所有者明确4095档全部九项均以50,000,000步为上限，不放宽全库查询门槛。可访问的方案已归档为[0040](0040-4095-file-performance.md)，所有者随后批准整体方案及有效块结果范围补充，当前为Approved，实施与验收尚未完成。上文1023/2047要求和下文历史结论保持；原仓库外0040引用保留为历史背景，不表示旧完整文件已恢复。
+
+2026-10-26后续进展：0040的局部优化与固定夹具性能门禁已完成本机验收，验证和发布状态见[0040 VERIFY](0040-4095-file-performance.md#verify-执行记录)。此前条款和历史结论保留。
+
 ### 0036-R8：让 R5-AC1 达标的改动（闫博 2026-10-20 #70 裁定）
 基线：N=1023 实测 mount 7.45e7、create 8.9e6、list 1.2e6、backlinks 1.91e8、related 1.90e8、block backlinks >7e8（未跑完）。主要开销是逐字节块传输（每 4 KiB 块 19–28 万步），其次是挂载两两比较、`find_entry` 线性查找（`os/yanfs.c:490`）和按 36 B 行逐字节搬移的插入排序。
 必须修的查询：**mount、backlinks、related、block backlinks**；`meta list`（含标签过滤）和搜索扫描同样逐文件读头，必须在 PR 中实测，超标即同样适用本条改动。create、`list` 已达标，只回归。
