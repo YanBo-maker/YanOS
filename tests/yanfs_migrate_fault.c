@@ -5,10 +5,15 @@
  *
  *   cc ... tests/yanfs_migrate_fault.c <snapshot sources except tools/yan_migrate.c>
  *      -Wl,--wrap=open -Wl,--wrap=openat -Wl,--wrap=pwrite -Wl,--wrap=pread
- *      -Wl,--wrap=write -Wl,--wrap=fsync -Wl,--wrap=close
+ *      -Wl,--wrap=read -Wl,--wrap=write -Wl,--wrap=fsync -Wl,--wrap=close
  *      -Wl,--wrap=mkdirat -Wl,--wrap=unlinkat -lm
  *
- * MIG_FAULT selects exactly one injection point.  Every injection prints a
+ * MIG_EOF_FAULT selects one deterministic injection at the post-copy one-byte
+ * EOF probe: a single or double EINTR, an extra tail byte, or EIO.  The role
+ * comes from the actual OLD.assets / NEW.assets directory tree, and the exact
+ * asset basename comes from MIG_EOF_ASSET; the probe must read exactly one
+ * byte at offset == fstat(st_size).  The marker includes kind, role, offset,
+ * size and attempt.  MIG_FAULT selects exactly one injection point.  Every injection prints a
  * FAULT line with after_new=1 once the O_EXCL target image exists, so a test
  * cannot mistake an argument failure for a post-creation cleanup failure.
  * MIG_FAULT=audit performs no injection and logs every open/openat, which the
@@ -62,6 +67,125 @@ static dev_t g_target_device = 0;
 static ino_t g_target_inode = 0;
 static uint64_t g_directory_bytes = 0;
 static int g_asset_fds[FAULT_ASSET_FDS];
+
+/* Post-copy EOF probe control.  The role is attached to the directory tree
+ * rooted at the actual OLD.assets and NEW.assets paths opened by migration, so
+ * the wrapper never has to guess from a global read count. */
+#define EOF_TRACKED_FDS 128
+
+typedef enum {
+    EOF_ROLE_NONE = 0,
+    EOF_ROLE_SOURCE,
+    EOF_ROLE_TARGET
+} EofRole;
+
+typedef struct {
+    int fd;
+    EofRole role;
+    bool directory;
+    char name[256];
+} EofTrackedFd;
+
+static const char *g_eof_kind = NULL;
+static const char *g_eof_asset = NULL;
+static char *g_source_assets_path = NULL;
+static int g_target_parent_fd = -1;
+static EofTrackedFd g_eof_fds[EOF_TRACKED_FDS];
+static int g_eof_attempt = 0;
+
+static EofTrackedFd *eof_tracked(int fd)
+{
+    if (fd < 0) {
+        return NULL;
+    }
+    for (size_t i = 0; i < EOF_TRACKED_FDS; ++i) {
+        if (g_eof_fds[i].fd == fd) {
+            return &g_eof_fds[i];
+        }
+    }
+    return NULL;
+}
+
+static void eof_forget(int fd)
+{
+    EofTrackedFd *tracked = eof_tracked(fd);
+    if (tracked != NULL) {
+        tracked->fd = -1;
+        tracked->role = EOF_ROLE_NONE;
+        tracked->directory = false;
+        tracked->name[0] = '\0';
+    }
+}
+
+static void eof_remember(int fd, EofRole role, bool directory,
+                         const char *name)
+{
+    if (fd < 0 || role == EOF_ROLE_NONE) {
+        return;
+    }
+    eof_forget(fd);
+    for (size_t i = 0; i < EOF_TRACKED_FDS; ++i) {
+        if (g_eof_fds[i].fd < 0) {
+            g_eof_fds[i].fd = fd;
+            g_eof_fds[i].role = role;
+            g_eof_fds[i].directory = directory;
+            if (name == NULL) {
+                g_eof_fds[i].name[0] = '\0';
+            } else {
+                (void)snprintf(g_eof_fds[i].name,
+                               sizeof g_eof_fds[i].name, "%s", name);
+            }
+            return;
+        }
+    }
+}
+
+static EofRole eof_role_of(int fd)
+{
+    EofTrackedFd *tracked = eof_tracked(fd);
+    return tracked == NULL ? EOF_ROLE_NONE : tracked->role;
+}
+
+static EofRole eof_expected_role(void)
+{
+    if (g_eof_kind == NULL) {
+        return EOF_ROLE_NONE;
+    }
+    if (strncmp(g_eof_kind, "asset_eof_source_", 17u) == 0) {
+        return EOF_ROLE_SOURCE;
+    }
+    if (strncmp(g_eof_kind, "asset_eof_target_", 17u) == 0) {
+        return EOF_ROLE_TARGET;
+    }
+    return EOF_ROLE_NONE;
+}
+
+static const char *eof_action(void)
+{
+    return g_eof_kind == NULL ? "" : g_eof_kind + 17;
+}
+
+static void eof_marker(const EofTrackedFd *tracked, off_t offset, off_t size)
+{
+    fprintf(stderr,
+            "FAULT kind=%s role=%s asset=%s phase=verify count=1 "
+            "offset=%lld size=%lld attempt=%d after_new=%d\n",
+            g_eof_kind,
+            tracked->role == EOF_ROLE_SOURCE ? "source" : "target",
+            tracked->name, (long long)offset, (long long)size,
+            g_eof_attempt, g_target_created ? 1 : 0);
+}
+
+static bool eof_action_known(void)
+{
+    const char *action = eof_action();
+    return strcmp(action, "eintr1") == 0 ||
+           strcmp(action, "eintr2") == 0 ||
+           strcmp(action, "eintr_tail") == 0 ||
+           strcmp(action, "eintr_eio") == 0 ||
+           strcmp(action, "tail") == 0 ||
+           strcmp(action, "eio") == 0;
+}
 
 static void mark_new_created(int fd)
 {
@@ -143,6 +267,11 @@ int __wrap_open(const char *path, int flags, ...)
         }
         free(resolved);
     }
+    if (fd >= 0 && g_eof_kind != NULL && (flags & O_DIRECTORY) != 0 &&
+        g_source_assets_path != NULL &&
+        strcmp(path, g_source_assets_path) == 0) {
+        eof_remember(fd, EOF_ROLE_SOURCE, true, "");
+    }
     if (fd >= 0 && !g_parent_tracked && (flags & O_DIRECTORY) != 0) {
         g_parent_tracked = true;
         g_parent_fd = fd;
@@ -177,6 +306,19 @@ int __wrap_openat(int dirfd, const char *name, int flags, ...)
     int fd = (flags & O_CREAT) != 0
                  ? __real_openat(dirfd, name, flags, mode)
                  : __real_openat(dirfd, name, flags);
+    if (fd >= 0 && g_eof_kind != NULL) {
+        EofRole parent_role = eof_role_of(dirfd);
+        if ((flags & O_DIRECTORY) != 0) {
+            if (parent_role != EOF_ROLE_NONE) {
+                eof_remember(fd, parent_role, true, "");
+            } else if (dirfd == g_target_parent_fd && g_assets_base != NULL &&
+                       strcmp(name, g_assets_base) == 0) {
+                eof_remember(fd, EOF_ROLE_TARGET, true, "");
+            }
+        } else if (parent_role != EOF_ROLE_NONE) {
+            eof_remember(fd, parent_role, false, name);
+        }
+    }
     if (fd >= 0 && g_target_base != NULL && strcmp(name, g_target_base) == 0 &&
         (flags & O_CREAT) != 0 && (flags & O_EXCL) != 0 &&
         (flags & O_NOFOLLOW) == 0 && !g_target_created) {
@@ -195,6 +337,7 @@ int __wrap_mkdirat(int dirfd, const char *name, mode_t mode)
         strcmp(name, g_assets_base) == 0) {
         struct stat info;
         g_assets_created = true;
+        g_target_parent_fd = dirfd;
         if (fstatat(dirfd, name, &info, AT_SYMLINK_NOFOLLOW) == 0) {
             g_assets_ino = info.st_ino;
         }
@@ -274,6 +417,64 @@ ssize_t __wrap_pread(int fd, void *bytes, size_t length, off_t offset)
     return __real_pread(fd, bytes, length, offset);
 }
 
+ssize_t __real_read(int fd, void *bytes, size_t length);
+ssize_t __wrap_read(int fd, void *bytes, size_t length)
+{
+    if (g_eof_kind != NULL && g_verify_opened && length == 1u) {
+        EofTrackedFd *tracked = eof_tracked(fd);
+        if (tracked != NULL && !tracked->directory &&
+            tracked->role == eof_expected_role() && g_eof_asset != NULL &&
+            strcmp(tracked->name, g_eof_asset) == 0) {
+            struct stat info;
+            off_t offset = lseek(fd, 0, SEEK_CUR);
+            if (offset >= 0 && fstat(fd, &info) == 0 &&
+                offset == info.st_size) {
+                ++g_eof_attempt;
+                const char *action = eof_action();
+                if (strcmp(action, "eintr1") == 0 && g_eof_attempt == 1) {
+                    eof_marker(tracked, offset, info.st_size);
+                    errno = EINTR;
+                    return -1;
+                }
+                if (strcmp(action, "eintr2") == 0 && g_eof_attempt <= 2) {
+                    eof_marker(tracked, offset, info.st_size);
+                    errno = EINTR;
+                    return -1;
+                }
+                if (strcmp(action, "eintr_tail") == 0) {
+                    eof_marker(tracked, offset, info.st_size);
+                    if (g_eof_attempt == 1) {
+                        errno = EINTR;
+                        return -1;
+                    }
+                    ((unsigned char *)bytes)[0] = 0x5Au;
+                    return 1;
+                }
+                if (strcmp(action, "eintr_eio") == 0) {
+                    eof_marker(tracked, offset, info.st_size);
+                    if (g_eof_attempt == 1) {
+                        errno = EINTR;
+                        return -1;
+                    }
+                    errno = EIO;
+                    return -1;
+                }
+                if (strcmp(action, "tail") == 0) {
+                    eof_marker(tracked, offset, info.st_size);
+                    ((unsigned char *)bytes)[0] = 0x5Au;
+                    return 1;
+                }
+                if (strcmp(action, "eio") == 0) {
+                    eof_marker(tracked, offset, info.st_size);
+                    errno = EIO;
+                    return -1;
+                }
+            }
+        }
+    }
+    return __real_read(fd, bytes, length);
+}
+
 ssize_t __real_write(int fd, const void *bytes, size_t length);
 ssize_t __wrap_write(int fd, const void *bytes, size_t length)
 {
@@ -313,6 +514,7 @@ int __wrap_fsync(int fd)
 int __real_close(int fd);
 int __wrap_close(int fd)
 {
+    eof_forget(fd);
     /* Linux may already have closed the descriptor when close reports an
      * error.  Reproduce that model: perform the real close first, then
      * inject EIO for the selected descriptor. */
@@ -464,6 +666,22 @@ int main(int argc, char **argv)
                             strcmp(cleanup_assets, "1") == 0;
     const char *secondary = getenv("MIG_SECONDARY");
     g_secondary = secondary == NULL ? NULL : secondary;
+    for (size_t i = 0; i < EOF_TRACKED_FDS; ++i) {
+        g_eof_fds[i].fd = -1;
+    }
+    const char *eof_kind = getenv("MIG_EOF_FAULT");
+    g_eof_kind = eof_kind == NULL || *eof_kind == '\0' ? NULL : eof_kind;
+    g_eof_asset = getenv("MIG_EOF_ASSET");
+    if (g_eof_kind != NULL &&
+        (g_eof_asset == NULL || *g_eof_asset == '\0')) {
+        fprintf(stderr, "MIGFAULT missing MIG_EOF_ASSET\n");
+        return 2;
+    }
+    if (g_eof_kind != NULL &&
+        (eof_expected_role() == EOF_ROLE_NONE || !eof_action_known())) {
+        fprintf(stderr, "MIGFAULT unknown MIG_EOF_FAULT=%s\n", g_eof_kind);
+        return 2;
+    }
     if (strcmp(g_kind, "audit") == 0) {
         g_old_real = realpath(from, NULL);
     }
@@ -478,17 +696,19 @@ int main(int argc, char **argv)
             if (lstat(source_assets, &info) == 0 && S_ISDIR(info.st_mode)) {
                 g_source_assets_ino = info.st_ino;
             }
-            free(source_assets);
+            g_source_assets_path = source_assets;
         }
         free(old_real);
     }
-    fprintf(stderr, "MIGFAULT start kind=%s\n", g_kind);
+    fprintf(stderr, "MIGFAULT start kind=%s eof_kind=%s\n", g_kind,
+            g_eof_kind == NULL ? "" : g_eof_kind);
 
     char error[512];
     YanImageMigrateResult result =
         yan_image_migrate(from, to, &options, error, sizeof error);
     fprintf(stderr, "MIGFAULT result=%d error=%s\n", (int)result, error);
     free(g_old_real);
+    free(g_source_assets_path);
     free(assets);
     if (result == YAN_IMAGE_MIGRATE_OK) {
         return 0;

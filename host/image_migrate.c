@@ -506,6 +506,21 @@ static YanImageMigrateResult close_checked(int fd, const char *what,
     return result;
 }
 
+/* One byte past the known length must be a true EOF.  A signal can interrupt
+ * read before it transfers anything; retry only that case so a tail byte and a
+ * real read error keep their existing VERIFY classification. */
+static bool probe_asset_eof(int fd)
+{
+    uint8_t byte;
+    for (;;) {
+        ssize_t got = read(fd, &byte, 1u);
+        if (got < 0 && errno == EINTR) {
+            continue;
+        }
+        return got == 0;
+    }
+}
+
 static YanImageMigrateResult asset_regular(int source, int target,
                                            const char *name, AssetMode mode,
                                            char *error, size_t error_size)
@@ -583,7 +598,7 @@ static YanImageMigrateResult asset_regular(int source, int target,
         }
         remaining -= chunk;
     }
-    if (read(in, left, 1u) != 0 || read(out, right, 1u) != 0) {
+    if (!probe_asset_eof(in) || !probe_asset_eof(out)) {
         result = set_error(error, error_size, YAN_IMAGE_MIGRATE_VERIFY,
                            "asset '%s' size changed during verification", name);
     }
