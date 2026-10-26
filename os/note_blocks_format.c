@@ -145,6 +145,17 @@ YanBlockResult yan_block_text_feed(YanBlockTextValidator *validator,
             validator->pending_cr = false;
             continue;
         }
+        if (validator->utf8_length == 0u) {
+            /* No CR or partial scalar is pending. Consume only this run of
+             * legal ASCII; the first other byte still takes the old path. */
+            while ((byte >= 0x20u && byte < 0x7fu) ||
+                   byte == (uint8_t)'\t' || byte == (uint8_t)'\n') {
+                if (++i == length) {
+                    return validator->result;
+                }
+                byte = bytes[i];
+            }
+        }
         if (validator->utf8_length == 0u && byte == (uint8_t)'\r') {
             validator->pending_cr = true;
             continue;
@@ -199,7 +210,10 @@ YanBlockResult yan_block_parser_init(YanBlockParser *parser,
     if (first_line == 0u) {
         return YAN_BLOCK_INVALID;
     }
-    memset(parser, 0, sizeof *parser);
+    /* Only the count-bounded active prefix is a result. Retain unused slots;
+     * each new declaration is fully initialized before increasing the count. */
+    memset(&parser->block_count, 0,
+           sizeof *parser - offsetof(YanBlockParser, block_count));
     parser->initialized = BLOCK_PARSER_READY;
     parser->result = YAN_BLOCK_OK;
     parser->offset = body_offset;
@@ -285,12 +299,14 @@ static void classify_line(YanBlockParser *parser, uint32_t after_eol)
     if (parser->result != YAN_BLOCK_OK) {
         return;
     }
-    YanBlockDecl *block = &parser->blocks[parser->block_count++];
+    YanBlockDecl *block = &parser->blocks[parser->block_count];
+    memset(block, 0, sizeof *block);
     memcpy(block->id, parser->line_prefix + 7u, id_length);
     block->id[id_length] = '\0';
     block->marker_line = (uint32_t)parser->line;
     block->start = after_eol;
     block->end = after_eol;
+    ++parser->block_count;
 }
 
 enum { REF_SEEK, REF_OPEN, REF_NAME, REF_ID, REF_CLOSE };

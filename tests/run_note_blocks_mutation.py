@@ -35,6 +35,7 @@ def required_inputs(suites):
               'tests/run_note_metadata_mutation.py', 'tests/run_yanfs_mutation.py',
               'tests/fs_test_support.h', 'os/memory.h',
               'os/note_metadata_format.h', 'os/note_metadata.h',
+              'os/note_metadata_format_internal.h',
               'os/note_relations.h', 'os/note_blocks_format.h',
               'os/note_blocks.h', 'os/search_terms.h',
               'os/search_terms_core.h', 'os/search_terms_linear.h',

@@ -302,14 +302,14 @@ def require_sources(source):
     needed = [guest / "persistent_combined.c", guest / "guest_lib.c", guest / "link.ld",
               guest / CONTROL_TESTS,
               source / "os/trap_entry.S", source / "os/task_switch.S", source / "os/task.c",
-              source / "os/task.h", source / "os/block.c", source / "os/block.h",
+              source / "os/task.h", source / "os/block.c", source / "os/block_peek.h", source / "os/block.h",
               source / "os/platform.h", source / "os/console.c",
               source / "tools/host_disk.c", source / "tools/host_disk.h",
               source / "tools/host_block.c", source / "tools/yan_run.c",
               *[source / name for name in (
                   "host/note_write.c", "host/note_write.h", "os/yanfs.c",
                   "os/yanfs.h", "os/sort.h", "os/memory.h",
-                  "os/note_metadata_format.c", "os/note_metadata_format.h",
+                  "os/note_metadata_format.c", "os/note_metadata_format.h", "os/note_metadata_format_internal.h",
                   "os/note_blocks_format.c", "os/note_blocks_format.h",
                   "os/search_text.c", "os/search_text.h")]]
     for path in needed:
@@ -804,21 +804,21 @@ def main():
     parser.add_argument("--mutation", action="store_true")
     args = parser.parse_args()
 
-    if not shutil.which(args.gcc):
-        print("SKIP: missing external cross compiler")
-        return 77
     source = args.source.resolve()
     work = args.work.resolve()
     if not require_sources(source):
         return 1
+    if not Path(args.run).is_file():
+        print(f"FAIL the executor under test is missing: {args.run}")
+        return 1
+    if not shutil.which(args.gcc):
+        print("SKIP: missing external cross compiler")
+        return 77
     # The verdict rules are checked before anything is built: a gate that cannot
     # tell a reader panic from a detection must not report PASS.
     controls = run_negative_controls()
     if controls != 0:
         return controls
-    if not Path(args.run).is_file():
-        print(f"FAIL the executor under test is missing: {args.run}")
-        return 1
     # A named executor without --disk-image is a tool regression, not a missing
     # dependency: 77 here would let it skip the case and leave the suite green.
     helper = run_process([args.run, "--help"], timeout=30)

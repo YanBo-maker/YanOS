@@ -44,6 +44,7 @@ RUN_TIMEOUT = 120
 # os/shell.c now consumes the term facade; os/memory.c itself is not compiled
 # here because the native C library supplies memcpy/memset/memcmp/strlen.
 OS_HEADERS = ["search.h", "search_linear.h", "yanfs.h", "sort.h", "shell.h", "note_relations.h", "note_blocks.h", "note_blocks_format.h", "note_metadata.h", "platform.h",
+              "note_metadata_format_internal.h",
               "task.h", "block.h", "console.h", "editor.h", "line.h",
               "terminal.h", "yanfs_block.h", "memory.h", "search_terms.h", "note_metadata_format.h",
               "search_terms_core.h", "search_terms_index.h",

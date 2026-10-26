@@ -1186,9 +1186,43 @@ static void index_preflight_protocol_does_not_publish(void)
     TEST_ASSERT_EQUAL_INT(YAN_SEARCH_INDEX_UNAVAILABLE, status_now().state);
 }
 
+static void index_complete_small_files_reuse_only_their_qualified_buffer(void)
+{
+    static uint8_t content[4097];
+    const uint32_t sizes[]={4095u,4096u,4097u};
+    for (uint32_t i=0u;i<3u;++i) {
+        setUp();mount_fs();
+        memset(content,' ',sizeof content);memcpy(content,"needle\n",7u);
+        /* Nonzero ASCII controls remain legal search text, unlike block text. */
+        content[100]=1u;
+        create_file("edge",content,sizes[i]);index_attach();device_reads=0u;
+        TEST_ASSERT_EQUAL(YAN_SEARCH_TERMS_OK,yan_search_terms_rebuild(&terms));
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(sizes[i]<=4096u ? 1u : 4u,device_reads,"0040_index_qualified_small_file_read_once");
+        TEST_ASSERT_EQUAL(YAN_SEARCH_TERMS_OK,capture_run(&terms,&capture_index,"needle"));
+        TEST_ASSERT_EQUAL_UINT32(1u,capture_index.matches);
+    }
+    setUp();mount_fs();
+    memset(content,' ',sizeof content);memcpy(content,"needle\n",7u);content[4095]=0u;
+    create_file("nul",content,4096u);
+    content[4095]=0xe4u;create_file("utf8",content,4096u);
+    create_file("good",(const uint8_t *)"needle\n",7u);
+    create_file("other",(const uint8_t *)"different\n",10u);
+    index_attach();device_reads=0u;
+    TEST_ASSERT_EQUAL(YAN_SEARCH_TERMS_OK,yan_search_terms_rebuild(&terms));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4u,device_reads,"0040_each_file_has_its_own_qualification_read");
+    TEST_ASSERT_EQUAL(YAN_SEARCH_TERMS_OK,capture_run(&terms,&capture_index,"needle"));
+    TEST_ASSERT_EQUAL_UINT32(2u,capture_index.summary.skipped);
+    TEST_ASSERT_EQUAL_UINT32(1u,capture_index.matches);
+    TEST_ASSERT_EQUAL_STRING("good",capture_index.name[0]);
+    TEST_ASSERT_EQUAL(YAN_SEARCH_TERMS_OK,capture_run(&terms,&capture_index,"different"));
+    TEST_ASSERT_EQUAL_UINT32(1u,capture_index.matches);
+    TEST_ASSERT_EQUAL_STRING("other",capture_index.name[0]);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(index_complete_small_files_reuse_only_their_qualified_buffer);
     RUN_TEST(index_init_rejects_null_and_alias);
     RUN_TEST(index_status_empty_is_zero_io);
     RUN_TEST(index_clear_is_zero_io_and_does_not_recover);

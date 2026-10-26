@@ -44,6 +44,7 @@ BUILD_TIMEOUT = 180
 RUN_TIMEOUT = 90
 
 OS_FILES = ["yanfs.h", "yanfs.c", "sort.h", "yanfs_block.h", "yanfs_block.c",
+            "block_peek.h",
             "block.h", "platform.h", "task.h",
             "note_metadata_format.h", "note_metadata.h", "note_relations.h",
             "note_blocks_format.h", "note_blocks.h", "search_terms.h",
@@ -188,21 +189,8 @@ MUTATIONS = [
     {
         "name": "first_fit_ignores_fragmentation",
         "file": "os/yanfs.c",
-        "old": """    uint32_t limit = fs->capacity_blocks;
-    for (uint32_t i = 0; i < fs->entry_capacity; ++i) {
-        const uint8_t *entry = entry_at(fs->directory, i);
-        if (entry[0] == 0u || load_le32(entry + FS_ENTRY_SIZE_OFFSET) == 0u) {
-            continue;
-        }
-        uint32_t start = load_le32(entry + FS_ENTRY_START_OFFSET);
-        if (start > candidate && start < limit) {
-            limit = start;
-        }
-    }
-    return limit - candidate >= needed;
-""",
-        "new": """    return fs->capacity_blocks - candidate >= needed;
-""",
+        "old": "        if (start - candidate >= needed) {\n            break;\n        }",
+        "new": "        if (start > candidate) {\n            break;\n        }",
     },
     {
         "name": "error_frame_waits_for_payload",

@@ -244,6 +244,9 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
     foreach(_header arena note_blocks note_blocks_format note_relations note_metadata note_metadata_format block console editor memory line platform search search_linear search_terms search_terms_core search_terms_index search_terms_linear search_text shell sort task terminal yanfs yanfs_block)
         list(APPEND _yan_terminal_headers "${CMAKE_CURRENT_SOURCE_DIR}/os/${_header}.h")
     endforeach()
+    list(APPEND _yan_terminal_headers
+         "${CMAKE_CURRENT_SOURCE_DIR}/os/block_peek.h"
+         "${CMAKE_CURRENT_SOURCE_DIR}/os/note_metadata_format_internal.h")
 
     add_custom_command(OUTPUT "${YAN_TERMINAL_ELF}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/guest-apps"
@@ -881,6 +884,11 @@ if(BUILD_TESTING)
         set_tests_properties(yanfs_r8_parity_harness PROPERTIES
             ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1" TIMEOUT 60
             LABELS "issue89;0036-R8-AC1-harness")
+        add_test(NAME yanfs_4095_performance_harness
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_yanfs_4095_performance.py")
+        set_tests_properties(yanfs_4095_performance_harness PROPERTIES TIMEOUT 120
+            LABELS "0040-R4-AC1;0040-R4-AC2;0040-R5-AC3")
         # Independent Unicode/regex reference checks complete rows, scores,
         # snippets and summaries. The warm index case also bounds disk reads;
         # it cannot pass by silently choosing the linear backend.
@@ -1170,6 +1178,17 @@ if(BUILD_TESTING)
                                 --mkfs "$<TARGET_FILE:yan_mkfs>"
                                 --guest "${YAN_TERMINAL_ELF}"
                                 --cc "${CMAKE_C_COMPILER}")
+                    add_test(NAME yanfs_4095_performance
+                        COMMAND "${Python3_EXECUTABLE}" -B
+                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_yanfs_4095_performance.py"
+                                --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                                --work "${CMAKE_BINARY_DIR}/yanfs-4095-performance"
+                                --mkfs "$<TARGET_FILE:yan_mkfs>"
+                                --guest "${YAN_TERMINAL_ELF}"
+                                --cc "${CMAKE_C_COMPILER}")
+                    set_tests_properties(yanfs_4095_performance PROPERTIES
+                        SKIP_RETURN_CODE 77 TIMEOUT 1800
+                        LABELS "0040-R4-AC1;0040-R4-AC3;0040-R5-AC1;0040-R5-AC2")
                     set_tests_properties(yanfs_r8_performance PROPERTIES
                                          SKIP_RETURN_CODE 77 TIMEOUT 900
                                          LABELS "0036-R8-AC4")

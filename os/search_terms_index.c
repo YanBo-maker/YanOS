@@ -222,6 +222,8 @@ static YanSearchTermsResult index_add_posting(YanSearchTermsIndex *index,
 typedef struct {
     YanFs *fs;
     const char *name;
+    uint32_t last_offset;
+    uint32_t last_length;
 } IndexReader;
 
 static YanSearchTermsResult index_read(void *context, uint32_t offset,
@@ -232,6 +234,8 @@ static YanSearchTermsResult index_read(void *context, uint32_t offset,
     uint32_t got = 0u;
     YanFsResult result =
         yan_fs_read(reader->fs, reader->name, offset, out, capacity, &got);
+    reader->last_offset = offset;
+    reader->last_length = result == YAN_FS_OK ? got : 0u;
     *length = got;
     return index_map_fs(result);
 }
@@ -258,7 +262,7 @@ static YanSearchTermsResult index_observe(const YanSearchTermsIndex *index,
 
 static YanSearchTermsResult index_scan_file(YanSearchTermsIndex *index,
                                             uint32_t slot, const char *name,
-                                            uint32_t file_size)
+                                            uint32_t file_size, bool buffered)
 {
     IndexReader reader;
     reader.fs = index->fs;
@@ -277,11 +281,11 @@ static YanSearchTermsResult index_scan_file(YanSearchTermsIndex *index,
         uint32_t request = remaining < YAN_SEARCH_TERMS_CHUNK
                                ? remaining
                                : YAN_SEARCH_TERMS_CHUNK;
-        uint32_t got = 0u;
-        YanSearchTermsResult result =
-            index_read(&reader, offset, request, chunk, &got);
-        if (result != YAN_SEARCH_TERMS_OK) {
-            return result;
+        uint32_t got = request;
+        YanSearchTermsResult result = YAN_SEARCH_TERMS_OK;
+        if (!buffered) {
+            result = index_read(&reader, offset, request, chunk, &got);
+            if (result != YAN_SEARCH_TERMS_OK) return result;
         }
         if (got > request || got == 0u) {
             return YAN_SEARCH_TERMS_PROTOCOL;
@@ -392,9 +396,7 @@ static YanSearchTermsResult index_build_locked(YanSearchTermsIndex *index)
         if (slot < index->entry_capacity) {
             index->entries[slot] = info;
         }
-        IndexReader reader;
-        reader.fs = index->fs;
-        reader.name = info.name;
+        IndexReader reader = {index->fs, info.name, 0u, 0u};
         bool skip = false;
         result = yan_search_terms_core_preflight(
             index_read, &reader, index->linear.scratch.chunk,
@@ -407,7 +409,9 @@ static YanSearchTermsResult index_build_locked(YanSearchTermsIndex *index)
             ++index->skipped;
             continue;
         }
-        result = index_scan_file(index, slot, info.name, info.size_bytes);
+        bool buffered = info.size_bytes <= YAN_SEARCH_TERMS_CHUNK &&
+            reader.last_offset == 0u && reader.last_length == info.size_bytes;
+        result = index_scan_file(index, slot, info.name, info.size_bytes, buffered);
         if (result == YAN_SEARCH_TERMS_INDEX_LIMIT) {
             /* Remember the source so a same-identity query can scan without
              * rebuilding, but publish no counts and no partial index. */

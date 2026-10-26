@@ -6,7 +6,7 @@ import subprocess
 import sys
 import run_search_terms_api as common
 INPUTS = ['os/note_relations.c','os/note_relations.h','os/note_metadata_format.c',
-          'os/note_metadata_format.h','os/yanfs.c','os/yanfs.h','os/memory.c',
+          'os/note_metadata_format.h', 'os/note_metadata_format_internal.h','os/yanfs.c','os/yanfs.h','os/memory.c',
           'os/memory.h','os/platform.h','tests/guest/start.S','tests/guest/link.ld',
           'tests/guest/guest.h','tests/guest/note_relations_api_check.c',
           'tests/guest/run_note_relations_api.py','tests/guest/run_search_terms_api.py']

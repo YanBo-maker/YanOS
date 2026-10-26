@@ -1,4 +1,5 @@
 #include "platform.h"
+#include "block_peek.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -10,6 +11,18 @@ _Alignas(uint32_t) static uint8_t output[8208], wanted[8208];
 
 int main(void)
 {
+    /* Pure header peek exercises the same normalized-copy helper used by the
+     * device callers, without consuming a byte or changing ring storage. */
+    for (uint32_t alignment=0u;alignment<4u;++alignment)
+    for (uint32_t tail=0u;tail<64u;++tail) {
+        for (uint32_t i=0u;i<sizeof ring;++i) ring[i]=expected[i]=(uint8_t)(i*19u);
+        memset(output,0xa5,sizeof output);memset(wanted,0xa5,sizeof wanted);
+        for (uint32_t i=0u;i<16u;++i) wanted[alignment+i]=ring[(tail+i)%64u];
+        yan_block_peek_copy(ring,64u,tail+3u*64u,output+alignment);
+        if (memcmp(ring,expected,sizeof ring)!=0 || memcmp(output,wanted,sizeof output)!=0) {
+            fprintf(stderr,"FAIL 0040 header peek mask/wrap/alignment/guards\n");return 1;
+        }
+    }
     const uint32_t sizes[] = {64u, 128u, 8192u};
     const uint32_t lengths[] = {0u, 1u, 2u, 3u, 4u, 7u, 15u, 16u, 17u,
         31u, 32u, 33u, 63u, 64u, 65u, 4095u, 4096u, 8191u};

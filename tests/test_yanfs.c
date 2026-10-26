@@ -4065,9 +4065,101 @@ static void source_identity_unchanged_by_normal_mount_rejection(void)
         "an UNSUPPORTED mount rejection must not publish a new source identity");
 }
 
+static void assert_0040_name_index_matches_cache(void)
+{
+    bool seen[YAN_FS_MAX_FILES]={false};
+    uint32_t live=0u;
+    for (uint32_t slot=0u;slot<fs.entry_capacity;++slot)
+        if (cache_entry(slot)[0]!=0u) ++live;
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(live,fs.name_order_count,"0040_name_index_full_coverage");
+    for (uint32_t i=0u;i<live;++i) {
+        uint32_t slot=fs.name_order[i];
+        TEST_ASSERT_LESS_THAN_UINT32(fs.entry_capacity,slot);
+        TEST_ASSERT_FALSE(seen[slot]);seen[slot]=true;
+        TEST_ASSERT_NOT_EQUAL_UINT8(0u,cache_entry(slot)[0]);
+        if (i!=0u) TEST_ASSERT_TRUE_MESSAGE(strcmp((const char *)cache_entry(fs.name_order[i-1u]),(const char *)cache_entry(slot))<0,"0040_name_index_strict_name_order");
+    }
+}
+
+static uint32_t oracle_0040_lowest_gap(uint32_t needed)
+{
+    for (uint32_t start=1u;start+needed<=device.capacity_blocks;++start) {
+        bool free=true;
+        for (uint32_t slot=0u;slot<fs.entry_capacity;++slot) {
+            if (cache_entry(slot)[0]==0u || cache_size(slot)==0u) continue;
+            if (start<cache_start(slot)+cache_count(slot) && cache_start(slot)<start+needed) free=false;
+        }
+        if (free) return start;
+    }
+    return 0u;
+}
+
+static void fixture_0040_permuted_extents(void)
+{
+    fx_device(16u);
+    fx_entry(device.blocks[0],0u,"z",4096u,8u,1u);
+    fx_entry(device.blocks[0],1u,"a",4096u,2u,1u);
+    fx_entry(device.blocks[0],2u,"m",4096u,5u,1u);
+    fx_entry(device.blocks[0],3u,"empty",0u,0u,0u);
+    fx_seal(device.blocks[0]);
+    TEST_ASSERT_EQUAL(YAN_FS_OK,mount_fresh());
+    device.reads=device.writes=0u;
+}
+
+static void allocation_0040_lowest_gap_and_index_restoration(void)
+{
+    fill_payload(5000u,19u);
+    for (uint32_t kind=0u;kind<3u;++kind) {
+        fixture_0040_permuted_extents();
+        uint32_t want=oracle_0040_lowest_gap(kind==2u ? 1u : 2u);
+        YanFsResult result=kind==0u ? yan_fs_create(&fs,"new",payload,5000u) :
+                           kind==1u ? yan_fs_replace(&fs,"m",payload,5000u) : yan_fs_copy(&fs,"z","new");
+        TEST_ASSERT_EQUAL(YAN_FS_OK,result);
+        const char *name=kind==1u ? "m" : "new";
+        uint32_t slot=0u;while (slot<fs.entry_capacity && strcmp((const char *)cache_entry(slot),name)!=0) ++slot;
+        TEST_ASSERT_LESS_THAN_UINT32(fs.entry_capacity,slot);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(want,cache_start(slot),"0040_lowest_gap_matches_independent_block_oracle");
+        assert_0040_name_index_matches_cache();
+    }
+    for (uint32_t kind=0u;kind<3u;++kind) for (uint32_t metadata=0u;metadata<2u;++metadata) {
+        fixture_0040_permuted_extents();
+        device.write_fail_at=metadata ? (kind==2u ? 2u : 3u) : 1u;
+        device.write_fail_code=YAN_FS_IO_ERROR;device.write_partial=0u;
+        YanFsResult result=kind==0u ? yan_fs_create(&fs,"new",payload,5000u) :
+                           kind==1u ? yan_fs_replace(&fs,"m",payload,5000u) : yan_fs_copy(&fs,"z","new");
+        TEST_ASSERT_EQUAL(YAN_FS_IO,result);
+        assert_0040_name_index_matches_cache();
+        device.write_fail_at=0u;
+    }
+    mount_empty(5u);
+    create_ok("empty",NULL,0u);
+    for (uint32_t i=0u;i<4u;++i) { char name[2]={(char)('a'+i),0};create_ok(name,payload,1u); }
+    TEST_ASSERT_EQUAL(YAN_FS_NOSPACE,yan_fs_create(&fs,"new",payload,1u));
+    assert_0040_name_index_matches_cache();
+}
+
+static void names_0040_terminating_before_each_workspace_remain_valid(void)
+{
+    static struct { char name[8];uint8_t directory[4096]; } adjacent_directory;
+    static struct { char name[8];uint16_t order[YAN_FS_MAX_FILES]; } adjacent_order;
+    static YanFs local;
+    fx_device(16u);fx_entry(device.blocks[0],0u,"abcdefg",0u,0u,0u);fx_seal(device.blocks[0]);
+    memset(&local,0,sizeof local);
+    memcpy(adjacent_directory.name,"abcdefg",8u);memcpy(adjacent_order.name,"abcdefg",8u);
+    TEST_ASSERT_EQUAL(YAN_FS_OK,yan_fs_init_directory(&local,fx_backend(),adjacent_directory.directory,1u,adjacent_order.order));
+    TEST_ASSERT_EQUAL(YAN_FS_OK,yan_fs_mount(&local));
+    YanFsInfo info;
+    TEST_ASSERT_EQUAL(YAN_FS_OK,yan_fs_stat(&local,adjacent_directory.name,&info));
+    TEST_ASSERT_EQUAL(YAN_FS_OK,yan_fs_stat(&local,adjacent_order.name,&info));
+    TEST_ASSERT_EQUAL_UINT32(1u,(uint32_t)((uintptr_t)adjacent_directory.directory-(uintptr_t)&adjacent_directory.name[7]));
+    TEST_ASSERT_EQUAL_UINT32(1u,(uint32_t)((uintptr_t)adjacent_order.order-(uintptr_t)&adjacent_order.name[7]));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(allocation_0040_lowest_gap_and_index_restoration);
+    RUN_TEST(names_0040_terminating_before_each_workspace_remain_valid);
     RUN_TEST(format_writes_header_and_empty_entries);
     RUN_TEST(format_encodes_capacity_little_endian);
     RUN_TEST(format_rejects_invalid_arguments_without_writing);

@@ -29,6 +29,7 @@ REQUIRED = tuple(SOURCES) + (
     'host/semantic.h', 'host/semantic_corpus.h', 'host/semantic_sha256.h',
     'host/semantic_text.h', 'host/semantic_result.h',
     'os/note_metadata_format.h', 'os/memory.h',
+    'os/note_metadata_format_internal.h',
     'tests/test_semantic.c', 'tests/run_semantic_mutation.py',
     'tests/run_note_metadata_mutation.py', 'tests/run_yanfs_mutation.py')
 SUITE = 'semantic'

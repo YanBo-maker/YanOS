@@ -53,6 +53,10 @@ def expected_arena(files, start):
         files,
         files * 36,
         files * 32,
+        files * 2,  # name_order
+        files * 2,  # metadata sort indices
+        files * 2,  # relation sort indices
+        files * 2,  # block sort indices
     ]
     current = start
     for size in sizes:
@@ -76,7 +80,7 @@ def main():
         return 1
     load_bytes = sum(end - start for start, end in spans)
     arena_start = (max(end for _, end in spans) + 15) & ~15
-    oracle = {63: 15008, 1023: 242528, 2047: 485216, 4095: 970592}
+    oracle = {63: 15518, 1023: 250718, 2047: 501598, 4095: 1003358}
     arena = {}
     for files in (63, 1023, 2047, 4095):
         arena[files] = expected_arena(files, arena_start)

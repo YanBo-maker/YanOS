@@ -108,14 +108,12 @@ runner="$source/tests/guest/run_block.sh"
 # the only one. The sources below are the thing under test: a missing one is a
 # hard failure, never a skip, or deleting an implementation would make this
 # check green.
-if [ ! -x "$gcc" ] && ! command -v "$gcc" > /dev/null 2>&1; then
-    echo "SKIP: no cross toolchain at '$gcc'"
-    exit 77
-fi
 missing=0
-for required in "$host_block" "$guest_block" "$source/os/block.h" \
+for required in "$host_block" "$guest_block" "$source/os/block.h" "$source/os/block_peek.h" \
                 "$source/os/platform.h" "$source/tools/host_block.h" "$check_c" \
-                "$unit_c" "$drive_c" "$runner"; do
+                "$unit_c" "$drive_c" "$runner" "$source/tests/guest/mtrap_entry.S" \
+                "$source/tests/guest/mtrap.c" "$source/tests/guest/guest_lib.c" \
+                "$source/tests/guest/link.ld"; do
     if [ ! -e "$required" ]; then
         echo "FAIL the source under test is missing: $required"
         missing=1
@@ -125,6 +123,10 @@ done
 if [ -n "$run" ] && [ ! -x "$run" ]; then
     echo "FAIL the executor under test is not executable: $run"
     exit 1
+fi
+if [ ! -x "$gcc" ] && ! command -v "$gcc" > /dev/null 2>&1; then
+    echo "SKIP: no cross toolchain at '$gcc'"
+    exit 77
 fi
 
 gcc_dir="$(cd "$(dirname "$gcc")" && pwd)"
@@ -283,9 +285,12 @@ MUTATIONS = {
          "        return YAN_OS_BLOCK_INVALID;\n"
          "    }",
          "    if (payload != 0) {\n"
-         "        for (uint32_t i = 0; i < (uint32_t)payload; ++i) {\n"
-         "            data[i] = peek_response(YAN_OS_BLOCK_HEADER_SIZE + i);\n"
-         "        }\n"
+         "        const uint32_t size = yan_os_transport_ring_size();\n"
+         "        const volatile uint8_t *ring = (const volatile uint8_t *)(uintptr_t)\n"
+         "            (yan_os_transport_ring_base() + size);\n"
+         "        const uint32_t tail = yan_os_transport_h2g_tail();\n"
+         "        yan_os_ring_copy_out(ring, size, tail & (size - 1u),\n"
+         "                             data, (uint32_t)payload);\n"
          "    }", 1),
     ],
     "guest-drops-without-consuming": [

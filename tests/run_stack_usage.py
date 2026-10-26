@@ -5,8 +5,9 @@
 runtime value (`fs->entry_capacity`), not a compile-time constant. One
 `-fstack-usage` build therefore proves independence: the .su record is a fixed
 byte count marked `static`, so no code path can grow the frame with the image.
-The called `extent_candidate_fits` may be inlined; if it survives as its own
-record it must be static and small too.
+The current allocator sorts extents in its caller-owned workspace. Historical
+`.su` files may also contain `extent_candidate_fits`; that optional record must
+be static and small too.
 """
 import argparse
 import re
@@ -33,6 +34,10 @@ def main():
     parser.add_argument("--work", required=True, type=Path)
     parser.add_argument("--gcc", required=True)
     args = parser.parse_args()
+    for relative in ("os/yanfs.c", "os/yanfs.h", "os/memory.h", "os/sort.h"):
+        if not (args.source / relative).is_file():
+            print(":FAIL: missing required local input: " + str(args.source / relative))
+            return 1
     if not Path(args.gcc).exists() and not shutil_which(args.gcc):
         print("SKIP cross compiler")
         return 77
@@ -96,7 +101,7 @@ def main():
               "extent_candidate_fits frame %d exceeds %d bytes"
               % (fit_bytes, LIMIT))
     else:
-        print("0036-R5-AC2 extent_candidate_fits=inlined", flush=True)
+        print("0036-R5-AC2 extent_candidate_fits=not emitted", flush=True)
     for failure in FAILURES:
         print(":FAIL: " + failure, flush=True)
     return 1 if FAILURES else 0

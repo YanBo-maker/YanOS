@@ -31,19 +31,13 @@
 #include <stddef.h>
 
 #include "platform.h"
+#include "block_peek.h"
 
 /* The response header's second byte is the status; os/block.h names the values. */
 
 /* Reads the i-th byte of the response stream without consuming it. The consumer
  * position is H2G_TAIL, and the index is taken modulo the ring size, so a
  * header that crosses the wrap point reads back contiguous (0018 rule 2). */
-static uint8_t peek_response(uint32_t index)
-{
-    const uint32_t size = yan_os_transport_ring_size();
-    const volatile uint8_t *ring =
-        (const volatile uint8_t *)(uintptr_t)(yan_os_transport_ring_base() + size);
-    return ring[yan_os_ring_index(yan_os_transport_h2g_tail(), size, index)];
-}
 
 /* Drops `count` bytes of the response stream. Used for frames that fail
  * validation: they still have to leave the ring, or the next frame is read from
@@ -211,9 +205,7 @@ int yan_os_block_take(YanOsBlockResponse *response, uint8_t *data,
     }
 
     uint8_t peeked[16];
-    for (uint32_t i = 0; i < sizeof peeked; ++i) {
-        peeked[i] = peek_response(i);
-    }
+    yan_block_peek_header(peeked);
     const uint8_t op = peeked[0];
     const uint8_t status = peeked[1];
     /* The payload stays 64 bits wide until the frame is known to fit the ring:

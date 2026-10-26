@@ -94,6 +94,7 @@ NATIVE_SUITES = {
 # Every repository header the native TUs include (transitively, through the os
 # headers). Missing any is a hard failure (1).
 NATIVE_HEADERS = [
+    "os/note_metadata_format_internal.h",
     "tests/test_shell.c", "tests/test_line.c",
     "os/shell.h", "os/note_relations.h", "os/note_blocks.h", "os/note_blocks_format.h", "os/note_metadata.h", "os/search.h", "os/search_linear.h", "os/yanfs.h",
     "os/line.h", "os/platform.h", "os/block.h",

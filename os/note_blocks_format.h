@@ -76,6 +76,7 @@ typedef struct {
 } YanBlockTextValidator;
 
 typedef struct {
+    /* Only blocks[0..block_count) are valid; init need not clear spare slots. */
     YanBlockDecl blocks[YAN_BLOCK_MAX_COUNT];
     uint32_t block_count;
     uint32_t initialized;

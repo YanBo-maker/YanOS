@@ -14,6 +14,7 @@ SHELL_SOURCES = CORE_SOURCES + ('note_blocks.c', 'note_blocks_format.c', 'shell.
 REQUIRED = tuple('os/' + name for name in SHELL_SOURCES) + tuple(
     'os/' + name.replace('.c', '.h') for name in SHELL_SOURCES) + (
     'os/note_relations.h', 'os/note_metadata_format.h', 'os/yanfs.h', 'os/memory.h', 'os/sort.h',
+    'os/note_metadata_format_internal.h',
     'tests/test_note_relations.c', 'tests/run_note_relations_mutation.py',
     'tests/run_note_metadata_mutation.py', 'tests/run_yanfs_mutation.py', 'tests/test_shell_relations.c')
 

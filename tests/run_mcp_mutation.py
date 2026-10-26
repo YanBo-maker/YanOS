@@ -22,6 +22,7 @@ REQUIRED = (
     'os/note_blocks.c', 'os/note_blocks.h', 'os/note_blocks_format.c',
     'os/note_blocks_format.h', 'os/note_metadata_format.c',
     'os/note_metadata_format.h', 'os/search_text.c', 'os/search_text.h',
+    'os/note_metadata_format_internal.h',
     'host/block_query.c', 'host/block_query.h', 'tools/semantic_json.h',
     'tests/test_mcp_protocol.c', 'tests/test_block_query.c',
     'tests/test_mcp_block_worker.c', 'tests/block_query_probe.c',

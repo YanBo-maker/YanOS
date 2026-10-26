@@ -38,7 +38,7 @@
  * contains no U+FEFF, including field values. The parser rejects it in keys
  * and validated values; body bytes remain opaque. */
 
-#include "note_metadata_format.h"
+#include "note_metadata_format_internal.h"
 
 #include "memory.h"
 
@@ -471,6 +471,74 @@ static YanNoteResult apply_field(YanNoteInfo *accumulator, NoteLineKind kind,
     }
 }
 
+static YanNoteResult parse_header_core(const uint8_t *bytes, uint32_t length,
+                                        YanNoteParseWorkspace *workspace,
+                                        uint32_t *offset, bool full_result)
+{
+    if (!prefix_matches(bytes, length)) {
+        /* An old no-header file: publish empty metadata, read no byte. */
+        *offset = 0u;
+        return YAN_NOTE_OK;
+    }
+    if (!marker_matches(bytes, length)) {
+        return YAN_NOTE_METADATA; /* prefix without the exact ` 1\n` marker */
+    }
+
+    YanNoteInfo *accumulator = &workspace->info;
+    if (full_result) {
+        memset(accumulator, 0, sizeof *accumulator);
+    } else {
+        /* The offset-only path publishes no info. Reset every flag, length
+         * and count read by the shared grammar; list values are read only
+         * below their freshly built counts. */
+        accumulator->has_header = false;
+        accumulator->header_bytes = 0u;
+        accumulator->has_title = false;
+        accumulator->title_length = 0u;
+        accumulator->has_created = false;
+        accumulator->created_length = 0u;
+        accumulator->has_modified = false;
+        accumulator->modified_length = 0u;
+        accumulator->tag_count = 0u;
+        accumulator->link_count = 0u;
+    }
+    uint32_t position = YAN_NOTE_MARKER_SIZE;
+    while (position < length) {
+        uint32_t line_start = position;
+        uint32_t line_end = length;
+        for (uint32_t i = position; i < length; ++i) {
+            if (bytes[i] == (uint8_t)'\n') {
+                line_end = i;
+                break;
+            }
+        }
+        if (line_end == length) {
+            /* No closing LF inside the offered prefix: an unterminated or
+             * oversized header, never a guess that it ended here. */
+            return YAN_NOTE_METADATA;
+        }
+        uint32_t line_length = line_end - line_start;
+        position = line_end + 1u;
+        const uint8_t *line = bytes + line_start;
+        if (is_end_line(line, line_length)) {
+            accumulator->has_header = true;
+            accumulator->header_bytes = position;
+            *offset = position;
+            return YAN_NOTE_OK;
+        }
+        uint32_t value_offset = 0u;
+        NoteLineKind kind = classify_line(line, line_length, &value_offset);
+        YanNoteResult result =
+            apply_field(accumulator, kind, line + value_offset,
+                        line_length - value_offset);
+        if (result != YAN_NOTE_OK) {
+            return result;
+        }
+    }
+    /* The walk reached the end of a bounded prefix without `@end`. */
+    return YAN_NOTE_METADATA;
+}
+
 YanNoteResult yan_note_parse_header(const uint8_t *bytes, uint32_t length,
                                     YanNoteInfo *out,
                                     YanNoteParseWorkspace *workspace)
@@ -495,52 +563,38 @@ YanNoteResult yan_note_parse_header(const uint8_t *bytes, uint32_t length,
         return YAN_NOTE_TOO_LARGE;
     }
 
-    if (!prefix_matches(bytes, length)) {
-        /* An old no-header file: publish empty metadata, read no byte. */
-        memset(out, 0, sizeof *out);
-        return YAN_NOTE_OK;
+    uint32_t offset = 0u;
+    YanNoteResult result = parse_header_core(bytes, length, workspace, &offset, true);
+    if (result == YAN_NOTE_OK) {
+        if (offset == 0u) {
+            memset(out, 0, sizeof *out);
+        } else {
+            memcpy(out, &workspace->info, sizeof *out);
+        }
     }
-    if (!marker_matches(bytes, length)) {
-        return YAN_NOTE_METADATA; /* prefix without the exact ` 1\n` marker */
-    }
+    return result;
+}
 
-    YanNoteInfo *accumulator = &workspace->info;
-    memset(accumulator, 0, sizeof *accumulator);
-    uint32_t position = YAN_NOTE_MARKER_SIZE;
-    while (position < length) {
-        uint32_t line_start = position;
-        uint32_t line_end = length;
-        for (uint32_t i = position; i < length; ++i) {
-            if (bytes[i] == (uint8_t)'\n') {
-                line_end = i;
-                break;
-            }
-        }
-        if (line_end == length) {
-            /* No closing LF inside the offered prefix: an unterminated or
-             * oversized header, never a guess that it ended here. */
-            return YAN_NOTE_METADATA;
-        }
-        uint32_t line_length = line_end - line_start;
-        position = line_end + 1u;
-        const uint8_t *line = bytes + line_start;
-        if (is_end_line(line, line_length)) {
-            accumulator->has_header = true;
-            accumulator->header_bytes = position;
-            *out = *accumulator;
-            return YAN_NOTE_OK;
-        }
-        uint32_t value_offset = 0u;
-        NoteLineKind kind = classify_line(line, line_length, &value_offset);
-        YanNoteResult result =
-            apply_field(accumulator, kind, line + value_offset,
-                        line_length - value_offset);
-        if (result != YAN_NOTE_OK) {
-            return result;
-        }
+YanNoteResult yan_note_body_offset(const uint8_t *bytes, uint32_t length,
+                                   uint32_t *offset,
+                                   YanNoteParseWorkspace *workspace)
+{
+    if (offset == NULL || workspace == NULL || (bytes == NULL && length != 0u) ||
+        (uint64_t)length > (uint64_t)(UINTPTR_MAX - (uintptr_t)bytes) ||
+        ranges_overlap(workspace, sizeof *workspace, offset, sizeof *offset) ||
+        ranges_overlap(bytes, length, offset, sizeof *offset) ||
+        ranges_overlap(bytes, length, workspace, sizeof *workspace)) {
+        return YAN_NOTE_INVALID;
     }
-    /* The walk reached the end of a bounded prefix without `@end`. */
-    return YAN_NOTE_METADATA;
+    if (length > YAN_NOTE_HEADER_MAX) {
+        return YAN_NOTE_TOO_LARGE;
+    }
+    uint32_t candidate = 0u;
+    YanNoteResult result = parse_header_core(bytes, length, workspace, &candidate, false);
+    if (result == YAN_NOTE_OK) {
+        *offset = candidate;
+    }
+    return result;
 }
 
 /* -------------------------------------------------------------- encoder */

@@ -9,7 +9,7 @@ import run_search_terms_api as common
 
 INPUTS = ('os/note_blocks.c', 'os/note_blocks.h', 'os/note_blocks_format.c',
           'os/note_blocks_format.h', 'os/note_metadata_format.c',
-          'os/note_metadata_format.h', 'os/search_text.c', 'os/search_text.h',
+          'os/note_metadata_format.h', 'os/note_metadata_format_internal.h', 'os/search_text.c', 'os/search_text.h',
           'os/yanfs.c', 'os/yanfs.h', 'os/memory.c', 'os/memory.h',
           'os/platform.h', 'tests/guest/start.S', 'tests/guest/link.ld',
           'tests/guest/guest.h', 'tests/guest/note_blocks_api_check.c',

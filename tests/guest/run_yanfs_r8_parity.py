@@ -166,7 +166,10 @@ def required_ref_inputs(label):
     guest = list(runtime.PRODUCTION_SOURCES)
     host = list(runtime.HOST_SOURCES)
     headers = list(runtime.HOST_HEADERS)
-    headers += [item for item in runtime.GUEST_HEADERS if item != "os/sort.h"]
+    # 0040 added these after both fixed refs; current production still requires them.
+    later_headers = {"os/block_peek.h", "os/note_metadata_format_internal.h"}
+    headers += [item for item in runtime.GUEST_HEADERS
+                if item != "os/sort.h" and item not in later_headers]
     ordered = []
     for item in guest + host + headers + [runtime.GUEST_LD]:
         if item not in ordered:

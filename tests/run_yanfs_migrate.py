@@ -667,6 +667,9 @@ def require_compiler(cc: str) -> str:
 
 def compile_test_binary(cc: str, root: Path, output: Path,
                         sources: list[Path], wrap: list[str]) -> Path:
+    if any(path.name == "note_metadata_format.c" for path in sources):
+        require((root / "os/note_metadata_format_internal.h").is_file(),
+                "missing repository input: os/note_metadata_format_internal.h")
     compiler = require_compiler(cc)
     output.parent.mkdir(parents=True, exist_ok=True)
     command = [compiler, "-I", str(root / "host"), "-I", str(root / "os"),
