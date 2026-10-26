@@ -26,6 +26,21 @@ static void copy_forward(uint8_t *out, const uint8_t *in, size_t size)
         *out++ = *in++;
         --size;
     }
+    while (size >= 32u) {
+        yan_memory_word *o = (yan_memory_word *)(void *)out;
+        const yan_memory_word *i = (const yan_memory_word *)(const void *)in;
+        o[0] = i[0];
+        o[1] = i[1];
+        o[2] = i[2];
+        o[3] = i[3];
+        o[4] = i[4];
+        o[5] = i[5];
+        o[6] = i[6];
+        o[7] = i[7];
+        out += 32u;
+        in += 32u;
+        size -= 32u;
+    }
     while (size >= 4u) {
         *(yan_memory_word *)(void *)out =
             *(const yan_memory_word *)(const void *)in;
@@ -47,6 +62,21 @@ static void copy_backward(uint8_t *out, const uint8_t *in, size_t size)
                          (uintptr_t)in_end % 4u != 0u)) {
         *--out_end = *--in_end;
         --size;
+    }
+    while (size >= 32u) {
+        out_end -= 32u;
+        in_end -= 32u;
+        yan_memory_word *o = (yan_memory_word *)(void *)out_end;
+        const yan_memory_word *i = (const yan_memory_word *)(const void *)in_end;
+        o[7] = i[7];
+        o[6] = i[6];
+        o[5] = i[5];
+        o[4] = i[4];
+        o[3] = i[3];
+        o[2] = i[2];
+        o[1] = i[1];
+        o[0] = i[0];
+        size -= 32u;
     }
     while (size >= 4u) {
         out_end -= 4u;
@@ -93,6 +123,19 @@ void *memset(void *destination, int value, size_t size)
     const yan_memory_word word =
         (yan_memory_word)byte | ((yan_memory_word)byte << 8) |
         ((yan_memory_word)byte << 16) | ((yan_memory_word)byte << 24);
+    while (size >= 32u) {
+        yan_memory_word *o = (yan_memory_word *)(void *)out;
+        o[0] = word;
+        o[1] = word;
+        o[2] = word;
+        o[3] = word;
+        o[4] = word;
+        o[5] = word;
+        o[6] = word;
+        o[7] = word;
+        out += 32u;
+        size -= 32u;
+    }
     while (size >= 4u) {
         *(yan_memory_word *)(void *)out = word;
         out += 4u;

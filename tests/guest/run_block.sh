@@ -100,12 +100,8 @@ tools_dir="$source/tools"
 # Everything else it drives is the thing *under test*, so a missing source is a
 # hard failure. Deleting an implementation must never be a way to a green
 # suite: CTest records 77 as a skip, and a skip is not a pass.
-if [ ! -x "$gcc" ] && ! command -v "$gcc" > /dev/null 2>&1; then
-    echo "SKIP: no cross toolchain at '$gcc'"
-    exit 77
-fi
 missing=0
-for required in "$block_c" "$os_dir/block.h" "$platform_c" \
+for required in "$block_c" "$os_dir/block.h" "$os_dir/block_peek.h" "$platform_c" \
                 "$host_block_c" "$tools_dir/host_block.h" "$check_c" \
                 "$drive_c" "$unit_c" "$guest_dir/mtrap_entry.S" \
                 "$guest_dir/mtrap.c" "$guest_dir/guest_lib.c" \
@@ -121,6 +117,10 @@ done
 if [ -n "$run" ] && [ ! -x "$run" ]; then
     echo "FAIL the executor under test is not executable: $run"
     exit 1
+fi
+if [ ! -x "$gcc" ] && ! command -v "$gcc" > /dev/null 2>&1; then
+    echo "SKIP: no cross toolchain at '$gcc'"
+    exit 77
 fi
 
 # A cross toolchain locates `as` and `ld` through its own directory.

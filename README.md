@@ -318,6 +318,19 @@ ctest --test-dir build --output-on-failure
 
 分层、覆盖边界与退出码见 [CPU 验证规格](docs/specs/0011-cpu-validation.md)。
 
+## 4095 文件性能验收
+
+Linux/WSL中具备Host C编译器和RISC-V交叉编译器时，可运行[0040性能门禁](docs/specs/0040-4095-file-performance.md)：
+
+```sh
+cmake -S . -B build/performance -DCMAKE_BUILD_TYPE=Release -DYAN_BUILD_TOOLS=ON
+cmake --build build/performance --target yanfs_terminal yan_mkfs --parallel
+ctest --test-dir build/performance --no-tests=error --output-on-failure \
+  -R '^yanfs_4095_performance(_harness)?$'
+```
+
+门禁生成自己的1023/2047/4095满库短文本镜像，检查启动、新建、列目录、关系、元数据与冷搜索的完整结果及每项5000万Guest步门槛。证据保存在构建目录的yanfs-4095-performance下，每次使用新子目录；夹具与边界见0040。该门槛针对固定语料，长正文的处理成本仍取决于内容量。Windows默认测试只运行判定器反例，不运行真实Guest性能矩阵。
+
 ## R8 历史版本对比
 
 [重跑入口](tests/guest/run_yanfs_r8_parity.py)在 Linux/WSL 从本地 Git 对象重新构建 `4c5e0ab` 与 `2b82d17`，用生成的 63、1023、2047 文件镜像比较 R8 优化前后的行为。需要 Host C 编译器、RISC-V 交叉编译器、CMake，以及包含 CURL/yyjson CMake package 的依赖前缀：

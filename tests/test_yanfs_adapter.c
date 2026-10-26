@@ -100,6 +100,16 @@ static uint32_t yan_os_ring_index(uint32_t base, uint32_t size, uint32_t i)
     return (base + i) & (size - 1u);
 }
 
+/* The mock platform implements the same read-only copy seam used by the
+ * shared header peek. Its ring and position are the explicit arguments. */
+static void yan_os_ring_copy_out(const volatile uint8_t *ring, uint32_t size,
+                                 uint32_t tail, uint8_t *out, uint32_t count)
+{
+    for (uint32_t i = 0u; i < count; ++i) {
+        out[i] = ring[yan_os_ring_index(tail, size, i)];
+    }
+}
+
 static uint8_t *mock_ring_bytes(void)
 {
     return (uint8_t *)(uintptr_t)(mock_ring_base + mock_ring_size);

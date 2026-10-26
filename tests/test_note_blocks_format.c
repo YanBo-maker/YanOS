@@ -152,6 +152,37 @@ static void format_text_invalid_utf8_and_truncation(void)
     }
 }
 
+static void format_text_ascii_run_preserves_transition_state_and_bounds(void)
+{
+    const uint8_t prefix[] = {'A', '\t', '~', '\n', 'B', '\r', 0u};
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK, yan_block_text_init(&validator));
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK, yan_block_text_feed(&validator, prefix, 6u));
+    TEST_ASSERT_TRUE(validator.pending_cr);
+    TEST_ASSERT_EQUAL_UINT8(0u, validator.utf8_length);
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK, yan_block_text_feed(&validator, (const uint8_t *)"\nabc", 4u));
+    TEST_ASSERT_FALSE(validator.pending_cr);
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK, yan_block_text_finish(&validator));
+    const uint8_t split[] = {'x', 'y', 0xe4u, 0xb8u, 0xadu, 'z', 0u};
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK, yan_block_text_init(&validator));
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK, yan_block_text_feed(&validator, split, 3u));
+    TEST_ASSERT_EQUAL_UINT8(1u, validator.utf8_length);
+    TEST_ASSERT_FALSE(validator.pending_cr);
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK, yan_block_text_feed(&validator, split + 3u, 3u));
+    TEST_ASSERT_EQUAL_UINT8(0u, validator.utf8_length);
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK, yan_block_text_finish(&validator));
+    for (uint32_t value = 0u; value <= 0x7fu; ++value) {
+        if ((value < 0x20u && value != '\t' && value != '\n') || value == 0x7fu) {
+            uint8_t bytes[] = {'a', 'b', (uint8_t)value, 'c'};
+            TEST_ASSERT_EQUAL(YAN_BLOCK_INVALID_TEXT, text_check(bytes, sizeof bytes, sizeof bytes));
+        }
+    }
+    const uint8_t c1[] = {'a', 'b', 0xc2u, 0x80u, 'c'};
+    TEST_ASSERT_EQUAL(YAN_BLOCK_INVALID_TEXT, text_check(c1, sizeof c1, sizeof c1));
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK, text_check(split, 6u, 6u));
+    TEST_ASSERT_EQUAL(YAN_BLOCK_INVALID_TEXT, text_check(split, 7u, 7u));
+    TEST_ASSERT_EQUAL(YAN_BLOCK_INVALID_TEXT, text_check(split, 3u, 3u));
+}
+
 static void format_text_late_damage_and_long_input(void)
 {
     memset(large, 'x', sizeof large);
@@ -415,15 +446,52 @@ static void format_result_names(void)
     TEST_ASSERT_EQUAL_STRING("INVALID", yan_block_result_name((YanBlockResult)999));
 }
 
+static void format_reinit_publishes_only_fully_initialized_active_slots(void)
+{
+    uint32_t used=make_blocks(64u);
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK,scan_at(large,used,13u,0u,1u));
+    TEST_ASSERT_EQUAL_UINT32(64u,parser.block_count);
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK,scan("@block abcdefghijklmnopqrstuvwxyz12345\n[[f#x]]",1u));
+    TEST_ASSERT_EQUAL_STRING("abcdefghijklmnopqrstuvwxyz12345",rows[0].source_id);
+    memset(parser.blocks,0xa5,sizeof parser.blocks);
+    row_count=0u;
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK,scan("@block a\n[[f#x]]",1u));
+    TEST_ASSERT_EQUAL_UINT32(1u,parser.block_count);
+    TEST_ASSERT_EQUAL_STRING("a",parser.blocks[0].id);
+    for (uint32_t i=2u;i<sizeof parser.blocks[0].id;++i)
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(0u,(uint8_t)parser.blocks[0].id[i],"0040_active_id_tail_initialized");
+    TEST_ASSERT_EQUAL_STRING("a",rows[0].source_id);
+    for (uint32_t i=2u;i<sizeof rows[0].source_id;++i)
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(0u,(uint8_t)rows[0].source_id[i],"0040_source_id_tail_initialized");
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK,scan("@block a\n",3u));
+    TEST_ASSERT_EQUAL_UINT32(0u,parser.blocks[0].first_line);
+    TEST_ASSERT_EQUAL_UINT32(0u,parser.blocks[0].last_line);
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK,scan("",1u));
+    TEST_ASSERT_EQUAL_UINT32(0u,parser.block_count);
+    static YanBlockParser saved;
+    saved=parser;
+    TEST_ASSERT_EQUAL(YAN_BLOCK_INVALID,yan_block_parser_init(&parser,0u,0u,NULL,NULL));
+    TEST_ASSERT_EQUAL_MEMORY(&saved,&parser,sizeof parser);
+    parser.busy=true;saved=parser;
+    TEST_ASSERT_EQUAL(YAN_BLOCK_BUSY,yan_block_parser_init(&parser,0u,1u,NULL,NULL));
+    TEST_ASSERT_EQUAL_MEMORY(&saved,&parser,sizeof parser);
+    parser.busy=false;refuse_row=true;
+    TEST_ASSERT_EQUAL(YAN_BLOCK_STOPPED,scan("[[f#x]]",1u));
+    refuse_row=false;
+    TEST_ASSERT_EQUAL(YAN_BLOCK_OK,scan("@block a\n[[f#x]]",1u));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(format_reinit_publishes_only_fully_initialized_active_slots);
     RUN_TEST(format_id_rules);
     RUN_TEST(format_address_rules_and_atomic_out);
     RUN_TEST(format_text_valid_chunks_and_feff);
     RUN_TEST(format_text_controls_and_bare_cr);
     RUN_TEST(format_text_invalid_utf8_and_truncation);
     RUN_TEST(format_text_late_damage_and_long_input);
+    RUN_TEST(format_text_ascii_run_preserves_transition_state_and_bounds);
     RUN_TEST(format_block_ranges_mixed_eol);
     RUN_TEST(format_empty_blocks_and_unterminated_marker);
     RUN_TEST(format_trailing_lf_does_not_invent_line);

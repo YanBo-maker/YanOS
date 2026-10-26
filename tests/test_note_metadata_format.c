@@ -57,6 +57,7 @@
  * builds one on the stack. */
 
 #include "note_metadata_format.h"
+#include "note_metadata_format_internal.h"
 #include "unity.h"
 
 #include <string.h>
@@ -1382,6 +1383,79 @@ static void note_title_validator_control_boundaries(void)
     TEST_ASSERT_TRUE_MESSAGE(yan_note_title_valid(nbsp, sizeof nbsp), "title_nbsp_allowed");
 }
 
+static void note_body_offset_matches_full_parser_and_keeps_failures(void)
+{
+    const char *cases[] = {"", "prose", "@yan-note 1\n@end\nbody",
+        "@yan-note 1\ntitle: \xe4\xb8\xad\nlink: f\ntag: t\n@end\nbody",
+        "@yan-note 2\n@end\n", "@yan-note 1\ntag: x\ntag: x\n@end\n",
+        "@yan-note 1\ntitle: \xef\xbb\xbf\n@end\n", "@yan-note 1\ntitle: \t\n@end\n"};
+    for (uint32_t i=0u; i<sizeof cases/sizeof cases[0]; ++i) {
+        uint32_t offset=UINT32_C(0xa5a5a5a5);
+        uint32_t length=(uint32_t)strlen(cases[i]);
+        YanNoteResult result=yan_note_parse_header((const uint8_t *)cases[i],length,&info,&workspace);
+        TEST_ASSERT_EQUAL_MESSAGE(result,yan_note_body_offset((const uint8_t *)cases[i],length,&offset,&parse_workspace),"0040_offset_same_grammar");
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(result==YAN_NOTE_OK ? info.header_bytes : UINT32_C(0xa5a5a5a5),offset,"0040_offset_atomic_publish");
+    }
+    uint32_t offset=99u;
+    TEST_ASSERT_EQUAL(YAN_NOTE_OK,yan_note_body_offset(NULL,0u,&offset,&workspace));
+    TEST_ASSERT_EQUAL_UINT32(0u,offset);
+    offset=99u;
+    TEST_ASSERT_EQUAL(YAN_NOTE_INVALID,yan_note_body_offset(NULL,1u,&offset,&workspace));
+    TEST_ASSERT_EQUAL(YAN_NOTE_INVALID,yan_note_body_offset((const uint8_t *)&offset,sizeof offset,&offset,&workspace));
+    TEST_ASSERT_EQUAL(YAN_NOTE_INVALID,yan_note_body_offset(old_body,sizeof old_body,(uint32_t *)(void *)&workspace,&workspace));
+    TEST_ASSERT_EQUAL(YAN_NOTE_INVALID,yan_note_body_offset((const uint8_t *)&workspace,1u,&offset,&workspace));
+    TEST_ASSERT_EQUAL(YAN_NOTE_INVALID,yan_note_body_offset((const uint8_t *)(UINTPTR_MAX-1u),3u,&offset,&workspace));
+    TEST_ASSERT_EQUAL(YAN_NOTE_INVALID,yan_note_body_offset(old_body,sizeof old_body,(uint32_t *)(UINTPTR_MAX-1u),&workspace));
+    TEST_ASSERT_EQUAL(YAN_NOTE_TOO_LARGE,yan_note_body_offset(old_body,4097u,&offset,&workspace));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(99u,offset,"0040_offset_bad_arguments_preserve_holder");
+}
+
+
+static void note_body_offset_reuses_dirty_workspace_without_public_pollution(void)
+{
+    static uint8_t many[4096];
+    size_t used = 0u;
+    append_literal(many, sizeof many, &used, "@yan-note 1\n");
+    for (uint32_t i = 0u; i < 16u; ++i) {
+        uint8_t value[] = {'t', (uint8_t)('a' + i)};
+        append_literal(many, sizeof many, &used, "tag: ");
+        append_bytes(many, sizeof many, &used, value, sizeof value);
+        append_literal(many, sizeof many, &used, "\nlink: ");
+        append_bytes(many, sizeof many, &used, value, sizeof value);
+        append_literal(many, sizeof many, &used, "\n");
+    }
+    append_literal(many, sizeof many, &used,
+                   "modified: 2026-10-26\ntitle: many\ncreated: 2026-01-01\n@end\n");
+    const char *cases[] = {
+        "@yan-note 1\nlink: z\ntag: z\ntitle: x\n@end\n",
+        "@yan-note 1\ntitle: x\ncreated: 2026-01-01\ncreated: 2026-01-01\n@end\n",
+        "@yan-note 1\nlink: z\nlink: z\n@end\n",
+        "@yan-note 1\ntag: z\ntag: z\n@end\n",
+        "@yan-note 1\n@end\n", "plain"
+    };
+    memset(&parse_workspace, 0xa5, sizeof parse_workspace);
+    for (uint32_t pass = 0u; pass < 3u; ++pass) {
+        for (uint32_t i = 0u; i <= sizeof cases / sizeof cases[0]; ++i) {
+            const uint8_t *bytes = i == 0u ? many : (const uint8_t *)cases[i - 1u];
+            uint32_t length = i == 0u ? (uint32_t)used : (uint32_t)strlen(cases[i - 1u]);
+            uint32_t offset = UINT32_C(0xa5a5a5a5);
+            YanNoteResult expected = yan_note_parse_header(bytes, length, &info, &workspace);
+            TEST_ASSERT_EQUAL(expected, yan_note_body_offset(bytes, length, &offset, &parse_workspace));
+            TEST_ASSERT_EQUAL_UINT32(expected == YAN_NOTE_OK ? info.header_bytes : UINT32_C(0xa5a5a5a5), offset);
+            /* Passes 0/2 use only the internal parser continuously. Pass 1
+             * also checks sparse-to-public publication, including all unused
+             * slots and padding, against the separate full workspace. */
+            if (pass == 1u) {
+                TEST_ASSERT_EQUAL(expected, yan_note_parse_header(bytes, length,
+                                                                 &parse_info, &parse_workspace));
+                if (expected == YAN_NOTE_OK) {
+                    TEST_ASSERT_EQUAL_MEMORY(&info, &parse_info, sizeof info);
+                }
+            }
+        }
+    }
+}
+
 int main(void)
 {
     for (uint32_t i = 0u; i < sizeof title_256; ++i) {
@@ -1398,6 +1472,8 @@ int main(void)
     }
 
     UNITY_BEGIN();
+    RUN_TEST(note_body_offset_matches_full_parser_and_keeps_failures);
+    RUN_TEST(note_body_offset_reuses_dirty_workspace_without_public_pollution);
     RUN_TEST(note_encoder_accepts_exact_capacity);
     RUN_TEST(note_title_validator_control_boundaries);
     RUN_TEST(note_parse_no_header_is_an_old_file);

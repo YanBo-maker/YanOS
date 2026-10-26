@@ -28,7 +28,7 @@ BLOCK_TIMEOUT = 300
 
 INPUTS = [
     "os/search_terms.c", "os/note_metadata_format.c",
-    "os/search_terms.h", "os/note_metadata_format.h",
+    "os/search_terms.h", "os/note_metadata_format.h", "os/note_metadata_format_internal.h",
     "os/search_terms_core.c",
     "os/search_terms_core.h",
     "os/search_text.c",

@@ -257,9 +257,10 @@ static bool name_byte_readable(const YanFs *fs, const char *name, uint32_t index
  * name without a terminator is rejected rather than walked past the entry. */
 static bool caller_name_allowed(const YanFs *fs, const char *name, uint32_t *length)
 {
+    bool span_safe = !protected_overlap(fs, name, FS_ENTRY_NAME_AREA);
     uint32_t size = 0;
     while (size < FS_ENTRY_NAME_AREA) {
-        if (!name_byte_readable(fs, name, size)) {
+        if (!span_safe && !name_byte_readable(fs, name, size)) {
             return false;
         }
         if (name[size] == '\0') {
@@ -373,37 +374,27 @@ static const uint8_t *entry_at(const uint8_t *block, uint32_t slot)
  * service name tables have always used. A name that is a prefix sorts first. */
 static int compare_entry_names(const uint8_t *left, const uint8_t *right)
 {
-    uint32_t left_length = entry_name_length(left);
-    uint32_t right_length = entry_name_length(right);
-    uint32_t common = left_length < right_length ? left_length : right_length;
-    for (uint32_t i = 0; i < common; ++i) {
+    for (uint32_t i = 0u; i < FS_ENTRY_NAME_AREA; ++i) {
         if (left[i] != right[i]) {
             return left[i] < right[i] ? -1 : 1;
         }
+        if (left[i] == 0u) {
+            return 0;
+        }
     }
-    if (left_length == right_length) {
-        return 0;
-    }
-    return left_length < right_length ? -1 : 1;
+    return 0;
 }
 
-/* Compares a stored entry with a caller name of the given bounded length. The
- * caller name is already validated and NUL-terminated, so no scan runs past it. */
 static int compare_entry_to_name(const uint8_t *entry, const char *name,
-                                 uint32_t length)
+                                  uint32_t length)
 {
-    uint32_t entry_length = entry_name_length(entry);
-    uint32_t common = entry_length < length ? entry_length : length;
     const uint8_t *bytes = (const uint8_t *)name;
-    for (uint32_t i = 0; i < common; ++i) {
+    for (uint32_t i = 0u; i < length; ++i) {
         if (entry[i] != bytes[i]) {
             return entry[i] < bytes[i] ? -1 : 1;
         }
     }
-    if (entry_length == length) {
-        return 0;
-    }
-    return entry_length < length ? -1 : 1;
+    return entry[length] == 0u ? 0 : 1;
 }
 
 /* Mount sorting sees bare directory pointers, so both comparators recover the
@@ -572,71 +563,33 @@ static uint32_t blocks_needed(uint32_t length)
     return count;
 }
 
-/* True when `candidate` is outside every used extent and the run of `needed`
- * blocks from it reaches the next used start or the end of the device. */
-static bool extent_candidate_fits(const YanFs *fs, uint32_t candidate,
-                                  uint32_t needed)
+/* Borrow the name table only inside the synchronous busy window. Restore it
+ * on every outcome, before any device callback can observe the filesystem. */
+static bool allocate_extent(YanFs *fs, uint32_t needed, uint32_t *start_out)
 {
+    uint32_t count = 0u;
     for (uint32_t slot = 0; slot < fs->entry_capacity; ++slot) {
         const uint8_t *entry = entry_at(fs->directory, slot);
-        if (entry[0] == 0u || load_le32(entry + FS_ENTRY_SIZE_OFFSET) == 0u) {
-            continue;
+        if (entry[0] != 0u && load_le32(entry + FS_ENTRY_SIZE_OFFSET) != 0u) {
+            fs->name_order[count++] = (uint16_t)slot;
         }
+    }
+    yan_sort_index(fs->name_order, count, extent_order_before, fs->directory);
+    uint32_t candidate = fs->directory_blocks;
+    for (uint32_t i = 0u; i < count; ++i) {
+        const uint8_t *entry = entry_at(fs->directory, fs->name_order[i]);
         uint32_t start = load_le32(entry + FS_ENTRY_START_OFFSET);
-        uint32_t count = load_le32(entry + FS_ENTRY_COUNT_OFFSET);
-        if (candidate >= start && candidate < start + count) {
-            return false;
+        if (start - candidate >= needed) {
+            break;
         }
+        candidate = start + load_le32(entry + FS_ENTRY_COUNT_OFFSET);
     }
-    uint32_t limit = fs->capacity_blocks;
-    for (uint32_t i = 0; i < fs->entry_capacity; ++i) {
-        const uint8_t *entry = entry_at(fs->directory, i);
-        if (entry[0] == 0u || load_le32(entry + FS_ENTRY_SIZE_OFFSET) == 0u) {
-            continue;
-        }
-        uint32_t start = load_le32(entry + FS_ENTRY_START_OFFSET);
-        if (start > candidate && start < limit) {
-            limit = start;
-        }
+    bool found = needed <= fs->capacity_blocks - candidate;
+    rebuild_name_order(fs);
+    if (found) {
+        *start_out = candidate;
     }
-    return limit - candidate >= needed;
-}
-
-/* Lowest contiguous free run of `needed` data blocks, starting at block D.
- *
- * The directory is the only allocation record, so the in-use set is rebuilt
- * from the cache every time. A run can only begin at block D or immediately
- * after a used extent, which is why the search visits O(files) candidates and
- * never walks the device: a UINT32_MAX-block device costs the same as a
- * three-block one. No per-file stack array is built, so the frame does not grow
- * with N; complexity is O(N^2). */
-static bool allocate_extent(const YanFs *fs, uint32_t needed, uint32_t *start_out)
-{
-    uint32_t best = 0u;
-    if (extent_candidate_fits(fs, fs->directory_blocks, needed)) {
-        best = fs->directory_blocks;
-    }
-    /* Slot order matches the old used_start/used_count array order, so the
-     * chosen start is exactly the same lowest feasible candidate. */
-    for (uint32_t slot = 0; slot < fs->entry_capacity; ++slot) {
-        const uint8_t *entry = entry_at(fs->directory, slot);
-        if (entry[0] == 0u || load_le32(entry + FS_ENTRY_SIZE_OFFSET) == 0u) {
-            continue;
-        }
-        uint32_t candidate = load_le32(entry + FS_ENTRY_START_OFFSET) +
-                             load_le32(entry + FS_ENTRY_COUNT_OFFSET);
-        if (best != 0u && candidate >= best) {
-            continue;
-        }
-        if (extent_candidate_fits(fs, candidate, needed)) {
-            best = candidate;
-        }
-    }
-    if (best == 0u) {
-        return false;
-    }
-    *start_out = best;
-    return true;
+    return found;
 }
 
 static bool find_entry(const YanFs *fs, const char *name, uint32_t length,

@@ -288,6 +288,9 @@ YanSearchTermsResult yan_search_terms_core_preflight(
                 *skip = true;
                 return YAN_SEARCH_TERMS_OK;
             }
+            if (carry_length == 0u && byte < 0x80u) {
+                continue;
+            }
             carry[carry_length] = byte;
             ++carry_length;
             uint32_t need = yan_search_text_utf8_expected(carry, carry_length);

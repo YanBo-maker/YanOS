@@ -84,6 +84,11 @@ jobs:
             echo "::error::MCP write tests not registered: $mcp_count/4 (#42)"
             exit 1
           fi
+          performance_count=$(ctest --test-dir build -N -R '^(yanfs_4095_performance_harness|yanfs_4095_performance)$' | sed -n 's/^Total Tests: //p')
+          if [ "$performance_count" != 2 ]; then
+            echo "::error::4095 performance tests not registered: $performance_count/2 (#90)"
+            exit 1
+          fi
       - name: Build
         run: cmake --build build --config ${{ matrix.config }} --parallel
       - name: Test
@@ -96,6 +101,7 @@ jobs:
           set -o pipefail
           ctest --test-dir build -N | sed -n 's/^  Test *#[0-9]*: //p' | sort
           ctest --test-dir build --build-config ${{ matrix.config }} --output-on-failure 2>&1 | tee ctest.log
+          cp build/Testing/Temporary/LastTest.log build/Testing/Temporary/LastTest-full.log
           ctest --test-dir build --build-config ${{ matrix.config }} -V -R '^(mcp_note|mcp_note_tool|mcp_sdk|mcp_stdio)$' 2>&1 | grep -E ': (PASS|.*:PASS$|[0-9]+ Tests 0 Failures)|tests passed'
           if [ ! -f ctest.log ]; then
             echo "::error::ctest 日志不存在"
@@ -105,3 +111,15 @@ jobs:
             echo "::error::存在被跳过的测试（见上方列表）"
             exit 1
           fi
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-evidence-${{ matrix.os }}-${{ matrix.config }}-sanitizers-${{ matrix.sanitizers }}
+          path: |
+            ctest.log
+            build/Testing/Temporary/
+            build/yanfs-4095-performance/
+            build/CMakeCache.txt
+          retention-days: 14
+          if-no-files-found: error

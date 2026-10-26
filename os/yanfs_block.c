@@ -23,6 +23,7 @@
 
 #include "block.h"
 #include "platform.h"
+#include "block_peek.h"
 #include "task.h"
 
 #include <stddef.h>
@@ -37,13 +38,6 @@ static uint32_t load_le32(const uint8_t *bytes)
  * position is H2G_TAIL and the index is taken modulo the ring size, so a header
  * that crosses the wrap point reads back contiguous (0018 rule 2). This is a
  * pure read: no ring position is advanced here. */
-static uint8_t peek_response(uint32_t index)
-{
-    const uint32_t size = yan_os_transport_ring_size();
-    const volatile uint8_t *ring =
-        (const volatile uint8_t *)(uintptr_t)(yan_os_transport_ring_base() + size);
-    return ring[yan_os_ring_index(yan_os_transport_h2g_tail(), size, index)];
-}
 
 /* The task_wait predicate. It must stay short, read-only and free of wait /
  * yield / exit: the runtime asks it with interrupts off. It decides only
@@ -70,9 +64,7 @@ static int response_ready(void *context)
         return 0;
     }
     uint8_t header[YAN_OS_BLOCK_HEADER_SIZE];
-    for (uint32_t i = 0; i < YAN_OS_BLOCK_HEADER_SIZE; ++i) {
-        header[i] = peek_response(i);
-    }
+    yan_block_peek_header(header);
     if (load_le32(header + 12) != 0u) {
         return 1; /* reserved must be zero */
     }
@@ -137,9 +129,7 @@ static bool response_legal_payload(uint64_t *payload_out)
         return false;
     }
     uint8_t header[YAN_OS_BLOCK_HEADER_SIZE];
-    for (uint32_t i = 0; i < YAN_OS_BLOCK_HEADER_SIZE; ++i) {
-        header[i] = peek_response(i);
-    }
+    yan_block_peek_header(header);
     if (load_le32(header + 12) != 0u) {
         return false;
     }

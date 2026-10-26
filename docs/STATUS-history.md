@@ -825,3 +825,13 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 
 0034 按自身 AC9.6 更新为 Implemented；0035、0036 整体保持 Approved。R8 跨版本对比的仓库内重跑入口与 4095 档性能验收分别跟踪于 [#89](https://github.com/YanBo-maker/YanOS/issues/89)、[#90](https://github.com/YanBo-maker/YanOS/issues/90)，不以容量支持代替性能验收。
 
+
+
+## 当前阶段
+
+当前补齐 [0036](specs/0036-yanfs-multi-block-directory.md) R8 历史行为对比的仓库内重跑入口，跟踪于 [#89](https://github.com/YanBo-maker/YanOS/issues/89)。入口从固定的 R8 前基线与 R8 候选重新构建，以同一组生成镜像比较终端、MCP 和镜像字节；本地分支已完成实现与本机验证，审核状态与收口结论见本轮交付材料；本阶段尚未发布。
+
+[PR #91](https://github.com/YanBo-maker/YanOS/pull/91) 文档核查已按所有者授权合入 main，merge commit 为 `9d8cf9b`，该提交的 CI 已核对通过。主线已具备大容量检索、离线迁移、学习记录联合验收和 dsh 双库试用，接入见 [dsh 双库接入](dsh-mcp-quickstart.md)。本轮验证明细与历史对比边界见 [0036 VERIFY](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)。
+
+0035、0036 整体保持 Approved；4095 档性能验收继续跟踪于 [#90](https://github.com/YanBo-maker/YanOS/issues/90)。本轮新增入口的发布、远端 CI 和合入状态随关联 PR 记录。
+

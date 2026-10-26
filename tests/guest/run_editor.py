@@ -454,7 +454,7 @@ CASES = [
 
 PRODUCTION_INPUTS = (
     "apps/yanfs_terminal/main.c",
-    "os/trap_entry.S", "os/task.c", "os/task_switch.S", "os/block.c",
+    "os/trap_entry.S", "os/task.c", "os/task_switch.S", "os/block.c", "os/block_peek.h",
     "os/console.c", "os/editor.c", "os/editor.h", "os/yanfs.c",
     "os/yanfs_block.c", "os/shell.c", "os/note_relations.c", "os/note_blocks.c", "os/note_blocks_format.c", "os/note_metadata.c", "os/search.c", "os/search_linear.c",
     "os/line.c", "os/terminal.c",
@@ -463,7 +463,7 @@ PRODUCTION_INPUTS = (
     "os/shell.h", "os/note_relations.h", "os/note_blocks.h", "os/note_blocks_format.h", "os/note_metadata.h", "os/search.h", "os/search_linear.h", "os/line.h",
     "os/terminal.h", "os/yanfs.h",
     "os/yanfs_block.h", "tests/guest/run_terminal_files.py",
-    "os/memory.h", "os/search_terms.h", "os/note_metadata_format.h", "os/search_terms.c", "os/note_metadata_format.c",
+    "os/memory.h", "os/search_terms.h", "os/note_metadata_format.h", "os/note_metadata_format_internal.h", "os/search_terms.c", "os/note_metadata_format.c",
     "os/search_terms_core.h", "os/search_terms_core.c",
     "os/search_terms_linear.h", "os/search_terms_linear.c",
     "os/search_terms_index.h", "os/search_terms_index.c",

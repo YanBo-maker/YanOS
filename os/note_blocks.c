@@ -1,4 +1,5 @@
 #include "note_blocks.h"
+#include "note_metadata_format_internal.h"
 #include "memory.h"
 #include "sort.h"
 #include <stddef.h>
@@ -180,17 +181,17 @@ static YanBlockResult file_scan(YanBlockContext *c, const char *name,
      * validation. The header parser borrows it without modifying its bytes. */
     if (!buffered) r = read_exact(c, name, 0, prefix);
     if (r != YAN_BLOCK_OK) return r;
-    YanNoteResult note = yan_note_parse_header(c->buffer, prefix, &c->metadata, &c->metadata_workspace);
+    uint32_t body = 0u;
+    YanNoteResult note = yan_note_body_offset(c->buffer, prefix, &body, &c->metadata_workspace);
     if (note != YAN_NOTE_OK) return note == YAN_NOTE_METADATA ? YAN_BLOCK_METADATA : YAN_BLOCK_PROTOCOL;
     uint32_t first_line = 1;
-    for (uint32_t i = 0; i < c->metadata.header_bytes; ++i) if (c->buffer[i] == '\n') ++first_line;
-    r = yan_block_parser_init(&c->parser, c->metadata.header_bytes, first_line, sink, sink != NULL ? c : NULL);
+    for (uint32_t i = 0; i < body; ++i) if (c->buffer[i] == '\n') ++first_line;
+    r = yan_block_parser_init(&c->parser, body, first_line, sink, sink != NULL ? c : NULL);
     if (buffered && r == YAN_BLOCK_OK) {
         r = yan_block_parser_feed(&c->parser,
-            c->buffer + c->metadata.header_bytes,
-            file.size_bytes - c->metadata.header_bytes);
+            c->buffer + body, file.size_bytes - body);
     }
-    for (uint32_t offset = c->metadata.header_bytes;
+    for (uint32_t offset = body;
          !buffered && r == YAN_BLOCK_OK && offset < file.size_bytes;) {
         uint32_t amount = file.size_bytes - offset;
         if (amount > sizeof c->buffer) amount = sizeof c->buffer;

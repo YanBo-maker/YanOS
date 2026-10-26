@@ -83,6 +83,7 @@ HOST_HEADERS = [
     "include/yan/status.h", "include/yan/transport.h", "include/yan/uart.h",
 ]
 GUEST_HEADERS = [
+    "os/block_peek.h", "os/note_metadata_format_internal.h",
     "tests/guest/guest.h", "os/block.h", "os/console.h", "os/line.h",
     "os/platform.h", "os/search.h", "os/search_linear.h", "os/shell.h", "os/note_relations.h", "os/note_blocks.h", "os/note_blocks_format.h", "os/note_metadata.h",
     "os/task.h", "os/terminal.h", "os/arena.h", "os/yanfs.h",

@@ -543,6 +543,15 @@ class HarnessControls(unittest.TestCase):
         self.expect("CRC_MISMATCH", "crc",
                     lambda: parity.decode(bytes(bad_crc)))
 
+    def test_historical_inventory_excludes_only_later_internal_headers(self):
+        later={"os/block_peek.h","os/note_metadata_format_internal.h"}
+        self.assertTrue(later.issubset(entry.runtime.GUEST_HEADERS))
+        for label in ('baseline','candidate'):
+            required=set(entry.required_ref_inputs(label))
+            self.assertFalse(later & required)
+            self.assertEqual(label=='candidate','os/sort.h' in required)
+            self.assertTrue(set(entry.runtime.GUEST_HEADERS)-later-{'os/sort.h'} <= required)
+
     def test_no_private_paths_in_sources(self):
         here = Path(__file__).resolve().parent
         forbidden = ("/mnt" + "/e", "E:" + "/YanOS")
