@@ -4,7 +4,7 @@
 
 [0040](specs/0040-4095-file-performance.md)的4095文件性能验收已获所有者认可，并通过[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`），保留阶段提交。合并代码树与已审核且三项CI通过的PR树一致；精确main提交的[独立CI](https://github.com/YanBo-maker/YanOS/actions/runs/40361835398)也已完成，三项结果及原始日志均核对通过。验证范围与原始工件见[0040 VERIFY](specs/0040-4095-file-performance.md#verify-执行记录)。
 
-当前处理[Issue #83](https://github.com/YanBo-maker/YanOS/issues/83)：补齐离线迁移附件末尾探测的EINTR处理。dsh负责编码和独立只读审核，总审核负责整合验证及正式文档；本地实现、完整验证和独立dsh复核已完成，正在本地提交收口，尚未发布。原错误分类、清理行为、只读来源和磁盘格式保持。
+当前处理[Issue #83](https://github.com/YanBo-maker/YanOS/issues/83)：补齐离线迁移附件末尾探测的EINTR处理。dsh负责编码和独立只读审核，总审核负责整合验证及正式文档；本地实现、完整验证、独立dsh复核及总审核已完成，所有者已批准推送、创建PR并运行CI；发布与远端检查见该Issue关联PR。原错误分类、清理行为、只读来源和磁盘格式保持。
 
 0035、0036整体保持Approved，0040为Implemented。主线已有大容量检索、离线迁移、学习记录联合验收和dsh双库试用，接入见[dsh双库接入](dsh-mcp-quickstart.md)。
 
@@ -52,7 +52,7 @@
 
 - 0036 R7 离线迁移已随 PR #82 合入 main（`26c25fc`）；可复制镜像和附件，保留槽号与库身份。[PR #82](https://github.com/YanBo-maker/YanOS/pull/82)
 
-- 0036 R7附件EOF探测的EINTR修复已在任务分支实现，本机验证与独立dsh复核已通过，正在本地提交收口，尚未发布。[Issue #83](https://github.com/YanBo-maker/YanOS/issues/83)，[验证记录](specs/0036-yanfs-multi-block-directory.md#r7-issue-83附件eof探测的eintr处理2026-10-27)
+- 0036 R7附件EOF探测的EINTR修复已在任务分支实现，本机验证与独立dsh复核已通过，所有者已批准发布；PR与CI状态见关联Issue。[Issue #83](https://github.com/YanBo-maker/YanOS/issues/83)，[验证记录](specs/0036-yanfs-multi-block-directory.md#r7-issue-83附件eof探测的eintr处理2026-10-27)
 
 - 0036 R8 历史行为对比重跑入口已随[PR #92](https://github.com/YanBo-maker/YanOS/pull/92)合入main（`d28c729`）；完整历史比较由操作员运行，默认门禁核对夹具和判定器。[入口](../tests/guest/run_yanfs_r8_parity.py)，[验证记录](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)
 

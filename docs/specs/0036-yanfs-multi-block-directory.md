@@ -541,3 +541,5 @@ dsh协调器使用一名编码者与一名独立只读审查者，最多三个�
 总审核按独立结论完成审核状态的机械同步，生产与测试370项输入保持；R1报告为当前检出`build/20261027-migration-eintr/formal-r1-report.md`，SHA-256为`19d1fc0c3677b5e320ddf76a28eaf74195304e6d88848317456684336cc9522d`。本次提交前九项总审核与文件归属见本阶段`audit-code-nine-checks.json`及`audit-docs-nine-checks.json`；审核前的冻结文档摘要保留于`final-delivery-inputs.json`，状态同步另记于`closeout-document-state.json`。
 
 本轮本地实现/测试提交为`85ef0395b5282070731cc0ab709caec1300cab91`，文档与其同批相邻提交；提交状态以交付材料为准，尚未发布。
+
+2026-10-27所有者随后批准推送`codex/83-migration-eintr`、创建PR与运行远端CI。实现/测试`85ef039`和文档`db62cd6`保持，发布状态同步仅记录此次授权；实际PR及其CI、可用工件见[Issue #83的关联PR](https://github.com/YanBo-maker/YanOS/issues/83)。此前“尚未发布/推送”的文字保留为本机收口时的快照，不能用0040的CI代替本次新head检查。本次仍沿0036-R7规格通道修复实现，EINTR从误拒绝变为重试成功是可见修复，不归入“不改用户可见行为”的轻量通道；没有新增接口或改变R7不变量。
