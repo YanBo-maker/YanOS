@@ -531,3 +531,8 @@ R8-AC1 的历史全量跨版本比较已实际执行，但 `ring_copy`／`os_mem
 默认回归命令为`ctest --test-dir BUILD -C CONFIG --no-tests=error --output-on-failure -E '_mutation$'`（Release/Windows为-j3，ASan为-j1）；实际变异使用`-R '_mutation$' -j3`，其后单选console门禁。初次构建及后续依赖检查出现未来mtime警告；三个Linux构建在各自测试完成后复核一次没有重新编译或链接，比对清单内的目标产物SHA-256保持一致，警告原文与产物比对记录在`*-build-root-verified.json`及其原始日志中，不宣称警告已消失。最初dsh的tools-only试跑保留了一个语义用例SKIP，不把该次试跑宣称为完整通过；最终SEMANTIC开启的完整迁移矩阵单独记录。
 
 独立只读dsh正式R1针对冻结树`70d3fa513e36e38899ee2ef9036ac1337542a8dc`完成源码、接口、实测与文档对齐，PASS且零阻塞，无需R2；报告为本轮工作区`build/20261027-migration-symlink/formal-r1-report.md`，SHA-256为`269a722d9bcda35c45fc538d4a34b70a5872cb96c5a2658154b7f06c153e27d9`。协调器随后修正私有报告中对坏候选后续锁检查的过度概括，正式文档原已明确该限制；编码与审查子会话均inactive，headless已退出。总审核九项检查通过，记录见仓库外本阶段`audit-code-nine-checks.json`与`audit-docs-nine-checks.json`。正式审核后的改动仅同步上述已核实结论、补列由总审核独立完成的缺oracle控制并统一“总审核”称谓，源码与测试保持冻结。本轮尚未推送、创建PR或运行新的远端CI。旧阶段结论与此前VERIFY均原样保留。
+
+
+### 2026-10-27：Issue #88 发布授权
+
+所有者明确批准推送`codex/88-migration-symlink`、创建PR并运行远端CI；总审核据此执行发布。此前“尚未发布/未运行远端CI”保留为本地交付时的快照。此处仅同步授权事实，370项非Markdown输入和原独立dsh R1所审实现保持；没有新增行为或新的dsh审核结论。发布、精确head检查与原始工件入口随[Issue #88](https://github.com/YanBo-maker/YanOS/issues/88)关联PR维护，远端结果与上述本机实测分开记录。

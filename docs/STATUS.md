@@ -4,7 +4,7 @@
 
 [0040](specs/0040-4095-file-performance.md)的4095文件性能验收已获所有者认可，经[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`）；精确main的三项CI和原始日志已核对通过，验收边界见该规格VERIFY。
 
-当前处理[Issue #88](https://github.com/YanBo-maker/YanOS/issues/88)：为镜像符号链接入口补齐附件定位验收，核对真实附件、入口旁诱饵、来源身份和旁锁位置。dsh编码、本机完整回归、实际变异、独立dsh正式审核与总审核已完成；本轮尚未推送、建立PR或运行远端CI。沿用0036-R7已批准行为，生产实现与接口保持。
+当前处理[Issue #88](https://github.com/YanBo-maker/YanOS/issues/88)：为镜像符号链接入口补齐附件定位验收，核对真实附件、入口旁诱饵、来源身份和旁锁位置。dsh编码、本机完整回归、实际变异、独立dsh正式审核与总审核已完成；所有者已批准推送、创建PR并运行CI；发布与最新检查见该Issue关联PR。沿用0036-R7已批准行为，生产实现与接口保持。
 
 附件末尾探测的EINTR修复单独位于[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)，三项CI已核对通过，仍待合入；本轮直接基于main开发。0035、0036整体保持Approved，0040为Implemented。双库接入见[dsh试用说明](dsh-mcp-quickstart.md)。
 
