@@ -603,3 +603,8 @@ dsh协调器使用一名编码者与一名独立只读审查者，最多三个�
 
 
 当前完整回归命令为`cmake --build BUILD --config Release --parallel 3`和`ctest --test-dir BUILD -C Release --no-tests=error --output-on-failure -j3 -E '_mutation$'`，TOOLS/SEMANTIC开启；每个配置/构建/注册/执行步骤前后核对同一372项输入。原始argv与退出状态在`integration-execution.json`，注册与完整输出在`integration-registration.json`、`integration-ctest.log`和`integration-LastTest.log`，总审核验在`full-release-root-verified.json`。这是当前完整Release结果，不是ASan完整执行或本次远端CI；本次本地提交以交付材料为准；尚未推送或创建PR。
+
+
+### 2026-10-27：Issue #84 发布授权
+
+所有者明确批准推送`codex/84-migration-symbols`、创建PR并运行远端CI；总审核据此执行发布。此前“尚未发布/未运行远端CI”保留为本地交付时的快照。此处仅同步授权事实，372项非Markdown输入和原独立dsh R1所审实现保持；没有新增行为或新的dsh审核结论。发布、精确head检查与原始工件入口随[Issue #84](https://github.com/YanBo-maker/YanOS/issues/84)关联PR维护，远端结果与上述本机实测分开记录。
