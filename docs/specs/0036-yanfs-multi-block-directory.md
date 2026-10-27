@@ -543,3 +543,45 @@ dsh协调器使用一名编码者与一名独立只读审查者，最多三个�
 本轮本地实现/测试提交为`85ef0395b5282070731cc0ab709caec1300cab91`，文档与其同批相邻提交；提交状态以交付材料为准，尚未发布。
 
 2026-10-27所有者随后批准推送`codex/83-migration-eintr`、创建PR与运行远端CI。实现/测试`85ef039`和文档`db62cd6`保持，发布状态同步仅记录此次授权；实际PR及其CI、可用工件见[Issue #83的关联PR](https://github.com/YanBo-maker/YanOS/issues/83)。此前“尚未发布/推送”的文字保留为本机收口时的快照，不能用0040的CI代替本次新head检查。本次仍沿0036-R7规格通道修复实现，EINTR从误拒绝变为重试成功是可见修复，不归入“不改用户可见行为”的轻量通道；没有新增接口或改变R7不变量。
+
+
+### 2026-10-27：Issue #88 镜像符号链接入口的附件定位验收
+
+本轮为既有0036-R7及2026-10-21附件澄清补直接测试，依据仍是`realpath(OLD) + ".assets"`与[0003决策](../decisions/0003-file-limit-and-images.md)。分支基于main `552dcde`；生产C、公开接口、Guest、磁盘格式及原错误边界保持。附件EOF/EINTR修复位于独立的[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)，不将其新增用例计入本轮。
+
+新增`tests/run_yanfs_migrate_symlink.py`复用原独立Python镜像解码与附件oracle，通过真实`yan_migrate`执行三个场景：相对链接指向v1镜像、绝对链接指向含slot 1000的v2镜像、真实附件缺省但入口旁存在诱饵。前两者逐字节及目录结构比较真实附件，第三者要求目标没有附件目录；同时核对slot/name/size/content、0033来源身份、源镜像与两份附件保持、链接目标保持，以及真实路径旁锁存在而入口旁无锁。CMake在既有Linux工具条件下注册`yanfs_migrate_symlink`，标签为R7-AC1和issue88；它不直接验收AC2错误清理，没有SKIP_RETURN_CODE。Windows不执行此Linux迁移场景。
+
+正确生产CLI的三个新场景共61项检查通过。实际私有错误候选仅将附件选择从`old_real`改为`from`，编译成功，三次迁移均以0退出且打印正常成功信息；新runner分别由`assets.canonical-manifest-equal`（两次）与`assets.target-absent`（一次）拒绝。该路径在首个附件断言停止，已执行35项检查；其后来源保持与锁断言没有执行，不能记为通过。这是错误成功输出的实际检测证据，不把构建失败、超时或信号当检出，也不称原生产实现存在RED故障。缺显式CLI或oracle的控制硬失败，且未创建工作目录；总审核另以缺CLI和缺oracle命令独立核对退出1与零工作目录。
+
+最终370项非Markdown输入在各配置的配置、构建、注册与执行前后均一致；配置/执行原argv、原始日志和总审核验保存在`E:/YanOS/build/20261027-migration-symlink/`的`*-execution.json`、`*-root-verified.json`与`handoff-root-verified.json`。本机最终结果：
+
+| 配置 | 注册数 | 选中并通过 | CTest耗时 |
+| --- | ---: | ---: | ---: |
+| Linux Release | 151 | 151/151 | 396.82s |
+| Linux Debug ASan/UBSan | 151 | 151/151 | 1291.19s |
+| Windows MSVC Debug | 81 | 81/81 | 152.00s |
+| Linux Release 实际变异 | 169 | 17/17 | 626.21s |
+
+以上最终执行均零失败、零CTest跳过。两个Linux默认配置均开启TOOLS/SEMANTIC，保留原74项迁移专项的完整通过结果，新三个场景单独统计；Windows为MSVC Debug。十七组实际变异之外，`guest_console_mutation_gate`另以串行入口通过1/1（131.41s），不计第十八组。旧1023/2047门槛及4095默认性能门禁随完整Linux回归执行；未重跑真实模型效果或历史全量对比。
+
+默认回归命令为`ctest --test-dir BUILD -C CONFIG --no-tests=error --output-on-failure -E '_mutation$'`（Release/Windows为-j3，ASan为-j1）；实际变异使用`-R '_mutation$' -j3`，其后单选console门禁。初次构建及后续依赖检查出现未来mtime警告；三个Linux构建在各自测试完成后复核一次没有重新编译或链接，比对清单内的目标产物SHA-256保持一致，警告原文与产物比对记录在`*-build-root-verified.json`及其原始日志中，不宣称警告已消失。最初dsh的tools-only试跑保留了一个语义用例SKIP，不把该次试跑宣称为完整通过；最终SEMANTIC开启的完整迁移矩阵单独记录。
+
+独立只读dsh正式R1针对冻结树`70d3fa513e36e38899ee2ef9036ac1337542a8dc`完成源码、接口、实测与文档对齐，PASS且零阻塞，无需R2；报告为本轮工作区`build/20261027-migration-symlink/formal-r1-report.md`，SHA-256为`269a722d9bcda35c45fc538d4a34b70a5872cb96c5a2658154b7f06c153e27d9`。协调器随后修正私有报告中对坏候选后续锁检查的过度概括，正式文档原已明确该限制；编码与审查子会话均inactive，headless已退出。总审核九项检查通过，记录见仓库外本阶段`audit-code-nine-checks.json`与`audit-docs-nine-checks.json`。正式审核后的改动仅同步上述已核实结论、补列由总审核独立完成的缺oracle控制并统一“总审核”称谓，源码与测试保持冻结。本轮尚未推送、创建PR或运行新的远端CI。旧阶段结论与此前VERIFY均原样保留。
+
+
+### 2026-10-27：Issue #88 发布授权
+
+所有者明确批准推送`codex/88-migration-symlink`、创建PR并运行远端CI；总审核据此执行发布。此前“尚未发布/未运行远端CI”保留为本地交付时的快照。此处仅同步授权事实，370项非Markdown输入和原独立dsh R1所审实现保持；没有新增行为或新的dsh审核结论。发布、精确head检查与原始工件入口随[Issue #88](https://github.com/YanBo-maker/YanOS/issues/88)关联PR维护，远端结果与上述本机实测分开记录。
+
+
+### 2026-10-27：PR #94／#95 合入整合
+
+所有者在核对两项PR状态后明确要求完成合并。附件EOF/EINTR修复[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)已以merge commit `203825a7dcc099c0029da3e82e688656d9c14bbf`合入main，父提交为`552dcde`与已审head `eb9cbd9`，合并tree与该head相同，原实现、文档和发布提交均保留。[PR #95](https://github.com/YanBo-maker/YanOS/pull/95)在此基础上整合镜像链接入口验收，合入授权覆盖这两项；先前本地交付及发布快照保持原文，最新合入记录见对应PR。
+
+整合不新增产品行为。CMake冲突由本轮dsh编码者解决：在相同既有条件内保留两组原测试注册、超时、标签和命令，各出现一次。总审核逐字节确认，相对PR #94仅增加原PR #95的七行注册；生产源码、EOF专项与故障驱动器均等于已审PR #94，新链接专项等于已审PR #95。两边规格追加段落完整保留；STATUS当前阶段同步，两个PR合入前的完整当前阶段分别原字节追加到历史一次。README、开发流程、0040及其索引无需新行为修订。
+
+对同一371项非Markdown输入重新配置、构建并执行Linux Release完整默认套件：注册152项，152/152通过，CTest实耗283.07s，零失败、零跳过。配置开启TOOLS/SEMANTIC，命令为`cmake --build BUILD --config Release --parallel 3`及`ctest --test-dir BUILD -C Release --no-tests=error --output-on-failure -j3 -E '_mutation$'`。当前完整LastTest与注册集合逐名匹配；原迁移74项、EOF22项、链接3例61项分别通过，两个迁移二进制摘要与同次专项输出相符。4095默认性能门禁在本次完整套件中运行，未把旧性能数值当作新测量。
+
+证据在`E:/YanOS/build/20261027-migration-merge/`：`source-union-proof.json`、`frozen-source.json`、`integration-execution.json`、`integration-registration.json`、原始`integration-ctest.log`／`integration-LastTest.log`、`integration-verified.json`及`verify-integration.py`。旧PR #94／#95精确head各自的三项CI和工件已有独立核验；本次新整合head的CI、精确检出与原始工件另随PR #95维护。本机只新跑上述Release套件，不将旧ASan、Windows、实际十七组、真实模型或历史全量比较说成当前整合树的新执行。
+
+本轮dsh协调器与窄范围编码者的整合预检不计正式轮次。独立只读审核者针对冻结树`9ef6bd6699a105434c4be157cad59ef21e7a14d7`完成正式R1，PASS且零阻塞；上限两轮，未用R2或启动恢复。报告为当前检出`build/20261027-migration-merge/formal-r1-report.md`，SHA-256为`43d51932500243e75cea2ccba057304a903b956f55836b62fe747c547def97bd`；核对实际源码、接口、原始证据和文档，编码者与审核者均inactive，协调headless已退出。九项总审核通过，见本轮`audit-nine-checks.json`。审核后仅由总审核机械填入上述已核实结论，371项源码输入保持冻结，不宣称新增dsh轮次或新测试。新整合head仍须单独通过CI；PR #95合入后按0034-R7归档监控通道并保留入口，归档回执在本轮交付材料中记录。
