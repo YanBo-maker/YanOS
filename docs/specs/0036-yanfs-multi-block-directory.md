@@ -150,6 +150,8 @@ search（线性与索引）、带标签的 search、`links`、`backlinks`、`rel
 
 2026-10-26后续进展：0040的局部优化与固定夹具性能门禁已完成本机验收，验证和发布状态见[0040 VERIFY](0040-4095-file-performance.md#verify-执行记录)。此前条款和历史结论保留。
 
+> 当前结论（2026-10-29核对）：以上2026-10-25、26日段落是历史快照，其中“当前为Approved，实施与验收尚未完成”的状态已被后续交付取代。[0040](0040-4095-file-performance.md)现为Implemented，并已于2026-10-27随[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)以`552dcde`合入main；固定夹具的性能验收范围及原始证据见其VERIFY。本规格整体仍为Approved。
+
 ### 0036-R8：让 R5-AC1 达标的改动（闫博 2026-10-20 #70 裁定）
 基线：N=1023 实测 mount 7.45e7、create 8.9e6、list 1.2e6、backlinks 1.91e8、related 1.90e8、block backlinks >7e8（未跑完）。主要开销是逐字节块传输（每 4 KiB 块 19–28 万步），其次是挂载两两比较、`find_entry` 线性查找（`os/yanfs.c:490`）和按 36 B 行逐字节搬移的插入排序。
 必须修的查询：**mount、backlinks、related、block backlinks**；`meta list`（含标签过滤）和搜索扫描同样逐文件读头，必须在 PR 中实测，超标即同样适用本条改动。create、`list` 已达标，只回归。
@@ -717,3 +719,12 @@ R3分支继续保留`4072e3b`与`756a289`两条原提交，并整合该main；�
 dsh基线脚本曾将Linux64合法超大容量误作拒绝用例，纠正后的182场景已独立核对；之后一项追加试验又在创建哨兵前调用超大容量，已停止编码会话并排除该追加结果，清理本轮确切临时镜像。两次验证脚本问题均保留记录，不计为产品故障或变异检出。本节的ASan和回归结论仅来自总审核独立执行的正式配置。
 
 证据位于仓库外 `E:/YanOS/build/20261029-mkfs-files-validation/`：`validation-summary.json`、`root-*-execution.json`、CTest日志及逐项原始LastTest记录、`frozen-source.json`、`root-cli-proof.json`、`root-dsh-matrix-verified.json`、`chief-harness-interruption.json` 与 `chief-coder-stop.json`。dsh修正后的原始输入记录和失败历史另存当前工作树的 `build/20261029-mkfs-files-validation/raw/`。本轮发布与新远端CI状态以交付材料及对应PR为准；本机通过不代替远端CI或维护者合入批准。
+
+
+#### Issue #63 后续发布与合入事实（2026-10-29）
+
+实现/测试提交`ff8d7fd`、文档提交`a6d3a2a`已随[PR #98](https://github.com/YanBo-maker/YanOS/pull/98)经所有者认可意图并授权，于2026-10-29以merge commit `55069e95ccdfb67028c6f7371accc001f7572287`合入main。两父提交为`2fb0be6`与`a6d3a2a`，阶段历史保留；合并tree与已审head一致。前述本机交付和待发布文字保留为合入前快照，当前状态由本段接续。
+
+PR精确head的[CI 40739247812](https://github.com/YanBo-maker/YanOS/actions/runs/40739247812)三项通过：Release155/155、完整ASan155/155、Windows83/83；三份工件、377项源码身份及两个Linux共54条性能原始记录已核验，范围与限制见仓库外交付材料`E:/YanOS/build/20261029-mkfs-files-validation/ci-40739247812/`。合入后的[main CI 40742512066](https://github.com/YanBo-maker/YanOS/actions/runs/40742512066)也已由Actions API确认completed/success；本次文档修正没有重新逐项核验该main运行的工件，不将PR工件结论冒充main工件复核。
+
+本次仅同步文档事实，源码、测试、接口和磁盘契约保持；0035、0036整体Approved状态不变，非阻塞测试增强单列[Issue #99](https://github.com/YanBo-maker/YanOS/issues/99)。

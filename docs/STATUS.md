@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-0036-R1格式化参数校验整理（[Issue #63](https://github.com/YanBo-maker/YanOS/issues/63)）：`yan_mkfs` 将显式 `--files` 的范围、目录几何校验和目录块数计算归并为一次解析；默认容量仍为1023文件、16块目录。已完成实现、本机验证、独立只读dsh核对与总审；发布与远端CI状态以交付材料及对应PR为准。本轮从main `2fb0be6`开发，沿用[0036-R1](specs/0036-yanfs-multi-block-directory.md#0036-r1mkfs-设定文件数)和0021格式化契约，接受的输入、诊断、退出码、镜像字节和失败边界保持。
+主线文档与实现对齐修正：更新 README 入口、镜像旁锁的平台限制及 CI 覆盖说明，为旧决策和性能规划补充固定快照引用与后续结论。历史原文保留，程序行为和规格状态保持。
 
-0036整体仍为Approved。实现、验证与所有者审查分别记录；本轮合入与远端验证状态以交付材料及对应PR为准；学习理解程度由项目所有者判断。
+上一开发阶段的0036-R1格式化参数校验整理已于2026-10-29经[PR #98](https://github.com/YanBo-maker/YanOS/pull/98)合入 main（`55069e9`），实现、独立核对与所有者意图验收已完成；该PR的三项远端CI通过，验证范围见[0036 VERIFY](specs/0036-yanfs-multi-block-directory.md#r1-issue-63格式化参数校验归并2026-10-29)。0035、0036整体仍为Approved，0040为Implemented；学习理解程度由项目所有者判断。
 
 ## 已交付能力
 
@@ -62,7 +62,7 @@
 
 - 0036 R7提供Linux故障符号核对入口，读取实际二进制与链接选项；故障运行逻辑和数据oracle保持。[Issue #84](https://github.com/YanBo-maker/YanOS/issues/84)，[检查入口](../tests/run_yanfs_migrate_symbols.py)
 
-- 0036 R1已归并格式化参数校验，并补充边界、前导零和错误路径的CLI验收；本轮仍为本机交付，原有使用方式保持。[Issue #63](https://github.com/YanBo-maker/YanOS/issues/63)，[验证记录](specs/0036-yanfs-multi-block-directory.md#r1-issue-63格式化参数校验归并2026-10-29)
+- 0036 R1已归并格式化参数校验，并补充边界、前导零和错误路径的CLI验收；已随[PR #98](https://github.com/YanBo-maker/YanOS/pull/98)合入main（`55069e9`），原有使用方式保持。[验证记录](specs/0036-yanfs-multi-block-directory.md#r1-issue-63格式化参数校验归并2026-10-29)
 
 ## 覆盖边界
 
@@ -70,7 +70,7 @@
 
 - 内存观测限定于默认RV32生产终端ELF的非递归、无LTO独立函数调用形状；内联、尾调用或其他编译形态未验证。观测条件缺失或不完整时明确失败，不把缺失统计当零分配；Guest整体32MiB预算保持。
 
-- 4095文件容量已支持，0040固定短文本夹具已完成本机性能验收；任意长正文或其他语料的耗时仍随内容增长。CI与合并状态见[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)，固定夹具的实测范围保持。
+- 4095文件容量已支持，0040固定短文本夹具已完成本机及Linux CI性能验收，并随[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main；任意长正文或其他语料的耗时仍随内容增长，固定夹具的实测范围保持。
 
 - R8 历史对比固定于 `4c5e0ab` 与 `2b82d17`。完整重跑由操作员显式执行，默认 CTest 的 `yanfs_r8_parity_harness` 检查夹具与判定器反例；历史 v2 MCP 的 CORRUPT 表示当时的错误保持，不作为当前大容量检索成功证据。
 
@@ -82,7 +82,7 @@
 - 第三方证据来自官方 riscv-tests 与 Sail 签名，范围是用户态 RV32IM。Guest trap 自检覆盖 MSIP 与 MTIP；MEIP 由 Host 侧测试驱动。
 - `tests/official/run_act4.sh` 在 Sail 与 DUT 都没有签名时把用例记为 skipped；结束条件仍是 differed 为 0 且 matched 大于 0。跳过数大于 0 本身不使脚本失败。
 - CI 不打开 `YAN_ENABLE_MUTATION_TESTS`。默认套件里的 `*_mutation_gate` 纯门禁仍会注册。`guest_console_mutation_gate` 只在变异配置打开时注册（`CMakeLists.txt` 中该门禁与 `YAN_ENABLE_MUTATION_TESTS` 同支）。
-- Linux CI（`.github/workflows/build.yml`，2921fed）打开 `YAN_BUILD_SEMANTIC`，因此会构建 `yan_mcp`。`CMakeLists.txt` 在该开关下注册 `mcp_protocol`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk`、`mcp_faults` 等测试；`mcp_note` 还要求已有 `yan_mcp`、`yan_run`、`yanfs_terminal` 和 `note_read_probe`。workflow 在配置后检查 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk` 四项都已注册。`guest_note_blocks_host` 写在 `if(TARGET yan_mcp)` 里，Linux 打开该开关后满足条件。windows-2022 的配置不传 `YAN_BUILD_SEMANTIC`（默认 OFF），不构建 `yan_mcp`。不依赖该开关的 Host 侧测试仍会注册。`YAN_ENABLE_MUTATION_TESTS` 仍然不打开。
+- Linux CI（[`.github/workflows/build.yml`](../.github/workflows/build.yml)，最近更新`b1ea1b9`）打开 `YAN_BUILD_SEMANTIC`，因此会构建 `yan_mcp`。`CMakeLists.txt` 在该开关下注册 `mcp_protocol`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk`、`mcp_faults` 等测试；`mcp_note` 还要求已有 `yan_mcp`、`yan_run`、`yanfs_terminal` 和 `note_read_probe`。workflow 在配置后检查 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk` 四项都已注册，并强制检查 `yanfs_4095_performance_harness` 与 `yanfs_4095_performance` 均已注册，缺失即失败。`guest_note_blocks_host` 写在 `if(TARGET yan_mcp)` 里，Linux 打开该开关后满足条件。windows-2022 的配置不传 `YAN_BUILD_SEMANTIC`（默认 OFF），不构建 `yan_mcp`。不依赖该开关的 Host 侧测试仍会注册。`YAN_ENABLE_MUTATION_TESTS` 仍然不打开。 各矩阵任务以 `always()` 上传 `test-evidence-*` artifact，保留14天；内容包括CTest日志、`Testing/Temporary/`、4095性能原始记录及CMakeCache。Linux完整回归的LastTest另存副本，避免追加MCP检查覆盖；工件未包含生产二进制，不能据此重新哈希它们。
 - 没有 S/U 模式、`medeleg` / `mideleg`、虚拟内存分页和抢占式调度。YanFS 仍是单根目录、连续 extent；v1 最多 63 个文件，v2（0036）最多 4095 个。主线的终端与 Host/MCP 检索按实际容量工作，Host 语义索引仍受 8192 段上限约束。R7 迁移要求源镜像及附件离线稳定，只接受普通附件文件和目录；镜像符号链接入口的附件定位测试仅在Linux/WSL执行；清理失败时报告残留路径，保留旁锁，不提供断电恢复。元数据写失败可能拒挂，不保证断电一致性：v1 一次目录更新是一次块写入，v2 改动块 0 以外的目录项时是两次（先写该块，再写块 0 的 CRC），两次之间断电会让镜像 CRC 不符而被拒挂。
 
 - 学习笔记联合验收只在临时双镜像上模拟人工确认；它核对原文、引用位置、镜像隔离和持久化，不能判断项目所有者是否学会，也不能保证任意 Agent 都遵守确认约束。`guest_learning_note` 在 Linux 工具、semantic/MCP 与 Guest 目标齐备时随默认套件注册；Windows 只运行纯 Python 的 `learning_note_gate`。PR #85 精确 head `30916a6` 的远端 CI 已核对通过；实际 dsh 试用单独记录在 0035 VERIFY，不算默认 CI 覆盖。

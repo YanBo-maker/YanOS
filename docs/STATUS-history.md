@@ -897,3 +897,8 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 
 本阶段从main `4021361`独立开发，现已整合获所有者批准合入的[PR #96](https://github.com/YanBo-maker/YanOS/pull/96)（main `9534a9a`）；原R3本地证据与新整合验证分别记录；新整合本机验证和独立核对完成；各提交的远端验证分别记录在[PR #97](https://github.com/YanBo-maker/YanOS/pull/97)。0036整体状态仍为Approved；本轮意图已获所有者认可，学习理解程度仍由项目所有者判断。
 
+
+
+0036-R1格式化参数校验整理（[Issue #63](https://github.com/YanBo-maker/YanOS/issues/63)）：`yan_mkfs` 将显式 `--files` 的范围、目录几何校验和目录块数计算归并为一次解析；默认容量仍为1023文件、16块目录。已完成实现、本机验证、独立只读dsh核对与总审；发布与远端CI状态以交付材料及对应PR为准。本轮从main `2fb0be6`开发，沿用[0036-R1](specs/0036-yanfs-multi-block-directory.md#0036-r1mkfs-设定文件数)和0021格式化契约，接受的输入、诊断、退出码、镜像字节和失败边界保持。
+
+0036整体仍为Approved。实现、验证与所有者审查分别记录；本轮合入与远端验证状态以交付材料及对应PR为准；学习理解程度由项目所有者判断。

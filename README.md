@@ -1,6 +1,6 @@
 # YanOS
 
-[Agent的只读块导航](docs/specs/0033-block-mcp-navigation.md)已实现并完成本机验证，可列出具名块、按64KiB分页读取原文，并查询正文引用与反向引用。审核中发现的旧控制台测试判据已修正并完成独立复核。0033已随 [PR #38](https://github.com/YanBo-maker/YanOS/pull/38) 合入 main（75e057a）。
+YanOS 已支持终端笔记编辑、知识检索、具名块导航与 Agent 的 MCP 读写工具。YanFS 新镜像默认容纳1023个文件，最多4095个；[0040](docs/specs/0040-4095-file-performance.md)已交付固定夹具的4095文件性能门禁。当前进度与能力边界见[项目状态](docs/STATUS.md)，使用入口见下文。
 
 YanOS 是一个用于学习计算机系统的项目，包含 C17 编写的 RISC-V RV32IM 功能模拟器、Guest 上的操作系统与文件系统实验，以及终端笔记和本地知识检索工具。
 
@@ -293,7 +293,7 @@ ctest --test-dir build/semantic --no-tests=error -R '^guest_learning_note$' --ou
 
 验收脚本只在临时测试镜像中模拟确认，不会记录或判断真实用户的学习状态。
 
-镜像旁边有 `<realpath(镜像)>.lock`。`yan_run --disk-image` 从启动到退出持有它；写工具在一次调用期间持有它，返回时放开。文件创建后留在原地，生产代码不删除。目录里还没有这个文件时，第一次 `dry_run` 也会创建它。拿不到锁时写工具返回 `{"code":"BUSY"}`，`yan_run` 打印锁冲突并以退出码 5 结束。等到持锁进程结束再试，不要删除锁文件。
+Linux/WSL 中，`yan_run --disk-image` 在打开镜像前取得 `<realpath(镜像)>.lock` 排他锁，并持有到进程退出；Windows 的 `yan_run` 尚未接入这项旁锁，不能依赖它与其他写入方互斥。Linux/WSL 的 MCP 写工具提交时取得排他锁，`dry_run` 预览取得共享锁，调用返回时释放。锁文件创建后留在原地，生产代码不删除；第一次预览也可能创建它。锁冲突时，写工具返回 `{"code":"BUSY"}`，Linux 的 `yan_run` 打印锁冲突并以退出码5结束。等持锁进程结束再试，不要删除锁文件。平台与错误边界见[锁说明](docs/mcp-write-tools.md#imagelock)。
 
 `expected_source` 与当前整库身份不一致、并且这次的 `text` 与已有文件内容不同时，工具返回 `{"code":"STALE"}`，镜像不变。调用方再做一次不带旧身份的预览，把新的 `text` 和 `diff` 给闫博确认，然后用新的 `source_sha256` 提交。文件内容已经等于 `text` 时，提交成功并带 `"unchanged": true`，这时不返回 STALE。参数与错误码见[写入类 MCP 工具](docs/mcp-write-tools.md)。
 
