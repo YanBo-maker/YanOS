@@ -585,3 +585,69 @@ dsh协调器使用一名编码者与一名独立只读审查者，最多三个�
 证据在`E:/YanOS/build/20261027-migration-merge/`：`source-union-proof.json`、`frozen-source.json`、`integration-execution.json`、`integration-registration.json`、原始`integration-ctest.log`／`integration-LastTest.log`、`integration-verified.json`及`verify-integration.py`。旧PR #94／#95精确head各自的三项CI和工件已有独立核验；本次新整合head的CI、精确检出与原始工件另随PR #95维护。本机只新跑上述Release套件，不将旧ASan、Windows、实际十七组、真实模型或历史全量比较说成当前整合树的新执行。
 
 本轮dsh协调器与窄范围编码者的整合预检不计正式轮次。独立只读审核者针对冻结树`9ef6bd6699a105434c4be157cad59ef21e7a14d7`完成正式R1，PASS且零阻塞；上限两轮，未用R2或启动恢复。报告为当前检出`build/20261027-migration-merge/formal-r1-report.md`，SHA-256为`43d51932500243e75cea2ccba057304a903b956f55836b62fe747c547def97bd`；核对实际源码、接口、原始证据和文档，编码者与审核者均inactive，协调headless已退出。九项总审核通过，见本轮`audit-nine-checks.json`。审核后仅由总审核机械填入上述已核实结论，371项源码输入保持冻结，不宣称新增dsh轮次或新测试。新整合head仍须单独通过CI；PR #95合入后按0034-R7归档监控通道并保留入口，归档回执在本轮交付材料中记录。
+
+
+### 0036 R3 Issue #78/#79：实际分配观测（2026-10-28）
+
+本阶段落实既有R3-AC1/AC2及决策0003，补强验收依据，不新增产品行为或修改Guest分配器。此前非法头部测试读取`yan_arena_used_bytes`，该字段在probe成功且分配完成后才填写，提前发生的分配可能仍显示零；预算测试单独按公式求和，依赖另一项测试证明公式等于实测。历史VERIFY保留其当时范围，本次改为直接观测执行过程。
+
+独立测试模块`tests/arena_trace.c/.h`在默认RV32终端ELF的`yan_arena_alloc`入口记录`ra`、arena指针和请求字节，在返回位置读取真实返回值及arena游标，累计调用、成功、失败和包含对齐的高水位。`terminal_runtime_driver.c`通过可选`--trace-arena`接入，未请求时保留原测试行为；这是测试接口，不是新的Guest ABI。缺符号、读取失败或未完成调用均明确报观测失败，不猜零值。该证明限定于已核对的`-O2`、无LTO、非递归函数调用形状；入口因中断被重复采样时不重复计数，不承诺检测任意递归、内联或尾调用。初稿中关于嵌套入口的过度表述已在正式审核前修正，原稿留作私有历史。
+
+`arena_measure.py`共享实际执行入口。`arena_accounting`与`arena_budget`各自在自己的工作目录构建Host驱动、创建镜像并运行同一份生产终端，不依赖另一项CTest留下的报告或顺序。预算采用本次观测的4095高水位与独立ELF32加载段解码；分配公式仅保留为一致性校验。原来的错误码、无prompt、坏镜像字节不变等断言保持。新原生控制覆盖观测器状态，纯Python控制覆盖32MiB边界、传入测量值与截断头；二者标为支持/门禁，不能单独冒充整个AC。4095原有七表/十一表边界反例改为调用同一实际判定函数，判据保持。
+
+R1冻结树`9158a1c6face53c1b5e6a90d0520b61bba90b1af`的同一376项非Markdown输入得到以下实测用量，每次正常启动均观察到11次成功分配、零失败；非法version、D、N三种输入均在错误退出前保持零调用、零成功、零高水位，镜像不变。下表保留修复R1阻塞项之前的验证范围。
+
+| N | 实测arena字节（含对齐） |
+| --- | --- |
+| 63 | 15,518 |
+| 1023 | 250,718 |
+| 2047 | 501,598 |
+| 4095 | 1,003,358 |
+
+预算所用生产ELF加载段为1,841,380字节，实测4095 arena为1,003,358字节，合计2,844,738字节，小于33,554,432字节；实际arena终点也在0x82000000以内，三处context静态断言仍随构建通过。
+
+| R1冻结树验证 | 结果与范围 |
+| --- | --- |
+| Linux Release完整默认套件 | 154/154，314.65s，零失败/跳过；逐名匹配注册与完整LastTest |
+| Windows Debug完整默认套件 | 83/83，145.86s，零失败/跳过；逐名匹配 |
+| ASan/UBSan定向 | 2/2，0.18s；实际运行带sanitizer的观测器六个原生用例，另执行三个纯Python控制方法；未运行完整ASan回归 |
+| 统一实际变异 | 17/17，550.70s；指定owner/断言、零存活及零harness错误，完整footer另核对 |
+| console变异门禁 | 1/1，132.26s；与实际十七组分开记录 |
+
+默认回归命令为`cmake --build BUILD --config Release --parallel 3`和`ctest --test-dir BUILD -C Release --no-tests=error --output-on-failure -j3 -E '_mutation$'`；Windows用Debug配置。实际变异另配`YAN_ENABLE_MUTATION_TESTS=ON`并运行`ctest -R '_mutation$'`，随后单独运行`guest_console_mutation_gate`。Linux TOOLS/SEMANTIC开启；各配置、构建、注册与执行步骤前后核对冻结输入。当前基线为main `4021361`，不包含待合入PR #96新增的符号测试，不能把两阶段计数混用。完整证据在`E:/YanOS/build/20261028-arena-evidence/final/`的各`*-execution.json`、注册、原始CTest/LastTest及`*-root-verified.json`。
+
+总审核独立重放九条真实执行命令，并重新编译三个实际Guest目标：健康生产和显式输入夹具通过；提前成功分配4096字节的候选在三种坏头上均显示`calls=1 successes=1 highwater=4096 legacy_snapshot=0`，被指定观测断言拒绝；仅把最终Guest字段改零的候选仍测得1,003,358字节，通过预算验证；去掉分配函数符号的候选明确报harness错误，不能算零分配通过。候选编译成功、实际符号/反汇编与加载段已核对。该九命令证明完成于下述私有编译路径补齐之前，相关观测器、Guest和声明输入不受该补齐影响，没有宣称再跑一遍；它也不是统一十七组的替代。证据为本阶段`root-proof-verified.json`与`root-proof-final/`，原始dsh证明及显式输入树保留在工作区`build/20261028-arena-evidence/raw/detection-proof/`。
+
+集成时首次完整Release为153/154：`guest_note_blocks_faults`复制Host驱动到私有目录后缺少`arena_trace.h`搜索路径，编译失败。原dsh编码会话只为该私有编译命令补`-I tests`，定向43项通过后再执行上述最终回归与实际变异。修前日志、原始输入与修后单文件差异分别保留，编译失败不计缺陷检测。总审核另保留了WSL正则参数转发导致测试未执行的诊断，以及首次要求整个ELF哈希相同的过严检查；后者的差异仅为非加载字符串表中的GNU临时对象名，重新核对加载段完全一致并分别记录产物身份。这些是验证工具诊断，均未冒充产品失败或候选检出。
+
+独立只读dsh正式R1提出B1：共享编译清单新增的观测模块不在历史固定提交中，导致完整R8对比入口在构建前拒绝缺文件；总审核同时提出F1：两项arena入口未先校验本地声明输入，缺源码可被旧ELF掩盖，或被缺编译器的77跳过。R1报告SHA-256为`05a4d098b8c40682ad716f1e113cd157a1376a0c56fa44c54a89aa096d4cd845`，实际复现分别记录于本阶段`formal-r1-report.md`、`chief-r1-input-order/`及`chief-r1-missing-production/`；没有宣称R1整体通过。
+
+原dsh编码会话已集中修复这两项：共享入口按实际声明文件及显式Guest/mkfs路径先检查本地缺失，只有本地齐全时才允许因外部编译器缺失返回77；历史对比使用一份独立Host清单，同时用于历史成员校验和实际编译，保留固定ref、数据oracle与case定义。支持测试新增真实CLI路径优先级控制，历史清单门禁检查明确排除后来增加的测试模块。修后验证正在进行，同一独立审核会话的R2及总审核尚待完成。README、开发流程、规格索引、0040与决策记录保持其原范围；0036整体仍为Approved。本阶段尚未提交或发布，没有新的远端CI、完整ASan或真实模型验收。
+
+
+#### R1修复后的最终验证（2026-10-28）
+
+F1复核使用真实CLI：缺声明生产文件`os/yanfs.c`而实际Guest/mkfs及编译器齐全时，两入口均先明确失败；缺source、Guest或mkfs并缺编译器时也不返回77；仅外部编译器缺失时才为77。总审核十条命令中的八条本地缺失拒绝、两条外部依赖跳过均按预期返回，记录在`r2/chief-blocker-recheck/verified.json`。新增支持控制共六个Python方法：原有三个预算边界方法及三个CLI输入方法；其存根仅证明路径存在性和优先级，不冒充真实Guest执行。
+
+修后首次Windows完整执行为82/83，失败仅在新控制把`os/yanfs.c`写死为POSIX路径，实际CLI已正确报告Windows本地缺失。原dsh会话只将该断言改为按Path生成相对路径，保留目录与文件名身份、缺失诊断、非0/非77和未创建work的断言；生产诊断及行为不变。此后对最终同一376项输入重新配置、构建、注册和验证：
+
+| 最终验证 | 结果与范围 |
+| --- | --- |
+| Linux Release完整默认套件 | 154/154，243.76s，零失败/跳过 |
+| Windows Debug完整默认套件 | 83/83，128.06s，零失败/跳过 |
+| ASan/UBSan定向 | 2/2，2.61s；六个带sanitizer原生观测用例及六个纯Python方法，未运行完整ASan |
+
+最终注册、原始执行和完整LastTest逐名匹配，四档实测及预算保持前述值。证据为本阶段`portable-final/`的`*-execution.json`、`*-registration.json`、原始日志及`*-root-verified.json`，输入哈希前后保持。R1修复后还以联合CTest执行17组实际变异及console门禁：18/18通过、597.89s，零失败/跳过，各实际组完整footer及指定owner/断言另核对；console门禁单项执行303.61s。这是联合执行耗时，不将它称作17组单独耗时。
+
+B1同时完成完整历史入口复验：固定`4c5e0ab1a036e845123e304333d363478243c146`与`2b82d17065bbd5b83e2d5e2f201f37f5308dedf5`，33对用例、66次产品执行全部通过（24个终端、6个坏镜像、3个MCP），总耗时2410.21s。两个历史清单均不要求后来新增的观测模块，实际历史Host驱动已编译并执行。总审核逐项核对66次执行的capture/status/镜像或wire身份、五个构建产物SHA-256和完整矩阵；1023/2047历史v2 MCP按原规格比较CORRUPT错误保持，不作为当前主线大容量成功证据。完整记录与原始材料在`r2/parity-execution.json`、`parity-root-verified.json`、`parity-cases-root-verified.json`及工作区`build/20261028-arena-evidence/root-r2-parity/`。
+
+实际变异联合执行和完整历史入口均在最后这条路径断言修补之前完成；之后唯一非Markdown差异是该支持测试的一行路径预期，观测器、生产/Guest、实际变异runner与历史入口代码保持。没有宣称第三次运行实际变异或再次运行完整历史入口，最终默认与定向复验单列上述范围；单文件差异见`portable-final/source-delta.json`。此前的失败记录全部保留，没有把编译/工具错误或平台断言误计为产品缺陷检出。
+
+同一独立只读dsh会话的正式R2与总审核待完成；R2仅核对R1的F1/B1修复、上述控制及文档/证据对齐。本阶段仍未提交或发布，没有新的远端CI或真实模型结果。
+
+
+#### 正式审核收口（2026-10-28）
+
+原独立只读dsh在冻结树`ef1f61b13665ad20a50325f938fc3addfc092f92`完成正式R2，仅复核R1的F1/B1及相应控制、实现与文档，PASS且零阻塞；报告`formal-r2-report.md`的SHA-256为`9783e8a3581bf9c11152695926d62175a748ac58ff3c35ec895ff330a0737b15`。两轮正式审核已用完，未新增审核会话或使用启动/传输恢复。原编码与独立审核会话均inactive，headless已退出；不自动进入第三轮。审核期间17条变更路径与376项非Markdown输入保持冻结。
+
+总审核按CONTRIBUTING提交前九项清单核对文档自洽、历史原文、STATUS三处及旧段落唯一追加、监控通道、实测计数、门禁判据、本地缺失与77边界、提交切分及文件权限；逐项证据见本阶段`audit-code-nine-checks.json`与`audit-docs-nine-checks.json`。代码/测试与文档相邻分开提交，本地提交哈希及阅读入口见`review-ready.md`；本段是上述待审快照的后续记录。R2后仅由总审核填入已核实结论，源码与测试没有再改，也不增加新的测试或审核声明。本阶段尚未推送、创建PR或运行新远端CI；合入意图验收和理解程度仍由所有者判断，0036整体Approved保持。

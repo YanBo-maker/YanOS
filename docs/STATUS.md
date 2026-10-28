@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-0036-R7迁移可靠性收口：附件末尾EOF探测的EINTR修复已随[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)以merge commit `203825a`合入main，保留原阶段提交；镜像符号链接入口的附件定位验收见[PR #95](https://github.com/YanBo-maker/YanOS/pull/95)。所有者已明确批准两项合入；整合核验、最新合入提交与CI入口随PR #95维护。既有接口、磁盘格式、来源身份、旁锁和失败清理契约保持，详见[0036 VERIFY](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)。
+0036-R3内存验收补强（[Issue #79](https://github.com/YanBo-maker/YanOS/issues/79)、[Issue #78](https://github.com/YanBo-maker/YanOS/issues/78)）：已实现执行侧分配观测，坏头检查不再依赖最后才填写的Guest统计字段；预算测试独立运行生产终端，采用实测用量。R1发现的本地输入检查和历史对比清单两项问题已修复，修后本机验证完成；同一独立只读dsh复核通过；本地交付与提交入口见本阶段材料，尚未发布。行为与成功标准沿用[0036-R3](specs/0036-yanfs-multi-block-directory.md#0036-r3内存按实际容量分配)，生产代码、公开接口和磁盘格式保持。
 
-[0040](specs/0040-4095-file-performance.md)的4095文件性能验收已获所有者认可，已随[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`）。0035、0036整体保持Approved，0040为Implemented；各阶段验证范围分别记录，不将一次PR结果当作另一整合树的验证。现有dsh双库接入见[试用说明](dsh-mcp-quickstart.md)。
+本阶段从main `4021361`独立开发。[PR #96](https://github.com/YanBo-maker/YanOS/pull/96)的迁移故障符号检查已另行完成发布与CI核验，合入状态见该PR；它未包含在本阶段基线中。0036整体状态仍为Approved，合入时的意图验收及理解程度由项目所有者判断。
 
 ## 已交付能力
 
@@ -58,7 +58,11 @@
 
 - 0040 4095性能门禁与局部优化已随[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`），阶段历史保留。[0040](specs/0040-4095-file-performance.md)
 
+- 0036 R3的执行侧内存验收与独立预算测量已本地实现，尚未合入；当前验证和审查状态见本页。[验收依据](specs/0036-yanfs-multi-block-directory.md#0036-r3内存按实际容量分配)
+
 ## 覆盖边界
+
+- 内存观测限定于默认RV32生产终端ELF的非递归、无LTO独立函数调用形状；内联、尾调用或其他编译形态未验证。观测条件缺失或不完整时明确失败，不把缺失统计当零分配；Guest整体32MiB预算保持。
 
 - 4095文件容量已支持，0040固定短文本夹具已完成本机性能验收；任意长正文或其他语料的耗时仍随内容增长。CI与合并状态见[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)，固定夹具的实测范围保持。
 

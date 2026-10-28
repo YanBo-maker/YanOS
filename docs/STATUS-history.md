@@ -869,3 +869,13 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 
 附件末尾探测的EINTR修复单独位于[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)，三项CI已核对通过，仍待合入；本轮直接基于main开发。0035、0036整体保持Approved，0040为Implemented。双库接入见[dsh试用说明](dsh-mcp-quickstart.md)。
 
+
+
+### 2026-10-28：开始0036-R3实际分配观测
+
+## 当前阶段
+
+0036-R7迁移可靠性收口：附件末尾EOF探测的EINTR修复已随[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)以merge commit `203825a`合入main，保留原阶段提交；镜像符号链接入口的附件定位验收见[PR #95](https://github.com/YanBo-maker/YanOS/pull/95)。所有者已明确批准两项合入；整合核验、最新合入提交与CI入口随PR #95维护。既有接口、磁盘格式、来源身份、旁锁和失败清理契约保持，详见[0036 VERIFY](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)。
+
+[0040](specs/0040-4095-file-performance.md)的4095文件性能验收已获所有者认可，已随[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`）。0035、0036整体保持Approved，0040为Implemented；各阶段验证范围分别记录，不将一次PR结果当作另一整合树的验证。现有dsh双库接入见[试用说明](dsh-mcp-quickstart.md)。
+
