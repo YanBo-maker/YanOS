@@ -688,3 +688,13 @@ R3分支继续保留`4072e3b`与`756a289`两条原提交，并整合该main；�
 
 
 整合冻结树`e2132c9235e5c6910b6a9fdc684ad28bad1c6c11`的原独立只读dsh核对PASS、零阻塞；本次整合用一轮，未启动新会话或重开原R3两轮结论，headless已退出。报告`integration/review-report.md`的SHA-256为`7905560acd7c594c12e232f2b40537e8d81e9421f913f42ef0a2d1af1d4caeb5`；九项总审核通过，见`integration/audit-nine-checks.json`。整合提交`9373450144d380e4b531018f42112daabf541fae`保留两个父阶段历史；此后仅总审核填入已核实结论，377项源码不变，不宣称新增测试或审核轮次。当前发布已获所有者授权，发布及新CI状态随Issue #78/#79关联PR维护；本地未发布快照保留。
+
+
+### 2026-10-28：PR #97远端验收与所有者合入授权
+
+[PR #97](https://github.com/YanBo-maker/YanOS/pull/97)的head `bfb91a5b08244e189475fa694fe4c21812be4dbf`已完成[Actions 40671188798](https://github.com/YanBo-maker/YanOS/actions/runs/40671188798)：Release155/155（765.85s）、ASan/UBSan配置完整默认155/155（1422.84s）、Windows83/83（328.75s），零失败/跳过；Linux追加MCP各4/4。实际临时检出`315672e87011befd323a1420d69fb1b57d8cace9`的父提交、完整tree及377项源码Git blob已核实，注册与完整LastTest逐名一致；三份ZIP摘要、API身份和CRC通过，四档arena实测、坏头零调用、独立预算及原迁移/符号专项均已核对。两个Linux各27条性能原始记录通过独立oracle复核，4095九项仍全部不超过5000万步。生产Guest ELF/yan_mkfs字节不在上传范围，相关身份只由同次manifest记录；没有声称下载后独立重哈希这些二进制，也没有新增真实模型或实际变异CI结果。原始材料见本阶段`ci-40671188798/`及PR工件链接。
+
+所有者已明确认可本轮内存验收结果，并授权总审核按merge commit合入PR #97、保留阶段历史。此前“尚未发布/尚未合入”等VERIFY陈述保留为具名执行快照；STATUS当前阶段与能力条目改为直接引用PR实时状态，避免合入后仍留下旧否定状态。只同步文档事实，不改行为、接口、数据结构或不变量；0036整体Approved保持，学习理解程度未由Agent代判。本文档同步提交的源码与已验收head相同，377项非Markdown输入保持；其精确head的新CI另随同一PR核验，不把旧head结果冒充新head运行。
+
+
+本次合入状态事实核对复用原独立只读dsh会话，一次核对PASS、零阻塞，报告`merge97/review-report.md`的SHA-256为`66f8c00934d83c53189fa84cf86c1006eee98244ebc12b4204428c52ba9ce680`；未启动新会话或恢复重试，headless已退出。总审核随后仅填入本结论，377项源码不变；旧实现/整合审核未重开。提交前九项总审核及两份文档原文→拟文见本阶段`merge97/audit-nine-checks.json`与`mechanical-changes.json`。精确文档head的CI、合入提交及监控归档回执随同一PR和本阶段交付材料维护。

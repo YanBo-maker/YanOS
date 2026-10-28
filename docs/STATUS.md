@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-0036-R3内存验收补强（[Issue #79](https://github.com/YanBo-maker/YanOS/issues/79)、[Issue #78](https://github.com/YanBo-maker/YanOS/issues/78)）：已实现执行侧分配观测，坏头检查不再依赖最后才填写的Guest统计字段；预算测试独立运行生产终端，采用实测用量。R1发现的本地输入检查和历史对比清单两项问题已修复，修后本机验证完成；同一独立只读dsh复核通过；本地交付与提交入口见本阶段材料，尚未发布。行为与成功标准沿用[0036-R3](specs/0036-yanfs-multi-block-directory.md#0036-r3内存按实际容量分配)，生产代码、公开接口和磁盘格式保持。
+0036-R3内存验收补强（[Issue #79](https://github.com/YanBo-maker/YanOS/issues/79)、[Issue #78](https://github.com/YanBo-maker/YanOS/issues/78)）：已实现执行侧分配观测，坏头检查不再依赖最后才填写的Guest统计字段；预算测试独立运行生产终端，采用实测用量。R1发现的本地输入检查和历史对比清单两项问题已修复，修后本机验证完成；同一独立只读dsh复核通过，已发布为[PR #97](https://github.com/YanBo-maker/YanOS/pull/97)。所有者已认可本轮验收结果并授权以merge commit合入；实际合入与最新CI状态见该PR。行为与成功标准沿用[0036-R3](specs/0036-yanfs-multi-block-directory.md#0036-r3内存按实际容量分配)，生产代码、公开接口和磁盘格式保持。
 
-本阶段从main `4021361`独立开发，现已整合获所有者批准合入的[PR #96](https://github.com/YanBo-maker/YanOS/pull/96)（main `9534a9a`）；原R3本地证据与新整合验证分别记录；新整合本机验证和独立核对完成；本轮发布及最新CI见[Issue #79](https://github.com/YanBo-maker/YanOS/issues/79)关联PR。0036整体状态仍为Approved，合入时的意图验收及理解程度由项目所有者判断。
+本阶段从main `4021361`独立开发，现已整合获所有者批准合入的[PR #96](https://github.com/YanBo-maker/YanOS/pull/96)（main `9534a9a`）；原R3本地证据与新整合验证分别记录；新整合本机验证和独立核对完成；各提交的远端验证分别记录在[PR #97](https://github.com/YanBo-maker/YanOS/pull/97)。0036整体状态仍为Approved；本轮意图已获所有者认可，学习理解程度仍由项目所有者判断。
 
 ## 已交付能力
 
@@ -58,7 +58,7 @@
 
 - 0040 4095性能门禁与局部优化已随[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`），阶段历史保留。[0040](specs/0040-4095-file-performance.md)
 
-- 0036 R3的执行侧内存验收与独立预算测量已本地实现，尚未合入；当前验证和审查状态见本页。[验收依据](specs/0036-yanfs-multi-block-directory.md#0036-r3内存按实际容量分配)
+- 0036 R3已提供执行侧内存验收与独立预算测量；发布、合入和最新检查见[PR #97](https://github.com/YanBo-maker/YanOS/pull/97)。[验收依据](specs/0036-yanfs-multi-block-directory.md#0036-r3内存按实际容量分配)
 
 - 0036 R7提供Linux故障符号核对入口，读取实际二进制与链接选项；故障运行逻辑和数据oracle保持。[Issue #84](https://github.com/YanBo-maker/YanOS/issues/84)，[检查入口](../tests/run_yanfs_migrate_symbols.py)
 
