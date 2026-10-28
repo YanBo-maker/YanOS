@@ -685,3 +685,6 @@ R3分支继续保留`4072e3b`与`756a289`两条原提交，并整合该main；�
 对新整合树377项非Markdown输入重新配置、构建并运行完整Linux Release默认套件：155/155、232.31s，零失败/跳过；注册与完整LastTest逐名一致，四档arena测量与预算保持，符号检查11项及原迁移74/EOF22/链接3例61项均随本次套件运行。命令为`cmake --build BUILD --config Release --parallel 3`及`ctest --test-dir BUILD -C Release --no-tests=error --output-on-failure -j3 -E '_mutation$'`，TOOLS/SEMANTIC开启。原始配置、构建、注册、CTest与LastTest及输入前后哈希在`integration/release-*`；本次没有重跑本机完整ASan、Windows、实际17组或完整历史矩阵，原R3结果保持各自快照范围，新远端三项CI待发布后执行。
 
 这是新main整合的窄范围核对，不重开已关闭的R3 F1/B1审核，也不启动第三轮缺陷修复。复用原独立只读dsh会话，预设本次整合最多两轮、只读且不新增会话；结束退出。源码/文档联合冻结与报告入口见`integration/review-freeze.json`，提交前九项总审核及实际结论在本阶段交付材料记录。
+
+
+整合冻结树`e2132c9235e5c6910b6a9fdc684ad28bad1c6c11`的原独立只读dsh核对PASS、零阻塞；本次整合用一轮，未启动新会话或重开原R3两轮结论，headless已退出。报告`integration/review-report.md`的SHA-256为`7905560acd7c594c12e232f2b40537e8d81e9421f913f42ef0a2d1af1d4caeb5`；九项总审核通过，见`integration/audit-nine-checks.json`。整合提交`9373450144d380e4b531018f42112daabf541fae`保留两个父阶段历史；此后仅总审核填入已核实结论，377项源码不变，不宣称新增测试或审核轮次。当前发布已获所有者授权，发布及新CI状态随Issue #78/#79关联PR维护；本地未发布快照保留。

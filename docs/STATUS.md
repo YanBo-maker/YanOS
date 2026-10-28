@@ -4,7 +4,7 @@
 
 0036-R3内存验收补强（[Issue #79](https://github.com/YanBo-maker/YanOS/issues/79)、[Issue #78](https://github.com/YanBo-maker/YanOS/issues/78)）：已实现执行侧分配观测，坏头检查不再依赖最后才填写的Guest统计字段；预算测试独立运行生产终端，采用实测用量。R1发现的本地输入检查和历史对比清单两项问题已修复，修后本机验证完成；同一独立只读dsh复核通过；本地交付与提交入口见本阶段材料，尚未发布。行为与成功标准沿用[0036-R3](specs/0036-yanfs-multi-block-directory.md#0036-r3内存按实际容量分配)，生产代码、公开接口和磁盘格式保持。
 
-本阶段从main `4021361`独立开发，现已整合获所有者批准合入的[PR #96](https://github.com/YanBo-maker/YanOS/pull/96)（main `9534a9a`）；原R3本地证据与新整合验证分别记录；新整合本机验证完成，发布与新CI待推进。0036整体状态仍为Approved，合入时的意图验收及理解程度由项目所有者判断。
+本阶段从main `4021361`独立开发，现已整合获所有者批准合入的[PR #96](https://github.com/YanBo-maker/YanOS/pull/96)（main `9534a9a`）；原R3本地证据与新整合验证分别记录；新整合本机验证和独立核对完成；本轮发布及最新CI见[Issue #79](https://github.com/YanBo-maker/YanOS/issues/79)关联PR。0036整体状态仍为Approved，合入时的意图验收及理解程度由项目所有者判断。
 
 ## 已交付能力
 
