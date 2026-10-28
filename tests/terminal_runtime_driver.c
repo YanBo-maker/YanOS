@@ -38,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "arena_trace.h"
 #include "host_block.h"
 #include "host_file.h"
 #include "yan/cpu.h"
@@ -182,6 +183,7 @@ typedef struct {
     uint32_t task0_observed_stack_bytes;
     uint32_t tohost_value;
     bool tohost_seen;
+    YanArenaTrace arena_trace;
 } Drive;
 
 /* ------------------------------------------------------------- UART backend */
@@ -630,7 +632,8 @@ static void usage(void)
             "  fixture:    --scenario ready|predicate|blocked|wake|reject\n"
             "  production: --disk-image FILE --stdin FILE"
             " [--fault none|io|protocol] [--corrupt-response N]"
-            " [--tx-fault-at N] [--baseline FILE] [--expect-tohost HEX]\n");
+            " [--tx-fault-at N] [--baseline FILE] [--expect-tohost HEX]"
+            " [--trace-arena]\n");
 }
 
 int main(int argc, char **argv)
@@ -645,6 +648,7 @@ int main(int argc, char **argv)
     uint32_t expect_tohost = 0;
     int have_expect_tohost = 0;
     int mode = 0;
+    int trace_arena = 0;
 
     for (int i = 1; i < argc; ++i) {
         uint64_t value = 0;
@@ -672,6 +676,8 @@ int main(int argc, char **argv)
         } else if (strcmp(argv[i], "--max-steps") == 0 && i + 1 < argc) {
             if (!number(argv[++i], &value)) return EXIT_USAGE;
             max_steps = value;
+        } else if (strcmp(argv[i], "--trace-arena") == 0) {
+            trace_arena = 1;
         } else if (strcmp(argv[i], "--corrupt-response") == 0 && i + 1 < argc) {
             if (!number(argv[++i], &value)) return EXIT_USAGE;
             corrupt_response = value;
@@ -692,6 +698,7 @@ int main(int argc, char **argv)
     Drive drive;
     memset(&drive, 0, sizeof drive);
     drive.mode = mode;
+    drive.arena_trace.requested = trace_arena != 0;
     drive.backend.tx_fault_at = (uint32_t)tx_fault_at;
     drive.corrupt_response = (uint32_t)corrupt_response;
     if (strcmp(fault_name, "io") == 0) drive.fault = FAULT_IO;
@@ -828,6 +835,21 @@ int main(int argc, char **argv)
                               &drive.arena_addr) == YAN_OK) {
         drive.arena_known = 1;
     }
+    uint32_t arena_alloc_addr = 0, arena_start_addr = 0;
+    const int arena_alloc_known =
+        yan_image_find_symbol(image, image_size, "yan_arena_alloc",
+                              &arena_alloc_addr) == YAN_OK;
+    const int arena_start_known =
+        yan_image_find_symbol(image, image_size, "__yan_arena_start",
+                              &arena_start_addr) == YAN_OK;
+    const int arena_trace_available = arena_alloc_known && arena_start_known;
+    if (drive.arena_trace.requested && !arena_trace_available) {
+        HARNESS_FAIL("--trace-arena needs the yan_arena_alloc and"
+                     " __yan_arena_start symbols");
+    }
+    yan_arena_trace_configure(&drive.arena_trace, drive.arena_trace.requested,
+                              arena_trace_available, arena_alloc_addr,
+                              arena_start_addr);
     /* A symbol a mode needs is required, never guessed or bypassed. */
     if (!drive.tohost_known) {
         HARNESS_FAIL("the image has no tohost symbol");
@@ -887,6 +909,7 @@ int main(int argc, char **argv)
             goto done;
         }
 
+        yan_arena_trace_step(&drive.arena_trace, &machine.cpu, &machine.bus);
         const bool perf_rx_before = machine.uart.rx_available;
         const YanStatus step_status = yan_machine_step(&machine);
         if (perf_rx_before && !machine.uart.rx_available &&
@@ -1047,6 +1070,15 @@ int main(int argc, char **argv)
     }
 
 done:
+    yan_arena_trace_finish(&drive.arena_trace);
+    if (drive.arena_trace.requested &&
+        (strcmp(yan_arena_trace_state(&drive.arena_trace), "ok") != 0) &&
+        result != EXIT_HOST_ERROR) {
+        fprintf(stderr, ":HARNESS-ERROR: [drive] arena trace is %s\n",
+                yan_arena_trace_state(&drive.arena_trace));
+        result = EXIT_HOST_ERROR;
+        verdict = "harness";
+    }
     if (status_file != NULL) {
         fprintf(status_file, "perf_total=%" PRIu64 "\n", drive.backend.perf_step + 1u);
         for (unsigned i = 0; i < drive.backend.perf_input_count; ++i)
@@ -1082,6 +1114,14 @@ done:
                           ? bus_word(&machine.bus, drive.arena_addr)
                           : 0u,
                       (int)drive.arena_known);
+        (void)fprintf(status_file,
+                      "arena_trace_state=%s\narena_trace_calls=%" PRIu64
+                      "\narena_trace_successes=%" PRIu64
+                      "\narena_trace_failures=%" PRIu64
+                      "\narena_trace_highwater=%" PRIu32 "\n",
+                      yan_arena_trace_state(&drive.arena_trace),
+                      drive.arena_trace.calls, drive.arena_trace.successes,
+                      drive.arena_trace.failures, drive.arena_trace.highwater);
         if (fflush(status_file) != 0 || ferror(status_file)) {
             result = EXIT_HOST_ERROR;
             verdict = "harness";

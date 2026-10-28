@@ -619,6 +619,17 @@ if(BUILD_TESTING)
     add_test(NAME arena COMMAND test_arena)
     set_tests_properties(arena PROPERTIES TIMEOUT 30 LABELS "0036-R3-AC1")
 
+    # Issue 78/79 support: the Host observer's entry/return state machine.
+    # This is a support control, not a claim that the whole AC is covered here.
+    add_executable(test_arena_trace tests/test_arena_trace.c tests/arena_trace.c)
+    target_include_directories(test_arena_trace PRIVATE
+                               "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(test_arena_trace PRIVATE yan_machine unity::framework)
+    target_compile_options(test_arena_trace PRIVATE ${YAN_WARNINGS})
+    add_test(NAME arena_trace COMMAND test_arena_trace)
+    set_tests_properties(arena_trace PROPERTIES TIMEOUT 30
+                         LABELS "issue78;issue79;support")
+
     add_executable(test_sort_index tests/test_sort_index.c)
     target_include_directories(test_sort_index PRIVATE os)
     target_compile_options(test_sort_index PRIVATE ${YAN_WARNINGS})
@@ -907,6 +918,14 @@ if(BUILD_TESTING)
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_yanfs_4095_performance.py")
         set_tests_properties(yanfs_4095_performance_harness PROPERTIES TIMEOUT 120
             LABELS "0040-R4-AC1;0040-R4-AC2;0040-R5-AC3")
+        # Issue 78/79 support: synthetic boundary-decision controls only. The
+        # real Guest measurement and detection proof are separate.
+        add_test(NAME arena_budget_boundary_harness
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_arena_budget_boundary.py")
+        set_tests_properties(arena_budget_boundary_harness PROPERTIES
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1" TIMEOUT 30
+            LABELS "issue78;issue79;harness")
         # Independent Unicode/regex reference checks complete rows, scores,
         # snippets and summaries. The warm index case also bounds disk reads;
         # it cannot pass by silently choosing the linear backend.
@@ -1257,8 +1276,13 @@ if(BUILD_TESTING)
                     add_test(NAME arena_budget
                         COMMAND "${Python3_EXECUTABLE}" -B
                                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_arena_budget.py"
-                                --guest "${YAN_TERMINAL_ELF}")
-                    set_tests_properties(arena_budget PROPERTIES TIMEOUT 60
+                                --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                                --work "${CMAKE_BINARY_DIR}/arena-budget"
+                                --mkfs "$<TARGET_FILE:yan_mkfs>"
+                                --guest "${YAN_TERMINAL_ELF}"
+                                --cc "${CMAKE_C_COMPILER}")
+                    set_tests_properties(arena_budget PROPERTIES
+                                         SKIP_RETURN_CODE 77 TIMEOUT 900
                                          LABELS "0036-R3-AC2")
                     add_test(NAME ram_default
                         COMMAND "${Python3_EXECUTABLE}" -B
