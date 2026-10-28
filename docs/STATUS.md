@@ -4,7 +4,7 @@
 
 0036-R3内存验收补强（[Issue #79](https://github.com/YanBo-maker/YanOS/issues/79)、[Issue #78](https://github.com/YanBo-maker/YanOS/issues/78)）：已实现执行侧分配观测，坏头检查不再依赖最后才填写的Guest统计字段；预算测试独立运行生产终端，采用实测用量。R1发现的本地输入检查和历史对比清单两项问题已修复，修后本机验证完成；同一独立只读dsh复核通过；本地交付与提交入口见本阶段材料，尚未发布。行为与成功标准沿用[0036-R3](specs/0036-yanfs-multi-block-directory.md#0036-r3内存按实际容量分配)，生产代码、公开接口和磁盘格式保持。
 
-本阶段从main `4021361`独立开发。[PR #96](https://github.com/YanBo-maker/YanOS/pull/96)的迁移故障符号检查已另行完成发布与CI核验，合入状态见该PR；它未包含在本阶段基线中。0036整体状态仍为Approved，合入时的意图验收及理解程度由项目所有者判断。
+本阶段从main `4021361`独立开发，现已整合获所有者批准合入的[PR #96](https://github.com/YanBo-maker/YanOS/pull/96)（main `9534a9a`）；原R3本地证据与新整合验证分别记录；新整合本机验证完成，发布与新CI待推进。0036整体状态仍为Approved，合入时的意图验收及理解程度由项目所有者判断。
 
 ## 已交付能力
 
@@ -60,7 +60,11 @@
 
 - 0036 R3的执行侧内存验收与独立预算测量已本地实现，尚未合入；当前验证和审查状态见本页。[验收依据](specs/0036-yanfs-multi-block-directory.md#0036-r3内存按实际容量分配)
 
+- 0036 R7提供Linux故障符号核对入口，读取实际二进制与链接选项；故障运行逻辑和数据oracle保持。[Issue #84](https://github.com/YanBo-maker/YanOS/issues/84)，[检查入口](../tests/run_yanfs_migrate_symbols.py)
+
 ## 覆盖边界
+
+- 迁移故障符号检查只核对当前链接声明、包装定义与正常CLI动态导入的对应关系，不能证明每个调用点均被拦截；实际注入标记和数据oracle仍负责行为验收。自定义编译选项改变调用符号时需重新核对覆盖，映射不匹配不表示产品不能运行。
 
 - 内存观测限定于默认RV32生产终端ELF的非递归、无LTO独立函数调用形状；内联、尾调用或其他编译形态未验证。观测条件缺失或不完整时明确失败，不把缺失统计当零分配；Guest整体32MiB预算保持。
 

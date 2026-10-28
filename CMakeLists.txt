@@ -491,6 +491,15 @@ if(BUILD_TESTING)
                 -Wl,--wrap=pread -Wl,--wrap=read -Wl,--wrap=write
                 -Wl,--wrap=fsync -Wl,--wrap=close -Wl,--wrap=mkdirat
                 -Wl,--wrap=unlinkat -Wl,--wrap=readdir)
+            add_test(NAME yanfs_migrate_symbols
+                COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_yanfs_migrate_symbols.py"
+                    --nm "${CMAKE_NM}"
+                    --migrate $<TARGET_FILE:yan_migrate>
+                    --fault $<TARGET_FILE:yanfs_migrate_fault>
+                    --link-options "$<TARGET_PROPERTY:yanfs_migrate_fault,LINK_OPTIONS>")
+            set_tests_properties(yanfs_migrate_symbols PROPERTIES TIMEOUT 60
+                LABELS "issue84;0036-R7-symbol-coverage")
             add_executable(yanfs_migrate_terms_probe tests/yanfs_migrate_terms_probe.c)
             target_link_libraries(yanfs_migrate_terms_probe PRIVATE
                                   yan_semantic_posix yan_search_terms)

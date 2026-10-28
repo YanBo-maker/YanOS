@@ -587,6 +587,29 @@ dsh协调器使用一名编码者与一名独立只读审查者，最多三个�
 本轮dsh协调器与窄范围编码者的整合预检不计正式轮次。独立只读审核者针对冻结树`9ef6bd6699a105434c4be157cad59ef21e7a14d7`完成正式R1，PASS且零阻塞；上限两轮，未用R2或启动恢复。报告为当前检出`build/20261027-migration-merge/formal-r1-report.md`，SHA-256为`43d51932500243e75cea2ccba057304a903b956f55836b62fe747c547def97bd`；核对实际源码、接口、原始证据和文档，编码者与审核者均inactive，协调headless已退出。九项总审核通过，见本轮`audit-nine-checks.json`。审核后仅由总审核机械填入上述已核实结论，371项源码输入保持冻结，不宣称新增dsh轮次或新测试。新整合head仍须单独通过CI；PR #95合入后按0034-R7归档监控通道并保留入口，归档回执在本轮交付材料中记录。
 
 
+### R7 Issue #84：故障测试的系统调用符号覆盖（2026-10-27）
+
+本轮落实既有[Issue #84](https://github.com/YanBo-maker/YanOS/issues/84)的测试支持边界，不新增产品语义、平台、公开接口或磁盘格式。新增独立`tests/run_yanfs_migrate_symbols.py`；CMake只注册Linux默认测试`yanfs_migrate_symbols`，从故障目标实际`LINK_OPTIONS`传入包装声明，正常CLI和故障二进制分别由目标路径传入，工具取`CMAKE_NM`。包装名不在Python中重复维护；标签为`issue84;0036-R7-symbol-coverage`，超时60秒，不把静态支持检查标为完整AC1/AC2验收，没有SKIP_RETURN_CODE。故障驱动器只修正文首漏列readdir的链接示例及说明，`#define _XOPEN_SOURCE 700`之后的运行源码与父提交逐字节一致。
+
+当前GNU/Linux构建的十一项声明为`open/openat/pwrite/pread/read/write/fsync/close/mkdirat/unlinkat/readdir`。检查通过显式nm读取正常CLI动态未定义符号和故障二进制已定义`__wrap_*`，仅对有效ELF版本后缀去标记，比较声明、定义及导入名称。当前十一项全部对应，额外无关导入允许存在。声明/定义/生产导入不符返回1并打印具名MISMATCH；缺文件、无包装声明、空符号输出或工具失败返回2并打印ERROR，不以77或空结果伪装通过。
+
+这是声明符号的静态支持检查，不证明每个调用点均被拦截，也不覆盖直接系统调用、dlsym、内联或所有I/O。真实注入标记未命中硬失败、真实close一次后报告EIO、残留errno与真实目录失败的控制继续由原行为测试承担；原独立Python镜像/附件oracle不被符号检查替代。当前实际导入为readdir，所以没有增加readdir64包装。自定义编译选项改变调用形状时，检查报告当前故障包装/导入映射不覆盖该形状，不据此判定产品行为无效，不自动按64后缀改名或建立通用包装框架。
+
+修后Linux Release与Debug ASan/UBSan配置各自构建实际CLI和故障目标，符号CTest各1/1通过（0.05s与0.06s）；ASan配置含实际`__asan_init`。这些检查读取ELF符号，不等于执行迁移二进制的ASan完整回归。另从未修改的实际生产源码构建`-D_FILE_OFFSET_BITS=64`正常CLI，编译成功；实际导入变为open64/openat64/pread64/pwrite64/readdir64，当前检查器返回1并给出五项对应的missing-production-call。该结果说明故障包装映射边界，不是产品故障或编译失败检测；不计入实际变异组。
+
+总审核独立重放两个健康配置、真实FOB64候选与十项控制，核对当前检查器SHA-256 `63811cf3316015dfb543e7ed068c481e1d132bda09a16d65c4fbd5d0772c0c3f`、二进制摘要、实际nm输出、编译选项和返回码。缺正常CLI、故障文件、nm，以及nm非零/空输出、空包装声明、无包装定义均为ERROR；缺定义或漏声明为具名MISMATCH，畸形包装声明为ERROR。实际EOF/数据控制的行为保持。总审核随后从同一372项非Markdown输入重新配置、构建并运行完整Linux Release默认套件：153/153，CTest300.05s，零失败、零跳过，注册集合与完整LastTest逐名一致；原迁移74项、EOF22项、链接3例61项与新十一符号检查分别确认，4095性能门禁亦在该套件内通过。不沿用父阶段的ASan全量、Windows、实际十七组、真实模型或历史全量比较冒充新执行。
+
+证据位于`E:/YanOS/build/20261027-migration-symbols/`的`baseline-symbols-root-verified.json`、`source-scope-root-verified.json`、`frozen-source.json`、`targeted-root-verified.json`及`root-targeted-final/`。当前工作区`build/20261027-migration-symbols/`保留实际构建、nm、符号CTest、控制和候选的原始argv/退出状态/stdout/stderr；初始阶段与标签/措辞修前材料留在`phase1-initial-raw/`，小型临时编译探针只是诊断，不替代实际完整生产目标候选。独立只读dsh针对冻结树`946303b6bc7fe753bd7eca5ae6e0e3f4eadabfd2`完成正式R1，PASS且零阻塞；上限两轮，未用R2或启动恢复。报告为当前检出`build/20261027-migration-symbols/formal-r1-report.md`，SHA-256为`0a23f49a3604b093b88ad131e515c99534f6c9d7160c50c1d8bd7bd809383606`；编码者与审核者均inactive，协调headless已退出。总审核九项检查通过，证据见`audit-nine-checks.json`。审核后仅由总审核机械填入这些已核实结论，372项源码输入保持，未新增dsh轮次或测试结果。
+
+
+当前完整回归命令为`cmake --build BUILD --config Release --parallel 3`和`ctest --test-dir BUILD -C Release --no-tests=error --output-on-failure -j3 -E '_mutation$'`，TOOLS/SEMANTIC开启；每个配置/构建/注册/执行步骤前后核对同一372项输入。原始argv与退出状态在`integration-execution.json`，注册与完整输出在`integration-registration.json`、`integration-ctest.log`和`integration-LastTest.log`，总审核验在`full-release-root-verified.json`。这是当前完整Release结果，不是ASan完整执行或本次远端CI；本次本地提交以交付材料为准；尚未推送或创建PR。
+
+
+### 2026-10-27：Issue #84 发布授权
+
+所有者明确批准推送`codex/84-migration-symbols`、创建PR并运行远端CI；总审核据此执行发布。此前“尚未发布/未运行远端CI”保留为本地交付时的快照。此处仅同步授权事实，372项非Markdown输入和原独立dsh R1所审实现保持；没有新增行为或新的dsh审核结论。发布、精确head检查与原始工件入口随[Issue #84](https://github.com/YanBo-maker/YanOS/issues/84)关联PR维护，远端结果与上述本机实测分开记录。
+
+
 ### 0036 R3 Issue #78/#79：实际分配观测（2026-10-28）
 
 本阶段落实既有R3-AC1/AC2及决策0003，补强验收依据，不新增产品行为或修改Guest分配器。此前非法头部测试读取`yan_arena_used_bytes`，该字段在probe成功且分配完成后才填写，提前发生的分配可能仍显示零；预算测试单独按公式求和，依赖另一项测试证明公式等于实测。历史VERIFY保留其当时范围，本次改为直接观测执行过程。
@@ -651,3 +674,14 @@ B1同时完成完整历史入口复验：固定`4c5e0ab1a036e845123e304333d36347
 原独立只读dsh在冻结树`ef1f61b13665ad20a50325f938fc3addfc092f92`完成正式R2，仅复核R1的F1/B1及相应控制、实现与文档，PASS且零阻塞；报告`formal-r2-report.md`的SHA-256为`9783e8a3581bf9c11152695926d62175a748ac58ff3c35ec895ff330a0737b15`。两轮正式审核已用完，未新增审核会话或使用启动/传输恢复。原编码与独立审核会话均inactive，headless已退出；不自动进入第三轮。审核期间17条变更路径与376项非Markdown输入保持冻结。
 
 总审核按CONTRIBUTING提交前九项清单核对文档自洽、历史原文、STATUS三处及旧段落唯一追加、监控通道、实测计数、门禁判据、本地缺失与77边界、提交切分及文件权限；逐项证据见本阶段`audit-code-nine-checks.json`与`audit-docs-nine-checks.json`。代码/测试与文档相邻分开提交，本地提交哈希及阅读入口见`review-ready.md`；本段是上述待审快照的后续记录。R2后仅由总审核填入已核实结论，源码与测试没有再改，也不增加新的测试或审核声明。本阶段尚未推送、创建PR或运行新远端CI；合入意图验收和理解程度仍由所有者判断，0036整体Approved保持。
+
+
+### 2026-10-28：PR #96合入与R3发布前整合
+
+所有者明确批准总审核以merge commit合入[PR #96](https://github.com/YanBo-maker/YanOS/pull/96)，保留阶段历史，并批准本次#78/#79推送、创建PR和运行CI。PR #96合入提交为`9534a9a9d38422243e283ac06f1b1b6eec8c5d15`，父提交`4021361`与已审head`caf7d78`、tree与该head完全一致；原精确head三项CI及工件已核验，合入main后的CI另随该提交维护，不拿旧head结果冒充新的main运行。合入后监控通道原样归档，SHA-256复核后重置为通道头，保留正在进行的R3证据入口，回执见本阶段`integration/merge96-and-monitor.json`。
+
+R3分支继续保留`4072e3b`与`756a289`两条原提交，并整合该main；代码由Git自动合并，总审核只处理三份正式文档冲突。CMake相对原R3只增加原#96九行测试注册，位置、条件、超时和标签逐字保留；原#96测试与包装文件保持已审字节，其余R3非Markdown输入不变。规格保留旧main全部正文，再保留原R3追加记录；历史归档以新main为完整前缀，相同旧R7当前段仅保留一次，再原样追加被R3取代的#84当前段；没有删除历史结论。STATUS保留R3当前阶段，并纳入两项能力及各自边界。
+
+对新整合树377项非Markdown输入重新配置、构建并运行完整Linux Release默认套件：155/155、232.31s，零失败/跳过；注册与完整LastTest逐名一致，四档arena测量与预算保持，符号检查11项及原迁移74/EOF22/链接3例61项均随本次套件运行。命令为`cmake --build BUILD --config Release --parallel 3`及`ctest --test-dir BUILD -C Release --no-tests=error --output-on-failure -j3 -E '_mutation$'`，TOOLS/SEMANTIC开启。原始配置、构建、注册、CTest与LastTest及输入前后哈希在`integration/release-*`；本次没有重跑本机完整ASan、Windows、实际17组或完整历史矩阵，原R3结果保持各自快照范围，新远端三项CI待发布后执行。
+
+这是新main整合的窄范围核对，不重开已关闭的R3 F1/B1审核，也不启动第三轮缺陷修复。复用原独立只读dsh会话，预设本次整合最多两轮、只读且不新增会话；结束退出。源码/文档联合冻结与报告入口见`integration/review-freeze.json`，提交前九项总审核及实际结论在本阶段交付材料记录。

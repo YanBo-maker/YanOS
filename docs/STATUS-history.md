@@ -871,11 +871,21 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 
 
 
-### 2026-10-28：开始0036-R3实际分配观测
+### 2026-10-27：Issue #84 前的当前阶段
 
 ## 当前阶段
 
 0036-R7迁移可靠性收口：附件末尾EOF探测的EINTR修复已随[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)以merge commit `203825a`合入main，保留原阶段提交；镜像符号链接入口的附件定位验收见[PR #95](https://github.com/YanBo-maker/YanOS/pull/95)。所有者已明确批准两项合入；整合核验、最新合入提交与CI入口随PR #95维护。既有接口、磁盘格式、来源身份、旁锁和失败清理契约保持，详见[0036 VERIFY](specs/0036-yanfs-multi-block-directory.md#verify-执行记录)。
 
 [0040](specs/0040-4095-file-performance.md)的4095文件性能验收已获所有者认可，已随[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`）。0035、0036整体保持Approved，0040为Implemented；各阶段验证范围分别记录，不将一次PR结果当作另一整合树的验证。现有dsh双库接入见[试用说明](dsh-mcp-quickstart.md)。
+
+
+
+### 2026-10-28：整合PR #96并继续0036-R3
+
+## 当前阶段
+
+当前处理[Issue #84](https://github.com/YanBo-maker/YanOS/issues/84)：核对离线迁移故障测试的实际符号覆盖。新增独立Linux检查模块，比较链接声明、故障包装定义与正常CLI导入；dsh已完成编码和定向验证，完整Release回归、独立只读dsh复核与总审核已通过；所有者已批准推送、创建PR并运行CI；发布与最新检查见该Issue关联PR。当前生产代码、磁盘格式、MCP接口、故障注入逻辑和独立数据oracle保持。
+
+[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)与[PR #95](https://github.com/YanBo-maker/YanOS/pull/95)均已按所有者授权合入main，最新合并为`4021361`，原阶段历史保留；整合CI及原始工件已核对通过，主线运行另见PR记录。0035、0036整体保持Approved，0040为Implemented。双库接入见[dsh试用说明](dsh-mcp-quickstart.md)。
 

@@ -6,7 +6,13 @@
  *   cc ... tests/yanfs_migrate_fault.c <snapshot sources except tools/yan_migrate.c>
  *      -Wl,--wrap=open -Wl,--wrap=openat -Wl,--wrap=pwrite -Wl,--wrap=pread
  *      -Wl,--wrap=read -Wl,--wrap=write -Wl,--wrap=fsync -Wl,--wrap=close
- *      -Wl,--wrap=mkdirat -Wl,--wrap=unlinkat -lm
+ *      -Wl,--wrap=mkdirat -Wl,--wrap=unlinkat -Wl,--wrap=readdir -lm
+ *
+ * The current supported Linux production shape imports open, openat, pwrite,
+ * pread, read, write, fsync, close, mkdirat, unlinkat, readdir;
+ * tests/run_yanfs_migrate_symbols.py checks declared/defined/imported mapping;
+ * _FILE_OFFSET_BITS=64/LTO shapes are outside the current fault-wrapper/import
+ * mapping (reported, not remapped).
  *
  * MIG_EOF_FAULT selects one deterministic injection at the post-copy one-byte
  * EOF probe: a single or double EINTR, an extra tail byte, or EIO.  The role
