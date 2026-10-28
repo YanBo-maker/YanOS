@@ -543,12 +543,25 @@ class HarnessControls(unittest.TestCase):
         self.expect("CRC_MISMATCH", "crc",
                     lambda: parity.decode(bytes(bad_crc)))
 
-    def test_historical_inventory_excludes_only_later_internal_headers(self):
+    def test_historical_inventory_excludes_later_and_new_test_only_inputs(self):
         later={"os/block_peek.h","os/note_metadata_format_internal.h"}
+        new={"tests/arena_trace.c","tests/arena_trace.h"}
         self.assertTrue(later.issubset(entry.runtime.GUEST_HEADERS))
+        self.assertEqual(
+            tuple(item for item in entry.runtime.HOST_SOURCES
+                  if item != "tests/arena_trace.c"),
+            entry.HISTORICAL_HOST_SOURCES)
+        self.assertEqual(
+            tuple(item for item in entry.runtime.HOST_HEADERS
+                  if item != "tests/arena_trace.h"),
+            entry.HISTORICAL_HOST_HEADERS)
         for label in ('baseline','candidate'):
             required=set(entry.required_ref_inputs(label))
             self.assertFalse(later & required)
+            self.assertFalse(new & required)
+            self.assertTrue(set(entry.HISTORICAL_HOST_SOURCES) <= required)
+            self.assertTrue(set(entry.HISTORICAL_HOST_HEADERS) <= required)
+            self.assertIn('tests/terminal_runtime_driver.c', required)
             self.assertEqual(label=='candidate','os/sort.h' in required)
             self.assertTrue(set(entry.runtime.GUEST_HEADERS)-later-{'os/sort.h'} <= required)
 

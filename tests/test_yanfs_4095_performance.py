@@ -146,11 +146,11 @@ class PerformanceControls(unittest.TestCase):
         struct.pack_into('<I',data,28,52);struct.pack_into('<HH',data,42,32,1)
         struct.pack_into('<I',data,52,1);struct.pack_into('<I',data,60,0x80000000)
         struct.pack_into('<I',data,72,32*1024*1024-990000)
-        with tempfile.TemporaryDirectory(prefix='yanfs-budget-control-') as work:
-            guest=Path(work)/'boundary.elf';guest.write_bytes(data)
-            result=subprocess.run([sys.executable,'-B',str(path),'--guest',str(guest)],capture_output=True)
-        self.assertEqual(1,result.returncode,result.stdout)
-        self.assertIn(b'exceed',result.stdout)
+        failures=budget.boundary_failures(bytes(data),1003358)
+        self.assertTrue(any('exceed' in failure for failure in failures),failures)
+        # The historical seven-table 970,592-byte value would still fit this
+        # boundary, so the test really separates the current eleven tables.
+        self.assertEqual([],budget.boundary_failures(bytes(data),970592))
 
     def test_main_missing_local_before_external_skip_and_fresh_work(self):
         with tempfile.TemporaryDirectory(prefix='yanfs-entry-control-') as temp:

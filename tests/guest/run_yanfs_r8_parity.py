@@ -49,6 +49,17 @@ NAMED_INPUTS = (
     "tests/semantic_json_checks.py",
 )
 
+# The fixed historical refs predate the shared test-only arena observer. Keep
+# one historical Host view and use it for both the member manifest check and
+# the driver compile, so the current shared lists cannot require a file that
+# did not exist at those refs.
+HISTORICAL_HOST_SOURCES = tuple(
+    item for item in runtime.HOST_SOURCES
+    if item != "tests/arena_trace.c")
+HISTORICAL_HOST_HEADERS = tuple(
+    item for item in runtime.HOST_HEADERS
+    if item != "tests/arena_trace.h")
+
 
 class DependencyMissing(Exception):
     """An external tool/dependency is absent; the run is NOT VERIFIED."""
@@ -164,8 +175,8 @@ def check_dependencies(args):
 
 def required_ref_inputs(label):
     guest = list(runtime.PRODUCTION_SOURCES)
-    host = list(runtime.HOST_SOURCES)
-    headers = list(runtime.HOST_HEADERS)
+    host = list(HISTORICAL_HOST_SOURCES)
+    headers = list(HISTORICAL_HOST_HEADERS)
     # 0040 added these after both fixed refs; current production still requires them.
     later_headers = {"os/block_peek.h", "os/note_metadata_format_internal.h"}
     headers += [item for item in runtime.GUEST_HEADERS
@@ -304,7 +315,8 @@ def build_driver(candidate_tree, work, cc, manifest):
     argv = [str(cc), *runtime.HOST_CC_FLAGS,
             "-I", str(candidate_tree / "include"),
             "-I", str(candidate_tree / "tools")]
-    argv += [str(candidate_tree / item) for item in runtime.HOST_SOURCES]
+    argv += [str(candidate_tree / item)
+             for item in HISTORICAL_HOST_SOURCES]
     argv += ["-o", str(driver)]
     result = run_process(argv, 600)
     stdout = work / "logs" / "driver-build.stdout"

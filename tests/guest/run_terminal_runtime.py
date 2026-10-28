@@ -57,7 +57,7 @@ HOST_SOURCES = [
     "src/ram.c", "src/bus.c", "src/machine.c", "src/cpu.c", "src/csr.c",
     "src/interrupt.c", "src/image.c", "src/uart.c", "src/transport.c",
     "tools/host_block.c", "tools/host_file.c",
-    "tests/terminal_runtime_driver.c",
+    "tests/arena_trace.c", "tests/terminal_runtime_driver.c",
 ]
 GUEST_SOURCES = [
     "tests/guest/terminal_wait_check.c", "os/trap_entry.S", "os/task_switch.S",
@@ -77,7 +77,7 @@ PRODUCTION_SOURCES = [
 # Every repository header the built sources include, so a missing one is a hard
 # failure (1), not a silent build error.
 HOST_HEADERS = [
-    "tools/host_block.h", "tools/host_file.h",
+    "tests/arena_trace.h", "tools/host_block.h", "tools/host_file.h",
     "include/yan/bus.h", "include/yan/cpu.h", "include/yan/image.h",
     "include/yan/interrupt.h", "include/yan/machine.h", "include/yan/ram.h",
     "include/yan/status.h", "include/yan/transport.h", "include/yan/uart.h",
@@ -461,7 +461,7 @@ def run_fixture(driver, elf, work, scenario):
 def run_production(driver, args, work, image, stdin_bytes, label, fault,
                    corrupt_response, tx_fault_at, baseline=None,
                    expect_tohost=None, max_steps=PRODUCTION_STEPS,
-                   timeout=TIMEOUT):
+                   timeout=TIMEOUT, trace_arena=False):
     case_dir = work / ("production-" + label)
     disk = case_dir / (label + ".img")
     stdin_path = case_dir / (label + ".stdin")
@@ -480,6 +480,8 @@ def run_production(driver, args, work, image, stdin_bytes, label, fault,
         argv += ["--baseline", str(baseline)]
     if expect_tohost is not None:
         argv += ["--expect-tohost", "0x%08x" % expect_tohost]
+    if trace_arena:
+        argv.append("--trace-arena")
     result = run(argv, timeout)
     record(case_dir, label, argv, result)
     return result, status, disk, capture

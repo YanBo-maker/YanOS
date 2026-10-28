@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-当前处理[Issue #84](https://github.com/YanBo-maker/YanOS/issues/84)：核对离线迁移故障测试的实际符号覆盖。新增独立Linux检查模块，比较链接声明、故障包装定义与正常CLI导入；dsh已完成编码和定向验证，完整Release回归、独立只读dsh复核与总审核已通过；所有者已批准推送、创建PR并运行CI；发布与最新检查见该Issue关联PR。当前生产代码、磁盘格式、MCP接口、故障注入逻辑和独立数据oracle保持。
+0036-R3内存验收补强（[Issue #79](https://github.com/YanBo-maker/YanOS/issues/79)、[Issue #78](https://github.com/YanBo-maker/YanOS/issues/78)）：已实现执行侧分配观测，坏头检查不再依赖最后才填写的Guest统计字段；预算测试独立运行生产终端，采用实测用量。R1发现的本地输入检查和历史对比清单两项问题已修复，修后本机验证完成；同一独立只读dsh复核通过，已发布为[PR #97](https://github.com/YanBo-maker/YanOS/pull/97)。所有者已认可本轮验收结果并授权以merge commit合入；实际合入与最新CI状态见该PR。行为与成功标准沿用[0036-R3](specs/0036-yanfs-multi-block-directory.md#0036-r3内存按实际容量分配)，生产代码、公开接口和磁盘格式保持。
 
-[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)与[PR #95](https://github.com/YanBo-maker/YanOS/pull/95)均已按所有者授权合入main，最新合并为`4021361`，原阶段历史保留；整合CI及原始工件已核对通过，主线运行另见PR记录。0035、0036整体保持Approved，0040为Implemented。双库接入见[dsh试用说明](dsh-mcp-quickstart.md)。
+本阶段从main `4021361`独立开发，现已整合获所有者批准合入的[PR #96](https://github.com/YanBo-maker/YanOS/pull/96)（main `9534a9a`）；原R3本地证据与新整合验证分别记录；新整合本机验证和独立核对完成；各提交的远端验证分别记录在[PR #97](https://github.com/YanBo-maker/YanOS/pull/97)。0036整体状态仍为Approved；本轮意图已获所有者认可，学习理解程度仍由项目所有者判断。
 
 ## 已交付能力
 
@@ -58,11 +58,15 @@
 
 - 0040 4095性能门禁与局部优化已随[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`），阶段历史保留。[0040](specs/0040-4095-file-performance.md)
 
+- 0036 R3已提供执行侧内存验收与独立预算测量；发布、合入和最新检查见[PR #97](https://github.com/YanBo-maker/YanOS/pull/97)。[验收依据](specs/0036-yanfs-multi-block-directory.md#0036-r3内存按实际容量分配)
+
 - 0036 R7提供Linux故障符号核对入口，读取实际二进制与链接选项；故障运行逻辑和数据oracle保持。[Issue #84](https://github.com/YanBo-maker/YanOS/issues/84)，[检查入口](../tests/run_yanfs_migrate_symbols.py)
 
 ## 覆盖边界
 
 - 迁移故障符号检查只核对当前链接声明、包装定义与正常CLI动态导入的对应关系，不能证明每个调用点均被拦截；实际注入标记和数据oracle仍负责行为验收。自定义编译选项改变调用符号时需重新核对覆盖，映射不匹配不表示产品不能运行。
+
+- 内存观测限定于默认RV32生产终端ELF的非递归、无LTO独立函数调用形状；内联、尾调用或其他编译形态未验证。观测条件缺失或不完整时明确失败，不把缺失统计当零分配；Guest整体32MiB预算保持。
 
 - 4095文件容量已支持，0040固定短文本夹具已完成本机性能验收；任意长正文或其他语料的耗时仍随内容增长。CI与合并状态见[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)，固定夹具的实测范围保持。
 

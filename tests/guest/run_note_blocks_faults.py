@@ -29,7 +29,9 @@ def build_driver(args):
     (args.work / 'driver-seam.txt').write_text('before:\n' + old + '\nafter:\n' + new + '\n')
     driver = args.work / 'block_fault_driver'
     flags = runtime.HOST_CC_FLAGS + (runtime.SANITIZER_FLAGS if args.sanitizers else [])
-    argv = [args.cc, *flags, '-I', str(args.source / 'include'), '-I', str(args.source / 'tools')]
+    # The private source lives in --work; the shared observer header stays in tests.
+    argv = [args.cc, *flags, '-I', str(args.source / 'include'),
+            '-I', str(args.source / 'tools'), '-I', str(args.source / 'tests')]
     argv += [str(private if name == 'tests/terminal_runtime_driver.c' else args.source / name)
              for name in runtime.HOST_SOURCES]
     argv += ['-o', str(driver)]

@@ -879,3 +879,13 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 
 [0040](specs/0040-4095-file-performance.md)的4095文件性能验收已获所有者认可，已随[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main（`552dcde`）。0035、0036整体保持Approved，0040为Implemented；各阶段验证范围分别记录，不将一次PR结果当作另一整合树的验证。现有dsh双库接入见[试用说明](dsh-mcp-quickstart.md)。
 
+
+
+### 2026-10-28：整合PR #96并继续0036-R3
+
+## 当前阶段
+
+当前处理[Issue #84](https://github.com/YanBo-maker/YanOS/issues/84)：核对离线迁移故障测试的实际符号覆盖。新增独立Linux检查模块，比较链接声明、故障包装定义与正常CLI导入；dsh已完成编码和定向验证，完整Release回归、独立只读dsh复核与总审核已通过；所有者已批准推送、创建PR并运行CI；发布与最新检查见该Issue关联PR。当前生产代码、磁盘格式、MCP接口、故障注入逻辑和独立数据oracle保持。
+
+[PR #94](https://github.com/YanBo-maker/YanOS/pull/94)与[PR #95](https://github.com/YanBo-maker/YanOS/pull/95)均已按所有者授权合入main，最新合并为`4021361`，原阶段历史保留；整合CI及原始工件已核对通过，主线运行另见PR记录。0035、0036整体保持Approved，0040为Implemented。双库接入见[dsh试用说明](dsh-mcp-quickstart.md)。
+
