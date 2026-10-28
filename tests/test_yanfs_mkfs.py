@@ -230,21 +230,169 @@ def v2_header_case(mkfs, work):
 
 
 def files_rejection_case(mkfs, work):
-    """0036-R1-AC3: a bad --files value or B <= D creates no image."""
+    """0036-R1-AC3: a bad --files value or B <= D creates no image.
+
+    The rejected set is the contract's own: a non-decimal form, a value outside
+    63..4095, or a value that is not 64*D-1. Every case must exit 2, print
+    nothing on stdout, explain itself on stderr and leave no path behind."""
     cases = [
         ("zero", ["--files", "0", "--blocks", "64"]),
         ("hundred", ["--files", "100", "--blocks", "64"]),
         ("4096", ["--files", "4096", "--blocks", "8192"]),
         ("8191", ["--files", "8191", "--blocks", "8192"]),
         ("too-small-blocks", ["--files", "4095", "--blocks", "64"]),
+        # Range neighbours: 62 is below the floor; 64 is legal range but is not
+        # 64*1-1; 4094 is below the ceiling without being 64*64-1.
+        ("sixty-two", ["--files", "62", "--blocks", "64"]),
+        ("sixty-four", ["--files", "64", "--blocks", "64"]),
+        ("4094", ["--files", "4094", "--blocks", "8192"]),
+        # Geometry neighbours of D=2, D=63 and D=64: one short and one long.
+        ("126", ["--files", "126", "--blocks", "64"]),
+        ("128", ["--files", "128", "--blocks", "64"]),
+        ("4030", ["--files", "4030", "--blocks", "8192"]),
+        ("4032", ["--files", "4032", "--blocks", "8192"]),
+        # Lexical forms that are not plain unsigned decimal.
+        ("empty", ["--files", "", "--blocks", "64"]),
+        ("sign", ["--files", "+63", "--blocks", "64"]),
+        ("negative", ["--files", "-63", "--blocks", "64"]),
+        ("fraction", ["--files", "63.0", "--blocks", "64"]),
+        ("hex", ["--files", "0x3f", "--blocks", "64"]),
+        ("leading-space", ["--files", " 63", "--blocks", "64"]),
+        ("trailing-space", ["--files", "63 ", "--blocks", "64"]),
+        ("trailing-junk", ["--files", "63a", "--blocks", "64"]),
+        ("overflow", ["--files", "4294967296", "--blocks", "64"]),
     ]
     for label, extra in cases:
         path = os.path.join(work, "reject-%s.img" % label)
         proc = run([mkfs, "--image", path] + extra)
-        check(proc.returncode != 0,
-              "R1-AC3 %s exits nonzero, got %d" % (label, proc.returncode))
+        check(proc.returncode == 2,
+              "R1-AC3 %s exits 2, got %d" % (label, proc.returncode))
+        check(proc.stdout == b"",
+              "R1-AC3 %s prints nothing on stdout" % label)
+        check(proc.stderr != b"",
+              "R1-AC3 %s explains itself on stderr" % label)
         check(not os.path.exists(path),
               "R1-AC3 %s creates no image" % label)
+
+    # A malformed --files is an argument problem: the diagnostic names --files,
+    # and an unusable --blocks is still reported first because --blocks is
+    # validated before --files.
+    path = os.path.join(work, "reject-precedence.img")
+    proc = run([mkfs, "--image", path, "--blocks", "64", "--files", "100"])
+    check(b"invalid --files" in proc.stderr,
+          "R1-AC3 a rejected --files is named in the diagnostic: %r"
+          % proc.stderr)
+    proc = run([mkfs, "--image", path, "--blocks", "abc", "--files", "100"])
+    check(b"invalid --blocks" in proc.stderr,
+          "R1-AC3 an unusable --blocks is reported before --files: %r"
+          % proc.stderr)
+    # A missing option value is an argument error, not a capacity error.
+    proc = run([mkfs, "--image", path, "--blocks", "64", "--files"])
+    check(proc.returncode == 2,
+          "R1-AC3 a --files with no value exits 2, got %d" % proc.returncode)
+    check(b"usage:" in proc.stderr,
+          "R1-AC3 a --files with no value prints the usage text")
+    check(not os.path.exists(path),
+          "R1-AC3 the rejected argument cases create no image")
+
+
+def verify_v2_directory(data, capacity, files, directory_blocks):
+    """Decode a v2 image with this file's own expectations.
+
+    Everything here comes from the contract, not from the tool: the version,
+    directory block count and entry capacity are read back out of the image and
+    the CRC is recomputed over the directory region with field 60..63 zeroed."""
+    check(len(data) == capacity * BLOCK, "v2 image is capacity * 4096 bytes")
+    header = data[:BLOCK]
+    check(header[0:8] == MAGIC, "v2 magic is YANFS01 0x00")
+    check(struct.unpack_from("<I", header, 8)[0] == 2, "v2 version is 2")
+    check(struct.unpack_from("<I", header, 12)[0] == BLOCK,
+          "v2 block_size is 4096")
+    check(struct.unpack_from("<I", header, 16)[0] == capacity,
+          "v2 capacity_blocks matches --blocks")
+    check(struct.unpack_from("<I", header, 20)[0] == files,
+          "v2 entry_capacity is the requested --files")
+    check(struct.unpack_from("<I", header, 24)[0] == directory_blocks,
+          "v2 directory_blocks is %d for --files %d"
+          % (directory_blocks, files))
+    check(all(byte == 0 for byte in header[28:60]),
+          "v2 reserved header bytes 28..59 are zero")
+    directory = bytearray(data[:directory_blocks * BLOCK])
+    directory[60:64] = b"\x00\x00\x00\x00"
+    expected = zlib.crc32(bytes(directory)) & 0xFFFFFFFF
+    check(struct.unpack_from("<I", header, 60)[0] == expected,
+          "v2 CRC matches the Python zlib oracle over %d directory blocks"
+          % directory_blocks)
+    check(all(byte == 0 for byte in data[BLOCK:directory_blocks * BLOCK]),
+          "v2 directory blocks 1..%d are zero" % (directory_blocks - 1))
+    check(all(byte == 0 for byte in data[directory_blocks * BLOCK:]),
+          "v2 data blocks are zero")
+
+
+def files_acceptance_case(mkfs, work):
+    """0036-R1: the accepted --files inputs, including the geometry, leading
+    zeros, the D boundaries and the approved default.
+
+    The exhaustive D=1..64 differential belongs to the private operator proof;
+    the default suite keeps the cheap boundary coverage."""
+    plain = os.path.join(work, "accept-plain.img")
+    padded = os.path.join(work, "accept-padded.img")
+    proc = run([mkfs, "--image", plain, "--blocks", "16", "--files", "63"])
+    check(proc.returncode == 0,
+          "leading-zero base image exits 0, got %d" % proc.returncode)
+    proc = run([mkfs, "--image", padded, "--blocks", "00016",
+                "--files", "00063"])
+    check(proc.returncode == 0,
+          "leading zeros in --blocks and --files exit 0, got %d"
+          % proc.returncode)
+    check(read_file(plain) == read_file(padded),
+          "leading zeros produce a byte-identical image")
+    check(struct.unpack_from("<I", read_file(plain), 8)[0] == 1,
+          "--files 63 keeps version 1")
+
+    plain_max = os.path.join(work, "accept-plain-max.img")
+    padded_max = os.path.join(work, "accept-padded-max.img")
+    proc = run([mkfs, "--image", plain_max, "--blocks", "65",
+                "--files", "4095"])
+    check(proc.returncode == 0,
+          "--files 4095 with 65 blocks exits 0, got %d" % proc.returncode)
+    proc = run([mkfs, "--image", padded_max, "--blocks", "00065",
+                "--files", "04095"])
+    check(proc.returncode == 0,
+          "leading zeros on 4095 exit 0, got %d" % proc.returncode)
+    check(read_file(plain_max) == read_file(padded_max),
+          "leading zeros on 4095 produce a byte-identical image")
+
+    # The default must be the same image as an explicit 1023: one request, two
+    # spellings.
+    default_path = os.path.join(work, "accept-default.img")
+    explicit_path = os.path.join(work, "accept-explicit.img")
+    proc = run([mkfs, "--image", default_path, "--blocks", "64"])
+    check(proc.returncode == 0,
+          "default image exits 0, got %d" % proc.returncode)
+    proc = run([mkfs, "--image", explicit_path, "--blocks", "64",
+                "--files", "1023"])
+    check(proc.returncode == 0,
+          "explicit 1023 exits 0, got %d" % proc.returncode)
+    check(read_file(default_path) == read_file(explicit_path),
+          "the default image is byte-identical to an explicit --files 1023")
+
+    # Boundary geometry, each at the smallest --blocks the contract allows:
+    # D>=2 needs at least one data block beyond the directory.
+    for files, capacity, directory_blocks in (
+            (127, 3, 2),
+            (4031, 64, 63),
+            (4095, 65, 64),
+    ):
+        path = os.path.join(work, "accept-files%d.img" % files)
+        proc = run([mkfs, "--image", path, "--blocks", str(capacity),
+                    "--files", str(files)])
+        check(proc.returncode == 0,
+              "accepted --files %d with --blocks %d exits 0, got %d"
+              % (files, capacity, proc.returncode))
+        check(str(files).encode() in proc.stdout,
+              "stdout reports the accepted --files %d" % files)
+        verify_v2_directory(read_file(path), capacity, files, directory_blocks)
 
 
 def build_metadata(capacity):
@@ -344,6 +492,7 @@ def main():
             v1_baseline_case(args.mkfs, work)
             v2_header_case(args.mkfs, work)
             files_rejection_case(args.mkfs, work)
+            files_acceptance_case(args.mkfs, work)
             for mode in ("short-write", "flush", "close", "seek", "metadata-write"):
                 fault_case(args.mkfs, args.fault_mkfs, work, mode)
             control_case(args.fault_mkfs, work)

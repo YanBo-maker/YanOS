@@ -64,9 +64,12 @@ static bool parse_capacity(const char *text, uint32_t *out)
     return true;
 }
 
-/* 0036: decimal directory capacity. Only 64*D-1 for D in 1..64 is accepted,
- * so the value alone determines the number of directory blocks. */
-static bool parse_files(const char *text, uint32_t *out)
+/* 0036: decimal directory capacity. Only 64*D-1 for D in 1..64 is accepted, so
+ * one parse yields both numbers: the lexical form, the 63..4095 range and the
+ * geometry are decided together, and the derived directory block count is 1..64
+ * by construction. Rejecting here is the only place --files can be refused. */
+static bool parse_files(const char *text, uint32_t *files_out,
+                        uint32_t *blocks_out)
 {
     if (text == NULL || *text == '\0') {
         return false;
@@ -81,23 +84,11 @@ static bool parse_files(const char *text, uint32_t *out)
             return false;
         }
     }
-    if (value < 63u || value > 4095u) {
+    if (value < 63u || value > 4095u || ((value + 1u) % 64u) != 0u) {
         return false;
     }
-    *out = (uint32_t)value;
-    return true;
-}
-
-static bool files_to_directory_blocks(uint32_t files, uint32_t *out)
-{
-    if (files < 63u || files > 4095u || ((files + 1u) % 64u) != 0u) {
-        return false;
-    }
-    uint32_t blocks = (files + 1u) / 64u;
-    if (blocks < 1u || blocks > 64u) {
-        return false;
-    }
-    *out = blocks;
+    *files_out = (uint32_t)value;
+    *blocks_out = (uint32_t)((value + 1u) / 64u);
     return true;
 }
 
@@ -156,13 +147,12 @@ int main(int argc, char **argv)
         fprintf(stderr, "yan_mkfs: invalid --blocks '%s'\n", blocks_text);
         return 2;
     }
+    /* The approved default is 1023 files, D=16 (0036-R1). Both numbers are set
+     * directly so the default never passes through the explicit parser. */
     uint32_t files = 1023u;
-    if (files_text != NULL && !parse_files(files_text, &files)) {
-        fprintf(stderr, "yan_mkfs: invalid --files '%s'\n", files_text);
-        return 2;
-    }
-    uint32_t directory_blocks = 0;
-    if (!files_to_directory_blocks(files, &directory_blocks)) {
+    uint32_t directory_blocks = 16u;
+    if (files_text != NULL &&
+        !parse_files(files_text, &files, &directory_blocks)) {
         fprintf(stderr, "yan_mkfs: invalid --files '%s'\n", files_text);
         return 2;
     }
