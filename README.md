@@ -60,6 +60,8 @@ GCC / Clang 的 Unix 构建可在配置时添加 `-DYAN_ENABLE_SANITIZERS=ON`，
 
 构建 Guest 验证工具可添加 `-DYAN_BUILD_TOOLS=ON`。`yan_run` 支持 RV32 ELF、最大步数、`tohost` 退出、签名区导出和逐条架构状态记录；`yan_difftest` 让 YanCPU 与外部参考模型逐条比较架构状态；`yan_gen` 生成随机 RV32IM 指令流。
 
+Host 的 `yan_mcp` 及语义检索工具只支持 Linux/WSL，Windows 原生构建不提供这些工具。Linux CI 运行 MCP 服务、写入和官方 SDK 验收；Windows 的 `mcp_write_docs` 仅检查纯 Python 文档判据，不启动 MCP 服务。平台覆盖见[STATUS](docs/STATUS.md#覆盖边界)，接入方式见[MCP 说明](docs/dsh-mcp-quickstart.md)。
+
 Linux 工具配置另提供 `yan_mkfs`，排他创建新 YanFS 镜像，已有文件或链接会被拒绝。`--files N` 取 63…4095，缺省 1023（目录占 16 块）；目录块数 D 为 1 时 `--blocks` 至少为 1，D 大于 1 时必须大于 D；默认镜像至少需要 17 块，下面的示例用 64 块：
 
 ```sh
@@ -68,6 +70,8 @@ cmake --build build/yanfs --parallel
 build/yanfs/yan_mkfs --image new.img --blocks 64
 build/yanfs/yan_run --image guest.elf --disk-image new.img
 ```
+
+Linux/WSL 上，`yan_run --disk-image FILE` 在打开镜像前取得 `<realpath(FILE)>.lock` 排他锁，并持有到进程退出。锁被其他进程占用时，它打印锁冲突并以退出码5拒绝启动；不要删除锁文件。Windows 原生 `yan_run` 没有这项旁锁。锁模式与释放规则见[镜像旁锁说明](docs/mcp-write-tools.md#imagelock)。
 
 `--files N` 是可选参数，设定这个新镜像的目录能存放多少个文件。N 必须等于 `64·D − 1`：D 是目录块数，取 1 到 64，所以 N 只能是 63、127、……、4095。省略 `--files` 时 N 为 1023（D=16），因此 `--blocks` 至少为 17。N 为 63 时写出 version 1，与改这个参数之前的 `yan_mkfs --blocks` 逐字节相同。N 大于 63 时写出 version 2。D 为 1 时 `--blocks` 至少为 1；D 大于 1 时 `--blocks` 必须大于 D。
 

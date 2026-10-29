@@ -311,3 +311,12 @@ Linux 默认集合中的 `mcp_note`、`mcp_sdk`、`mcp_write_docs`、学习联�
 ### PR #85／#86／#87 合入回执（2026-10-23 核对）
 
 GitHub 当前记录确认：PR #85 于 2026-10-22 以 `3377a50b743a57876ad249cf9f0142bed4cf2a20`、#86 以 `fae32e811060be0c9e066f60be24e93546bca2cf`、#87 以 `0948b94dfe54cc44006cb453c9e821400b0f01a2` 依次合入 main，保留阶段提交。#87 的核对记录接续上文发布快照，不改写过去的“尚未合入”。该历史随后保留在 `26c25fc` 的 main 中；新 main 的验证记录见 [0036 VERIFY](0036-yanfs-multi-block-directory.md#verify-执行记录)。本回执不扩展真实 dsh 试用范围，也不把 0035 整体提升为 Implemented。
+
+
+### 用法入口与平台覆盖说明核对（2026-10-30，Issue #57／#60）
+
+[Issue #60](https://github.com/YanBo-maker/YanOS/issues/60)的补充放在README的 `yan_run --disk-image` 示例旁：Linux/WSL在打开镜像前取得旁锁并持有到退出，锁冲突诊断及退出码5直接可见，同时链接完整锁说明；Windows原生 `yan_run` 未实现该旁锁。实际依据为 `tools/yan_run.c` 的 `__linux__` 条件与加锁顺序，以及 `host/note_write.c` 的非阻塞flock。既有写工具章节保留，程序行为不改。
+
+[Issue #57](https://github.com/YanBo-maker/YanOS/issues/57)允许评估Windows移植或明确Linux覆盖。本轮采用已批准的Linux/WSL支持范围，README与STATUS显式说明：Windows不构建MCP服务、不运行四项MCP服务／SDK验收，只运行纯Python的 `mcp_write_docs` 检查器自测。`CMakeLists.txt` 的非Linux SEMANTIC配置拒绝及workflow的Linux检查分支保持，不将此文档补充表述为Windows原生MCP已实现或已覆盖。
+
+本轮仅做文档、链接、历史与实际源码的一致性核对，未新跑产品回归或实际变异，也未改变本规格状态、接口或验收标准。主目录同步与旧现场备份属于本机交接，记录在仓库外材料；文档审核和后续发布事实随本轮PR与交付材料维护。
