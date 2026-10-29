@@ -56,7 +56,6 @@
 #define YAN_RELATION_MAX_SHARED_TAGS UINT32_C(16)
 #define YAN_RELATION_RELATED_SHOWN UINT32_C(20)
 #define YAN_RELATION_BACKLINKS_SHOWN UINT32_C(20)
-#define YAN_RELATION_MAX_ROWS YAN_FS_MAX_FILES
 
 /* One synchronised relation row. Every field is deterministic on every result
  * row: a field a command does not explain is always zero, never stale.
