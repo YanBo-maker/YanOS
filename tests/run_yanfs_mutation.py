@@ -149,6 +149,16 @@ MUTATIONS = [
         "new": "memset(fs->scratch + chunk, 0xA5, YAN_FS_BLOCK_SIZE - chunk);",
     },
     {
+        # The identifier predates 0036, when mount kept the unvalidated bytes
+        # out of the cache and copied them in only after validation. Mount now
+        # reads the D directory blocks straight into the cache and carries the
+        # same guarantee with two other mechanisms: busy hides the intermediate
+        # state from every other call, and the done label clears the cache and
+        # the name index on every non-OK result. This mutant therefore attacks
+        # the second half only -- it drops that clear, so a rejected directory
+        # stays visible in the cache. The owner test still catches it because
+        # it asserts the cache region is zero after a corrupt mount, not
+        # because anything is published early any more.
         "name": "cache_published_before_validation",
         "file": "os/yanfs.c",
         "old": """    if (result != YAN_FS_OK) {

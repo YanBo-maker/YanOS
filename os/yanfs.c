@@ -4,9 +4,10 @@
  * decide whether the rest of the filesystem may trust a device:
  *
  *   detection, not repair  mount reads block 0 into scratch and accepts it
- *   only after every field, the CRC and every allocation invariant holds. A
- *   rejected block is never copied into the metadata cache, so a caller that
- *   ignores the result still cannot observe a partial directory.
+ *   only after every field, the CRC and every allocation invariant holds. The
+ *   bytes it has already copied into the metadata cache are cleared again
+ *   before mount returns a rejection, so a caller that ignores the result
+ *   still cannot observe a partial directory.
  *
  *   fail closed  an I/O or protocol error faults the instance. Every later
  *   file operation and mount then returns FAULTED until unmount clears the
@@ -885,7 +886,15 @@ YanFsResult yan_fs_mount(YanFs *fs)
     }
 
     /* busy spans the whole operation, including every callback, so a reentrant
-     * call from inside one of them sees BUSY rather than a half-filled cache. */
+     * call from inside one of them sees BUSY rather than a half-filled cache.
+     * Because of that, mount publishes the directory blocks it reads straight
+     * into the cache instead of keeping a separate validated copy: no other
+     * call can look at the cache while busy is set. 0036 needs that, since the
+     * D blocks must be validated together, not block by block. The invariant a
+     * caller relies on is therefore "no observer sees an unvalidated
+     * directory", and it is carried by two things working together -- busy
+     * hiding the intermediate state, and the done label clearing the cache
+     * again whenever the result is not OK. */
     fs->busy = true;
     clear_directory(fs);
     fs->name_order_count = 0u;
@@ -985,6 +994,12 @@ YanFsResult yan_fs_mount(YanFs *fs)
         }
     }
 done:
+    /* The other half of the mount invariant. By here the cache may already
+     * hold directory bytes that validate_directory rejected, or a prefix of
+     * them if a read failed part way through the D blocks, so every failure
+     * path clears it and drops the derived name index before busy is released.
+     * A successful mount needs no action: the cache it published is the
+     * validated one. */
     if (result != YAN_FS_OK) {
         clear_directory(fs);
         fs->name_order_count = 0u;
