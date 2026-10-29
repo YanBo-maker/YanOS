@@ -9,6 +9,8 @@ B 要让 Agent 通过 MCP 写笔记。镜像同一时间可能被两类进程使
 
 ## 代码里的现状（origin/main 41b83b5）
 
+> 本节及后文方案比较保留2026-10-20的决策依据，所述 README 示例见[固定快照](https://github.com/YanBo-maker/YanOS/blob/41b83b5ab0094ba483aeb643feb66dcba4b93105/README.md#L66-L77)。其中63文件上限和64KiB示例已由[0036](../specs/0036-yanfs-multi-block-directory.md)的容量扩展及[当前用法](../../README.md)取代：新镜像默认1023文件，示例使用 `--blocks 64`。
+
 1. **Guest 和 Host 同时写，会真的写坏镜像。** `YanFs` 挂载后把目录块缓存在内存里（`os/yanfs.h`：`uint8_t metadata[4096]`）。0021 规定空闲空间每次都从「当前已验证目录」反推，覆盖时最后发布一个目录块。所以 Host 在 Guest 挂载期间新建一个文件后，Guest 下一次写入会做两件事：用旧的缓存目录发布，把 Host 那个文件从目录里抹掉；同时可能把 Host 刚占用的区间当成空闲区间分配出去。这不是读到旧数据那么简单，而是丢文件。
 2. **现在没有任何互斥。** `tools/host_disk.c` 用 `fopen(path,"r+b")` 打开镜像，不加锁；0033 的只读工具靠「Guest 已退出、镜像稳定」这条前提和 STALE 检测兜底。只读时这样够用，写入时不够。
 3. **Host 已经有完整的 YanFS 实现。** `os/yanfs.c` 是可移植 C，Host 侧已经编进 `yan_fs` 库（`yan_mkfs`、0033 的只读适配都在用），`yan_fs_create`、`yan_fs_replace` 现成可用。
@@ -54,3 +56,7 @@ B 要让 Agent 通过 MCP 写笔记。镜像同一时间可能被两类进程使
 - 闫博开着 Guest 终端时，Agent 的写入会返回 BUSY；需要在学习流程里约定「先退出终端，再让 Agent 写回」。
 - `yan_run` 要加一处锁逻辑（属于必要适配）。
 - 实施前必须先在 WSL 的 `/mnt/e`（drvfs）上实测 flock 在两个 WSL 进程之间是否有效；如果无效，要求镜像放在 WSL 原生文件系统里（见 0035「前置条件」）。
+
+## 当前实现说明（2026-10-29）
+
+上述并发路线已用于Linux/WSL的MCP写工具与 `yan_run`；`yan_run` 的加锁代码受 `__linux__` 条件编译保护，Windows未实现该旁锁。当前锁模式、平台限制与错误边界见[写工具说明](../mcp-write-tools.md#imagelock)。本注释说明已交付实现，不改变原决策或承诺Windows互斥。

@@ -7,6 +7,8 @@
 
 ## 背景：三个上限从哪来
 
+> 以下源码行号和 `README.md:66,77` 均属于[41b83b5固定快照](https://github.com/YanBo-maker/YanOS/blob/41b83b5ab0094ba483aeb643feb66dcba4b93105/README.md#L66-L77)，不指向当前文件行号。旧63文件背景已由0036多块目录扩展；当前默认1023文件、最大4095文件，格式化示例使用 `--blocks 64`，见[README](../../README.md)。旧背景和原裁定保留用于追溯。
+
 | 上限 | 来源 | 性质 |
 |---|---|---|
 | 63 个文件 | `os/yanfs.h:28` `YAN_FS_MAX_FILES 63`；格式定义在 `docs/specs/0021-yanfs.md:31,34`：目录只占块 0，4096 B = 64 B 头 + 63 × 64 B 目录项。`os/yanfs.c:149` 格式化时把 63 写进 `entry_capacity`，`os/yanfs.c:318` 挂载时要求它恰好等于 63，否则 CORRUPT。Guest 把整块缓存在 `os/yanfs.h:83` `metadata[4096]`。 | 盘上格式 + 编译期常量 |
@@ -74,6 +76,8 @@
 - YanFS 文件硬上限现在就提到 4095（`YAN_FS_MAX_DIR_BLOCKS` = 64），取代上文的 2047；`--files` 缺省仍为 1023。
 - 模拟器 RAM 定为 64 MiB，Guest 可用满 32 MiB（`__yan_arena_end = 0x80000000 + 32 MiB`），原「五个 context ≤ 2 MiB」预算由 [0036](../specs/0036-yanfs-multi-block-directory.md) 的 Guest 整体 32 MiB 预算取代。
 - 4095 下的 O(N²) 由 0040 处理；0040-P1 实测与 Q2（全库操作超 5×10⁷ 步时怎么办）仍待定。
+
+> 上述“仍待定”为2026-10-20快照，已由[决策0004](0004-4095-performance-budget.md)和[0040](../specs/0040-4095-file-performance.md)的后续批准及验收取代。0040现为Implemented，经[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)以`552dcde`合入main；固定短文本夹具的4095九项操作均执行5000万步上限。
 
 ## R7 迁移边界澄清（闫博 2026-10-21 批准）
 
