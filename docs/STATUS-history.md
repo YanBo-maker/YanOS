@@ -902,3 +902,8 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 0036-R1格式化参数校验整理（[Issue #63](https://github.com/YanBo-maker/YanOS/issues/63)）：`yan_mkfs` 将显式 `--files` 的范围、目录几何校验和目录块数计算归并为一次解析；默认容量仍为1023文件、16块目录。已完成实现、本机验证、独立只读dsh核对与总审；发布与远端CI状态以交付材料及对应PR为准。本轮从main `2fb0be6`开发，沿用[0036-R1](specs/0036-yanfs-multi-block-directory.md#0036-r1mkfs-设定文件数)和0021格式化契约，接受的输入、诊断、退出码、镜像字节和失败边界保持。
 
 0036整体仍为Approved。实现、验证与所有者审查分别记录；本轮合入与远端验证状态以交付材料及对应PR为准；学习理解程度由项目所有者判断。
+
+
+主线文档与实现对齐修正：更新 README 入口、镜像旁锁的平台限制及 CI 覆盖说明，为旧决策和性能规划补充固定快照引用与后续结论。历史原文保留，程序行为和规格状态保持。
+
+上一开发阶段的0036-R1格式化参数校验整理已于2026-10-29经[PR #98](https://github.com/YanBo-maker/YanOS/pull/98)合入 main（`55069e9`），实现、独立核对与所有者意图验收已完成；该PR的三项远端CI通过，验证范围见[0036 VERIFY](specs/0036-yanfs-multi-block-directory.md#r1-issue-63格式化参数校验归并2026-10-29)。0035、0036整体仍为Approved，0040为Implemented；学习理解程度由项目所有者判断。

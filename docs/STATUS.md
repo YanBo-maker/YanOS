@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-主线文档与实现对齐修正：更新 README 入口、镜像旁锁的平台限制及 CI 覆盖说明，为旧决策和性能规划补充固定快照引用与后续结论。历史原文保留，程序行为和规格状态保持。
+用法入口与平台覆盖说明收尾：在 `yan_run --disk-image` 示例旁说明Linux/WSL旁锁、锁冲突退出码及Windows限制；明确Windows的文档判据自测与Linux的MCP服务验收范围。程序行为、工具参数和CI配置保持。
 
-上一开发阶段的0036-R1格式化参数校验整理已于2026-10-29经[PR #98](https://github.com/YanBo-maker/YanOS/pull/98)合入 main（`55069e9`），实现、独立核对与所有者意图验收已完成；该PR的三项远端CI通过，验证范围见[0036 VERIFY](specs/0036-yanfs-multi-block-directory.md#r1-issue-63格式化参数校验归并2026-10-29)。0035、0036整体仍为Approved，0040为Implemented；学习理解程度由项目所有者判断。
+前一组六项文档修正已随[PR #100](https://github.com/YanBo-maker/YanOS/pull/100)以`2233ea8`合入main；其合入前验证已核对，合入后的[主线CI](https://github.com/YanBo-maker/YanOS/actions/runs/40892892526)已由Actions API确认通过。本阶段不新增Windows原生MCP支持，0035、0036整体仍为Approved，0040为Implemented；学习理解程度由项目所有者判断。
 
 ## 已交付能力
 
@@ -75,6 +75,8 @@
 - R8 历史对比固定于 `4c5e0ab` 与 `2b82d17`。完整重跑由操作员显式执行，默认 CTest 的 `yanfs_r8_parity_harness` 检查夹具与判定器反例；历史 v2 MCP 的 CORRUPT 表示当时的错误保持，不作为当前大容量检索成功证据。
 
 - 写工具文档核对只覆盖 `mcp-write-tools.md` 的两个工具参考段；Linux 的 `mcp_note` 比较实际工具列表，纯 Python 的 `mcp_write_docs` 在配置找到 Python 时注册，Windows 也运行。README、STATUS 与其余用法段落仍需独立文档审核。
+
+- MCP服务及语义工具的运行平台为Linux/WSL。Windows原生构建不提供 `yan_mcp`，不运行 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk`；它运行的 `mcp_write_docs` 是纯Python检查器自测，不构成MCP服务运行验收。此边界沿用[0035](specs/0035-agent-writable-knowledge.md)，对应[Issue #57](https://github.com/YanBo-maker/YanOS/issues/57)的“明确Linux覆盖”选项；Windows原生支持仍需独立规格与实现。
 
 - CI 矩阵与失败条件见 `.github/workflows/build.yml`：ubuntu-22.04 Debug+ASan、ubuntu-22.04 Release 安装 `gcc-riscv64-linux-gnu` 并打开 `YAN_BUILD_TOOLS`；工具链缺失、Guest 测试未注册、或日志中有 `(Skipped)` 时 Linux 任务失败。windows-2022 Debug 不装该工具链，也不跑 Guest 测试。
 - 外部验证层仍不在 CI：NEMU 差分（`difftest_*`）、官方 riscv-tests、Sail 签名、ACT4。依赖缺失时这些测试不注册，或按原脚本返回 SKIP，不记为通过。历史测量在归档的「外部验证层」。
