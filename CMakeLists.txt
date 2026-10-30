@@ -602,6 +602,18 @@ if(BUILD_TESTING)
                 SKIP_RETURN_CODE 77 LABELS
                 "0035-R3-AC1;0035-R3-AC2;0035-R3-AC3;0035-R3-AC4;0035-R4-AC1;0035-R4-AC2;0035-R4-AC3;0035-R4-AC4;0035-R5-AC1;0035-R5-AC2;0035-R5-AC5;0035-R6-AC2;0035-R6-AC3;0035-R10-AC1;0035-R10-AC2;0035-R10-AC3;0035-R10-AC4;0035-R11-AC1;0035-R11-AC2;0035-R11-AC3;0035-R11-AC4")
         endif()
+        # 0041-R1: the gated yanos_note_meta tool. This drives a real yan_mcp
+        # over stdio and is the only automated guard on the four-state
+        # tools/list contract, so it must stay registered whenever yan_mcp is
+        # built.
+        if(Python3_Interpreter_FOUND AND TARGET yan_mcp)
+            add_test(NAME mcp_meta COMMAND "${Python3_EXECUTABLE}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_meta_checks.py"
+                $<TARGET_FILE:yan_mcp>)
+            set_tests_properties(mcp_meta PROPERTIES TIMEOUT 240
+                SKIP_RETURN_CODE 77 LABELS
+                "0041-R1-AC1;0041-R1-AC2;0041-R1-AC3;0041-R1-AC4;0041-R1-AC5;0041-R1-AC6;0041-R1-AC7;0041-R1-AC8;0041-R1-AC9;0041-R1-AC10;0041-R1-AC11")
+        endif()
         if(Python3_Interpreter_FOUND)
             add_test(NAME block_query_oracle COMMAND "${Python3_EXECUTABLE}" -B
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/block_page_oracle.py"
