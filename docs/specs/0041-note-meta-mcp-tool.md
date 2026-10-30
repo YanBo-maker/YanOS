@@ -15,7 +15,7 @@
 |---|---|---|
 | 加两个只读工具（`yanos_note_meta`、`yanos_note_list`），同由 `--allow-meta` 开启，与 `--allow-write` 正交 | meta 的写入面（title/tag/link/date 的增删改）；不带 `--allow-meta` 时出现在工具列表 | description 的措辞 |
 | link 状态两态 `OK`/`MISSING`，只看目标文件是否存在 | 读目标正文判定链接健康；引入第三态；复用 0032 的 `OK/DANGLING_FILE/DANGLING_BLOCK` | — |
-| 单文件观察只校验目标头 | 导入 0027:83 的 list 全库预检（任意坏头即 METADATA、不出半份名单） | — |
+| 单文件观察（`yanos_note_meta`）只校验目标头；全库预检只属 `yanos_note_list`（R2） | 在 `yanos_note_meta` 里导入 0027:83 的全库预检（任意坏头即 METADATA、不出半份名单） | — |
 | 正文内容不参与判定，对二进制正文照常返回元数据 | 在观察路径返回 INVALID_TEXT / TOO_LARGE（二者属 0027 的 update 路径） | — |
 | `meta list` 的 tag AND 筛选由 R2 提供；`yanos_note_list` 只返名单 | 让 `yanos_note_list` 返回每文件元数据；流式输出半份名单；把 `search` 的 `tag:` 操作符（0027:97）塞进本工具 | `search` 侧操作的 Issue 编号与拆法 |
 
@@ -155,9 +155,9 @@ arguments：`{ "tags"?: string[], "expected_source"?: string }`。`tags` 可省�
 | 启动开关 | 工具数 | `tools` 成员 SHA-256 | 与 0033 基线 |
 |---|---|---|---|
 | 无 | 6 | `3bbd05c5c7e5adfef17122dbf46a10b2704ee960c8cddf6a163a176c72bab4a2` | 相同 |
-| `--allow-meta` | 7 | `d767ac2ba0a63de15f196d283b60d16282b6812fbd543bff5df20837768165a6` | 不同 |
+| `--allow-meta` | 8 | `06064af069202df525140bcde8eeed540b20a70219fbac1cd17aadecef39e53e` | 不同 |
 | `--allow-write` | 8 | `ba3ad734782509b9ab5a276f154e24e0d2172ae7365a59c14f19e074a58b2830` | 不同 |
-| 两者 | 10 | 见 VERIFY 执行记录 | 不同 |
+| 两者 | 10 | `cff29342bba39087a8cf875c6890866720e21e60ae640c6c4d1eba94899a90fa` | 不同 |
 
 四态工具顺序与 R1 表一致；`serverInfo.version` 四态均为 `0035`。默认态哈希与 `TOOLS_0033_SHA256` 逐字节相同，R1-AC1 成立。
 
