@@ -4,9 +4,10 @@
  * decide whether the rest of the filesystem may trust a device:
  *
  *   detection, not repair  mount reads block 0 into scratch and accepts it
- *   only after every field, the CRC and every allocation invariant holds. A
- *   rejected block is never copied into the metadata cache, so a caller that
- *   ignores the result still cannot observe a partial directory.
+ *   only after every field, the CRC and every allocation invariant holds. The
+ *   bytes it has already copied into the metadata cache are cleared again
+ *   before mount returns a rejection, so a caller that ignores the result
+ *   still cannot observe a partial directory.
  *
  *   fail closed  an I/O or protocol error faults the instance. Every later
  *   file operation and mount then returns FAULTED until unmount clears the
@@ -85,6 +86,13 @@ static void source_identity_allocate(YanFs *fs)
 #define FS_RESERVED_END 60u
 #define FS_CRC_OFFSET 60u
 
+/* The FS_MAGIC_SIZE bytes at FS_MAGIC_OFFSET. Formatting writes them and header
+ * validation compares against them, so there is one definition to change. */
+static const uint8_t yan_fs_magic[FS_MAGIC_SIZE] = {
+    (uint8_t)'Y', (uint8_t)'A', (uint8_t)'N', (uint8_t)'F',
+    (uint8_t)'S', (uint8_t)'0', (uint8_t)'1', 0u
+};
+
 /* Directory-entry offsets inside the 64-byte entry. */
 #define FS_ENTRY_NAME_AREA 32u
 #define FS_ENTRY_SIZE_OFFSET 32u
@@ -156,10 +164,6 @@ uint32_t yan_fs_metadata_crc(const uint8_t block[4096])
 YanFsResult yan_fs_format_directory(uint8_t *out, uint32_t directory_blocks,
                                     uint32_t capacity_blocks)
 {
-    static const uint8_t magic[FS_MAGIC_SIZE] = {
-        (uint8_t)'Y', (uint8_t)'A', (uint8_t)'N', (uint8_t)'F',
-        (uint8_t)'S', (uint8_t)'0', (uint8_t)'1', 0u
-    };
     /* D=1 keeps 0021's capacity >= 1 rule: a one-block v1 image is still a
      * valid empty file system. A v2 directory needs at least one data block,
      * so D>1 requires capacity_blocks > D. */
@@ -174,7 +178,7 @@ YanFsResult yan_fs_format_directory(uint8_t *out, uint32_t directory_blocks,
         out[i] = 0;
     }
     for (uint32_t i = 0; i < FS_MAGIC_SIZE; ++i) {
-        out[FS_MAGIC_OFFSET + i] = magic[i];
+        out[FS_MAGIC_OFFSET + i] = yan_fs_magic[i];
     }
     store_le32(out + FS_VERSION_OFFSET,
                directory_blocks == 1u ? YAN_FS_VERSION : YAN_FS_VERSION_2);
@@ -816,12 +820,8 @@ static YanFsResult validate_header(const uint8_t header[YAN_FS_BLOCK_SIZE],
                                    uint32_t *version_out,
                                    uint32_t *directory_blocks_out)
 {
-    static const uint8_t magic[FS_MAGIC_SIZE] = {
-        (uint8_t)'Y', (uint8_t)'A', (uint8_t)'N', (uint8_t)'F',
-        (uint8_t)'S', (uint8_t)'0', (uint8_t)'1', 0u
-    };
     for (uint32_t i = 0; i < FS_MAGIC_SIZE; ++i) {
-        if (header[FS_MAGIC_OFFSET + i] != magic[i]) {
+        if (header[FS_MAGIC_OFFSET + i] != yan_fs_magic[i]) {
             return YAN_FS_CORRUPT;
         }
     }
@@ -886,7 +886,15 @@ YanFsResult yan_fs_mount(YanFs *fs)
     }
 
     /* busy spans the whole operation, including every callback, so a reentrant
-     * call from inside one of them sees BUSY rather than a half-filled cache. */
+     * call from inside one of them sees BUSY rather than a half-filled cache.
+     * Because of that, mount publishes the directory blocks it reads straight
+     * into the cache instead of keeping a separate validated copy: no other
+     * call can look at the cache while busy is set. 0036 needs that, since the
+     * D blocks must be validated together, not block by block. The invariant a
+     * caller relies on is therefore "no observer sees an unvalidated
+     * directory", and it is carried by two things working together -- busy
+     * hiding the intermediate state, and the done label clearing the cache
+     * again whenever the result is not OK. */
     fs->busy = true;
     clear_directory(fs);
     fs->name_order_count = 0u;
@@ -986,6 +994,12 @@ YanFsResult yan_fs_mount(YanFs *fs)
         }
     }
 done:
+    /* The other half of the mount invariant. By here the cache may already
+     * hold directory bytes that validate_directory rejected, or a prefix of
+     * them if a read failed part way through the D blocks, so every failure
+     * path clears it and drops the derived name index before busy is released.
+     * A successful mount needs no action: the cache it published is the
+     * validated one. */
     if (result != YAN_FS_OK) {
         clear_directory(fs);
         fs->name_order_count = 0u;

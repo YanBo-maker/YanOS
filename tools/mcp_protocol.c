@@ -1,4 +1,5 @@
 #include "mcp_protocol.h"
+#include "mcp_meta.h"
 #include "mcp_note.h"
 #include "note_blocks_format.h"
 #include "note_metadata_format.h"
@@ -257,6 +258,7 @@ void yan_mcp_parse(const char *text,size_t length,YanMcpSession *session,
 {
     memset(r,0,sizeof *r); protocol_error(r,-32700);
     r->allow_write=session->allow_write;
+    r->allow_meta=session->allow_meta;
     if (!text || !bounded(text,length)) return;
     yyjson_doc *doc=yyjson_read_opts((char *)text,length,0,allocator,NULL);
     if (!doc) return;
@@ -322,8 +324,12 @@ void yan_mcp_parse(const char *text,size_t length,YanMcpSession *session,
         bool refs=string_is(name,"yanos_block_refs"), backlinks=string_is(name,"yanos_block_backlinks");
         YanMcpNoteTool note=r->allow_write ? yan_mcp_note_tool(yyjson_get_str(name))
                                            : YAN_NOTE_TOOL_NONE;
+        /* 0027 metadata is gated by its own --allow-meta so that the default
+         * tools/list stays byte-identical to the 0033 six-tool array
+         * (0035-R1-AC1, 0035-R12-AC1). */
+        bool meta=r->allow_meta && string_is(name,"yanos_note_meta");
         if (!search && !status && !list && !read && !refs && !backlinks &&
-            note==YAN_NOTE_TOOL_NONE) goto done;
+            note==YAN_NOTE_TOOL_NONE && !meta) goto done;
         r->kind=YAN_MCP_TOOL_ERROR; r->error=0;
         if (status) { if (!args || yyjson_obj_size(args)==0) r->kind=YAN_MCP_STATUS; }
         else if (search) {
@@ -331,6 +337,10 @@ void yan_mcp_parse(const char *text,size_t length,YanMcpSession *session,
             if (!args || yyjson_obj_size(args)!=1 || !yyjson_is_str(query) ||
                 !yan_semantic_query_valid((const uint8_t *)yyjson_get_str(query),yyjson_get_len(query))) goto done;
             memcpy(r->query,yyjson_get_str(query),yyjson_get_len(query)); r->kind=YAN_MCP_SEARCH;
+        } else if (meta) {
+            /* Same name/expected_source shape as the block read tools. */
+            if (!args || !block_arguments(r,args,false,false)) goto done;
+            r->kind=YAN_MCP_NOTE_META;
         } else if (list || refs) {
             if (!args || !block_arguments(r,args,false,false)) goto done;
             r->kind=list ? YAN_MCP_BLOCK_LIST : YAN_MCP_BLOCK_REFS;
@@ -362,12 +372,19 @@ static const char *const tools_json_parts[] = {
     "\"name\":\"yanos_block_refs\",\"description\":\"Read-only references in source byte order, first 20 plus the full occurrence count, with target names/IDs and existence state.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\"],\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"expected_source\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"}}},\"outputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schema_version\",\"operation\",\"source_sha256\",\"name\",\"total\",\"shown\",\"refs\"],\"properties\":{\"schema_version\":{\"const\":1},\"operation\":{\"const\":\"block_refs\"},\"source_sha256\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"},\"name\":{\"type\":\"string\"},\"total\":{\"type\":\"integer\",\"minimum\":0},\"shown\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":20},\"refs\":{\"type\":\"array\",\"maxItems\":20,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"source\",\"block_id\",\"line\",\"start\",\"end\",\"target\",\"state\"],\"properties\":{\"source\":{\"type\":\"string\"},\"block_id\":{\"type\":[\"string\",\"null\"]},\"line\":{\"type\":\"integer\",\"minimum\":0},\"start\":{\"type\":\"integer\",\"minimum\":0},\"end\":{\"type\":\"integer\",\"minimum\":0},\"target\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\",\"id\"],\"properties\":{\"name\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}}},\"state\":{\"enum\":[\"OK\",\"DANGLING_FILE\",\"DANGLING_BLOCK\"]}}}}}},\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,\"idempotentHint\":true,\"openWorldHint\":false}},{",
     "\"name\":\"yanos_block_backlinks\",\"description\":\"Read-only occurrences of one target address across ASCII-ordered files, first 20 plus total, skipped non-text files and target state.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\",\"block_id\"],\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"block_id\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"expected_source\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"}}},\"outputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schema_version\",\"operation\",\"source_sha256\",\"name\",\"block_id\",\"total\",\"shown\",\"skipped\",\"target_state\",\"backlinks\"],\"properties\":{\"schema_version\":{\"const\":1},\"operation\":{\"const\":\"block_backlinks\"},\"source_sha256\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"},\"name\":{\"type\":\"string\"},\"block_id\":{\"type\":\"string\"},\"total\":{\"type\":\"integer\",\"minimum\":0},\"shown\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":20},\"skipped\":{\"type\":\"integer\",\"minimum\":0},\"target_state\":{\"enum\":[\"OK\",\"DANGLING_FILE\",\"DANGLING_BLOCK\"]},\"backlinks\":{\"type\":\"array\",\"maxItems\":20,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"source\",\"block_id\",\"line\",\"start\",\"end\"],\"properties\":{\"source\":{\"type\":\"string\"},\"block_id\":{\"type\":[\"string\",\"null\"]},\"line\":{\"type\":\"integer\",\"minimum\":0},\"start\":{\"type\":\"integer\",\"minimum\":0},\"end\":{\"type\":\"integer\",\"minimum\":0}}}}}},\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,\"idempotentHint\":true,\"openWorldHint\":false}}",
 };
-static char *tools_json_join(bool allow_write,size_t *length)
+static char *tools_json_join(bool allow_write,bool allow_meta,size_t *length)
 {
     unsigned notes=allow_write ? yan_mcp_note_tool_count() : 0;
+    /* tools_json_parts is the always-on 0033 six-tool array and must not gain
+     * an entry: 0035-R1-AC1/0035-R12-AC1 pin its byte-identical output when no
+     * extension flag is given. The 0027 metadata tool is therefore appended
+     * from its own gated branch, before the write tools, so the observed order
+     * is six read-only, then yanos_note_meta, then create/replace. */
+    bool meta=allow_meta;
     size_t total=2;
     for (unsigned i=0;i<sizeof tools_json_parts/sizeof *tools_json_parts;++i)
         total+=strlen(tools_json_parts[i]);
+    if (meta) total+=1+strlen(yan_mcp_meta_tool_json());
     for (unsigned i=0;i<notes;++i)
         total+=1+strlen(yan_mcp_note_tool_json(i));
     char *text=malloc(total+1);
@@ -376,6 +393,11 @@ static char *tools_json_join(bool allow_write,size_t *length)
     for (unsigned i=0;i<sizeof tools_json_parts/sizeof *tools_json_parts;++i) {
         size_t n=strlen(tools_json_parts[i]);
         memcpy(text+at,tools_json_parts[i],n); at+=n;
+    }
+    if (meta) {
+        const char *tool=yan_mcp_meta_tool_json();
+        size_t n=strlen(tool);
+        text[at++]=','; memcpy(text+at,tool,n); at+=n;
     }
     for (unsigned i=0;i<notes;++i) {
         const char *tool=yan_mcp_note_tool_json(i);
@@ -427,7 +449,7 @@ YanMcpReplyStatus yan_mcp_reply_ex(const YanMcpRequest *r,const char *payload,si
             body=copy_json(doc,discover,sizeof discover-1,a);
         } else if (r->kind==YAN_MCP_LIST) {
             size_t tools_length=0;
-            char *tools=tools_json_join(r->allow_write,&tools_length);
+            char *tools=tools_json_join(r->allow_write,r->allow_meta,&tools_length);
             if (tools) body=copy_json(doc,tools,tools_length,a);
             free(tools);
         } else if (r->kind==YAN_MCP_PING) body=yyjson_mut_obj(doc);
