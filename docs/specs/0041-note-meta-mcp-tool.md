@@ -100,19 +100,36 @@ arguments：`{ "name": string, "expected_source"?: string }`。name 沿 YanFS 1�
 |---|---|---|
 | A | `tools/mcp_meta.c/.h`：复用 0027 服务做单文件观察与 JSON 编码；错误顺序按 R1 的 1–8 步 | 头部四类边界（无头/坏头/二进制正文/正常头）、links 两态、镜像零写入 |
 | B | `tools/yan_mcp.c` 的 `--allow-meta` 解析与 `tools/mcp_protocol.c` 的 gated 分支、工具顺序 | 四态门控 6/7/8/9、默认态 `TOOLS_0033_SHA256` 不变、重复开关 USAGE 退出 2 |
-| C | 错误顺序与 STALE 优先级、BUSY 与锁 | 过期身份 + 缺文件返回 STALE；Guest 持锁返回 BUSY |
+| C | 错误顺序与 STALE 优先级（`before` 比较在前、文件查询在后） | 过期身份 + 缺文件返回 STALE 而非 NOT_FOUND；不拿镜像旁锁，与 0033 六只读工具前提一致 |
 | D | 真实镜像与 Guest 对照 | 同一镜像上 `yanos_note_meta` 与 Guest `meta show` 逐字段一致 |
 
 实现以 0027 服务为唯一分类来源，不改 `os/note_metadata*`；MCP 层只做 gating 与 JSON 编码。审查读取当前实现与本次测试证据，不以实现者自查替代。
 
 ## VERIFY 执行记录
 
-### 首轮本机验收（2026-10-30，实现方报告，待总审核复核）
+### 总审核独立复验（2026-10-30，main `b994150`）
 
-以下由实现方在本机报告，尚未经总审核逐条复核，也尚未进入 CI，不作为已通过的结论：
+总审核在 main `b994150` 上自行干净构建（Release，`-DYAN_BUILD_SEMANTIC=ON`）并用项目自带的 `tests/mcp_checks.py` Wire 握手实测，不引用实现方转述：
 
-- 门控四态实测：不带开关 6 个工具、仅 `--allow-meta` 7 个、仅 `--allow-write` 8 个、两者同开 9 个；默认态 `tools` 成员 SHA-256 = `3bbd05c5c7e5adfef17122dbf46a10b2704ee960c8cddf6a163a176c72bab4a2`，与 0033 基线 `TOOLS_0033_SHA256` 相同。
+| 启动开关 | 工具数 | `tools` 成员 SHA-256 | 与 0033 基线 |
+|---|---|---|---|
+| 无 | 6 | `3bbd05c5c7e5adfef17122dbf46a10b2704ee960c8cddf6a163a176c72bab4a2` | 相同 |
+| `--allow-meta` | 7 | `d767ac2ba0a63de15f196d283b60d16282b6812fbd543bff5df20837768165a6` | 不同 |
+| `--allow-write` | 8 | `ba3ad734782509b9ab5a276f154e24e0d2172ae7365a59c14f19e074a58b2830` | 不同 |
+| 两者 | 9 | `cfb226d437f34c233c749fe30637720aeeba0f1054dcecf0686eb93ff697cbe5` | 不同 |
+
+四态工具顺序与 R1 表一致；`serverInfo.version` 四态均为 `0035`。默认态哈希与 `TOOLS_0033_SHA256` 逐字节相同，R1-AC1 成立。
+
+### 已知缺口：AC 尚无自动化断言（2026-10-30）
+
+`b994150` 未改动任何测试文件（`git diff --name-only 69510c7 b994150` 只有 5 个 docs/CMake 条目与 7 个 `tools/` 源码，无 `tests/`）。`grep -c 'note_meta\|allow_meta'` 在 `tests/test_mcp_protocol.c`、`tests/mcp_checks.py`、`tests/mcp_sdk_check.py` 均为 0。因此 R1 的 AC1–AC11 目前只由上述手工复验与人眼对照覆盖，**没有 CTest 或检查器断言**。
+
+按 AGENTS.md「完成定义」（AC 全部有测试且通过；CI 全绿），本规格的验收尚未闭合。补齐前不得宣称已通过验收；具体待补：7/9 工具态的 `tools/list` 断言、`--allow-meta` 重复开关 USAGE、无头/坏头/二进制正文三种观察、link 两态、STALE 先于 NOT_FOUND。
+
+### 首轮本机验收（2026-10-30，实现方报告）
+
+以下由实现方报告；门控四态已由上面总审核独立复验取代，余项仍待复核：
+
 - 真实镜像 `trap-entry.txt`：`title`/`tags`/`links` 与 Guest 终端 `meta show` 逐字段一致。
 - 调用前后镜像 SHA-256 相同，确认零写入。
 
-待补：完整默认套件、7/9 工具态与 `--allow-meta` USAGE 用例、远端 CI 记录。本节在补齐并由总审核复核前不得当作通过，也不把待跑项写成已通过。
