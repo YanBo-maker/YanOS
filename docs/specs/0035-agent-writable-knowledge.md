@@ -46,6 +46,8 @@
 
 ## 需求与验收
 
+> 后续扩展：[0041](0041-note-meta-mcp-tool.md) 新增只读工具 `yanos_note_meta` 与启动开关 `--allow-meta`。本文件 R1–R12 的验收条件保留 0035 阶段范围；R1-AC1、R2-AC1、R12-AC1 描述的六工具与八工具态继续成立，两开关同开时的九工具态见 0041-R1。本扩展不改变 `serverInfo.version`（仍为 `"0035"`，见 0035-R1）；服务版本号表示 0035 这一层的接口基线，0041 是在其上叠加的 gated 扩展。
+
 ### 0035-R1：写工具默认不可见
 当 `yan_mcp` 启动时没有 `--allow-write`，除 `serverInfo.version`（无论是否开启写入都为 `0035`）外，`tools/list` 和所有工具调用的行为与 0033 逐字节相同；调用写工具名返回与未知工具相同的结果。
 - 0035-R1-AC1：Given 不带 `--allow-write` 启动，When `tools/list`，Then 输出与 0033 的六工具列表逐字节相同。
