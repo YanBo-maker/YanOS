@@ -907,3 +907,11 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 主线文档与实现对齐修正：更新 README 入口、镜像旁锁的平台限制及 CI 覆盖说明，为旧决策和性能规划补充固定快照引用与后续结论。历史原文保留，程序行为和规格状态保持。
 
 上一开发阶段的0036-R1格式化参数校验整理已于2026-10-29经[PR #98](https://github.com/YanBo-maker/YanOS/pull/98)合入 main（`55069e9`），实现、独立核对与所有者意图验收已完成；该PR的三项远端CI通过，验证范围见[0036 VERIFY](specs/0036-yanfs-multi-block-directory.md#r1-issue-63格式化参数校验归并2026-10-29)。0035、0036整体仍为Approved，0040为Implemented；学习理解程度由项目所有者判断。
+
+### 2026-10-30：PR #109 合入前的当前阶段
+
+## 当前阶段
+
+用法入口与平台覆盖说明收尾：在 `yan_run --disk-image` 示例旁说明Linux/WSL旁锁、锁冲突退出码及Windows限制；明确Windows的文档判据自测与Linux的MCP服务验收范围。程序行为、工具参数和CI配置保持。
+
+前一组六项文档修正已随[PR #100](https://github.com/YanBo-maker/YanOS/pull/100)以`2233ea8`合入main；其合入前验证已核对，合入后的[主线CI](https://github.com/YanBo-maker/YanOS/actions/runs/40892892526)已由Actions API确认通过。本阶段不新增Windows原生MCP支持，0035、0036整体仍为Approved，0040为Implemented；学习理解程度由项目所有者判断。
