@@ -13,11 +13,11 @@
 
 | 已决定 | 禁止 | 未规定（留给实现者） |
 |---|---|---|
-| 只加一个只读工具，只由 `--allow-meta` 开启，与 `--allow-write` 正交 | meta 的写入面（title/tag/link/date 的增删改）；不带 `--allow-meta` 时出现在工具列表 | description 的措辞 |
+| 加两个只读工具（`yanos_note_meta`、`yanos_note_list`），同由 `--allow-meta` 开启，与 `--allow-write` 正交 | meta 的写入面（title/tag/link/date 的增删改）；不带 `--allow-meta` 时出现在工具列表 | description 的措辞 |
 | link 状态两态 `OK`/`MISSING`，只看目标文件是否存在 | 读目标正文判定链接健康；引入第三态；复用 0032 的 `OK/DANGLING_FILE/DANGLING_BLOCK` | — |
 | 单文件观察只校验目标头 | 导入 0027:83 的 list 全库预检（任意坏头即 METADATA、不出半份名单） | — |
 | 正文内容不参与判定，对二进制正文照常返回元数据 | 在观察路径返回 INVALID_TEXT / TOO_LARGE（二者属 0027 的 update 路径） | — |
-| 本次不含 tag 筛选 | 把 `meta list` 的 AND 筛选或 `search` 的 `tag:` 操作符塞进本工具 | 另开 Issue 的编号与拆法 |
+| `meta list` 的 tag AND 筛选由 R2 提供；`yanos_note_list` 只返名单 | 让 `yanos_note_list` 返回每文件元数据；流式输出半份名单；把 `search` 的 `tag:` 操作符（0027:97）塞进本工具 | `search` 侧操作的 Issue 编号与拆法 |
 
 ## 需求与验收
 
@@ -68,16 +68,16 @@ arguments：`{ "name": string, "expected_source"?: string }`。name 沿 YanFS 1�
 | 启动开关 | 工具列表 |
 |---|---|
 | 无 | 0033 六工具，JSON 数组逐字节不变（`TOOLS_0033_SHA256` 不变） |
-| 仅 `--allow-meta` | 六工具 + `yanos_note_meta` = **7** |
+| 仅 `--allow-meta` | 六工具 + `yanos_note_meta` + `yanos_note_list` = **8** |
 | 仅 `--allow-write` | 六工具 + `yanos_note_create` + `yanos_note_replace` = **8**（与 0035-R2-AC1 一致） |
-| 两者 | 六工具 → `yanos_note_meta` → `yanos_note_create` → `yanos_note_replace` = **9** |
+| 两者 | 六工具 → `yanos_note_meta` → `yanos_note_list` → `yanos_note_create` → `yanos_note_replace` = **10** |
 
 `serverInfo.version` **保持 `"0035"`**，不推进为 `0041`。理由：0035 有四处把该值规定为 `"0035"`（`grep -c serverInfo.version` = 4）——「0035-R1」正文、「0035-R2」正文、「实施澄清（develop-gpt…）」节、以及 0035-R12-AC1；而本规格不改写 0035 任何正文，故必须遵守其取值规定。这与 0033 当年推进为 `0033` 不矛盾：0031 全文没有该值的取值规定（`grep -c serverInfo.version` = 0），0033 是首次定值而非违反既存规定。服务版本号表示 0035 这一层的接口基线，0041 是在其上叠加的 gated 扩展。「实施澄清（develop-gpt…）」节那条的措辞是「不论是否带 `--allow-write`」，未覆盖 `--allow-meta`；本规格保持 `"0035"`，因此不需要对该条做任何澄清。
 
-- 0041-R1-AC1：Given 不带任何开关启动，When `tools/list`，Then 工具数 6，名称依次为 search、index_status、block_list、block_read、block_refs、block_backlinks，`tools` 成员的 SHA-256 等于 0033 六工具基线 `TOOLS_0033_SHA256`，`yanos_note_meta` 不出现。
+- 0041-R1-AC1：Given 不带任何开关启动，When `tools/list`，Then 工具数 6，名称依次为 search、index_status、block_list、block_read、block_refs、block_backlinks，`tools` 成员的 SHA-256 等于 0033 六工具基线 `TOOLS_0033_SHA256`，`yanos_note_meta` 与 `yanos_note_list` 均不出现。
 - 0041-R1-AC2：Given 仅带 `--allow-write` 启动，When 用官方 SDK 列工具，Then 依次为 0033 六工具加 `yanos_note_create`、`yanos_note_replace`（即 0035-R2-AC1 在原位仍成立）。
-- 0041-R1-AC3：Given 仅带 `--allow-meta` 启动，When `tools/list`，Then 工具数 7，第 7 个为 `yanos_note_meta`，其 annotations 恰为上述四项，inputSchema/outputSchema 非空且 `additionalProperties` 为 false。
-- 0041-R1-AC4：Given 两开关同开，When `tools/list`，Then 顺序为六只读 → `yanos_note_meta` → `yanos_note_create` → `yanos_note_replace`，共 9 个。
+- 0041-R1-AC3：Given 仅带 `--allow-meta` 启动，When `tools/list`，Then 工具数 8，第 7 个为 `yanos_note_meta`、第 8 个为 `yanos_note_list`，两者 annotations 恰为上述四项，inputSchema/outputSchema 非空且 `additionalProperties` 为 false。
+- 0041-R1-AC4：Given 两开关同开，When `tools/list`，Then 顺序为六只读 → `yanos_note_meta` → `yanos_note_list` → `yanos_note_create` → `yanos_note_replace`，共 10 个。
 - 0041-R1-AC5：Given 不带 `--allow-meta` 的实例，When 调用 `yanos_note_meta`，Then 返回值与调用一个不存在的工具名相同（JSON-RPC `-32602`），镜像 SHA-256 不变。
 - 0041-R1-AC6：Given 一篇头为 title=中断笔记、created=2026-10-07、tag=os、tag=riscv、link=irq.txt（存在）、link=missing.txt（不存在）的笔记，When 调用，Then has_header=true、title/tags 逐字节相符、links 依次为 `{irq.txt,OK}` 与 `{missing.txt,MISSING}`，镜像 SHA-256 与 mtime 不变。
 - 0041-R1-AC7：Given 一个无头、正文为二进制的旧笔记，When 调用，Then has_header=false、title/created/modified 为 null、tags 与 links 为空数组、返回成功，**不返回 INVALID_TEXT 或 TOO_LARGE**。
@@ -86,11 +86,52 @@ arguments：`{ "name": string, "expected_source"?: string }`。name 沿 YanFS 1�
 - 0041-R1-AC10：Given 任一次成功或失败调用，Then 镜像零写入，SHA-256 不变。
 - 0041-R1-AC11：Given 一个正被 `yan_run` 持有排他锁的镜像，When 调用 `yanos_note_meta`，Then 与 0033 的六个只读工具一致：不拿镜像旁锁，照常只读打开并返回观察结果（若调用期间镜像被就地改写，则由 R1 第 7 步的前后身份比较报 STALE）。
 
+### 0041-R2：新增只读工具 yanos_note_list，同由 --allow-meta 开启
+
+`yanos_note_list` 只读，补齐 0027:83 的 `meta list` 在 MCP 侧的用户面：列出笔记库的文件名，可按标签筛选。它只由既有的 `--allow-meta` 启用（不新增开关），与 `--allow-write` 正交，默认关闭。
+
+**本工具只返回名单，不返回每个文件的元数据**——单文件字段仍由 R1 的 `yanos_note_meta` 提供。这是 0027:83 的既有语义，也是两条工具的分界。
+
+arguments：`{ "tags"?: string[], "expected_source"?: string }`。`tags` 可省略或为空表示不筛选；每项为 1–63 字节的标签原文，**最多 16 个去重后不同**的标签，重复 token 先去重再计配额（`note_metadata_format.h:85-87` 要求调用方去重）。`expected_source` 为 64 个小写十六进制字符（沿 0030 身份）。未知字段、tags 超 16、空标签、超 63 字节、含 NUL 或格式错误的 expected_source 均 INVALID，零来源 I/O。
+
+成功对象沿用 0033 的公共成员（`schema_version`=1、`operation`="note_list"、`source_sha256`），另加 `names`（string[]，ASCII 文件名升序）、`shown`（整数，等于 `names` 长度）、`complete`（常量 true）。
+
+**筛选与列出**：多个 `tags` 为 AND（文件须同时含全部标签）。无 `tags` 时列出全部文件，**含无头的旧文件**（其标签视为空集合，0027:83）。**空结果仍成功**：`names` 为空数组、`shown` 为 0，不是错误。
+
+**全库预检**：按 0027:83，必须先检查库中每个文件的头；**任一坏头即返回 METADATA，不返回半份名单、不返回 OK**。因此本工具不能在扫描过程中流式输出——必须先完成全库校验，再构造响应。单文件观察（R1）不做此预检，两者的错误规则不同，不得混用。
+
+错误顺序沿 R1 与 0033:44，第一条命中即返回：
+
+1. 请求格式/参数错误（未知字段、tags 超 16、空标签、超 63 字节、非法 expected_source）→ INVALID，零来源 I/O
+2. 打开/挂载镜像失败 → 实际错误
+3. 计算前身份（`before`）失败 → 实际错误
+4. 合法 expected_source 与 `before` 不符 → STALE，**不进入全库扫描**
+5. 全库扫描中发现坏头 → METADATA，名单不发布
+6. 扫描中其它读错误 → 实际错误
+7. 成功后重新观察 `after`，与 `before` 不同 → STALE
+8. 成功；`source_sha256` 为 `after`（此时等于 `before`）
+
+第 4 步先于第 5 步：过期身份的代价必须低于全库扫描。这与 R1 及 0033 块工具的优先级一致，使调用方能用一套逻辑处理三族只读工具。
+
+注解与 R1 相同：`readOnlyHint:true`、`destructiveHint:false`、`idempotentHint:true`、`openWorldHint:false`。本工具同样不拿镜像旁锁，前提与 0033 的六个只读工具一致（0035:44）。
+
+- 0041-R2-AC1：Given 不带任何开关启动，When `tools/list`，Then 工具数仍为 6，`tools` 成员的 SHA-256 等于 `TOOLS_0033_SHA256`，`yanos_note_list` 不出现。
+- 0041-R2-AC2：Given 仅带 `--allow-meta` 启动，When 调用 `yanos_note_list` 且不带 `tags`，Then 返回库中全部文件名，按 ASCII 升序，`shown` 等于 `names` 长度，含无头旧文件。
+- 0041-R2-AC3：Given 同一镜像，When 带单个 `tag`，Then 只返回含该标签的文件；与 Guest 终端 `meta list tag:<同一个>` 的名单逐项相同。
+- 0041-R2-AC4：Given 同一镜像，When 带两个 `tag`，Then 只返回同时含这两个标签的文件（AND，不是 OR）。
+- 0041-R2-AC5：Given 一组没有交集的 `tags`，When 调用，Then `names` 为空数组、`shown` 为 0，且返回**成功**（不是错误）。
+- 0041-R2-AC6：Given 库中存在任一坏头文件，When 调用，Then 返回 METADATA，**不返回部分名单、不返回 OK**。
+- 0041-R2-AC7：Given `tags` 含重复项（如 `["cpu","cpu"]`），When 调用，Then 结果与只传一次相同，且重复项不消耗 16 个配额。
+- 0041-R2-AC8：Given `tags` 超过 16 项、或含空字符串、或某项超过 63 字节，When 调用，Then INVALID，零来源 I/O。
+- 0041-R2-AC9：Given 过期 `expected_source` 且库中存在坏头，When 调用，Then 返回 STALE（不是 METADATA，因第 4 步先于第 5 步）。
+- 0041-R2-AC10：Given 不带 `--allow-meta` 的实例，When 调用 `yanos_note_list`，Then 返回值与调用不存在的工具名相同（JSON-RPC `-32602`），镜像 SHA-256 不变。
+- 0041-R2-AC11：Given 任一次成功或失败调用，Then 镜像零写入，SHA-256 不变。
+
 ## 非目标
 
 - 不改 0033 六个工具与 0035 两个写工具的任何行为、schema、注解或错误 token。
 - 不提供 meta 的写入面：不新增 `yanos_note_meta_set` 之类工具；改 meta 仍走 Guest 终端或 0035 的整文件覆盖。
-- 不提供 tag 筛选与文件名单：`meta list` 的 AND 筛选（0027:83）和 `search` 的 `tag:` 操作符（0027:97）都不在本规格，另开 Issue 并拆成两条。
+- 不提供 `search` 的 `tag:` 操作符（0027:97）：它走检索结果而非文件名单，返回形状与错误规则都不同（tag-only 为 ERROR USAGE、要求至少一个 0026 关键词组），另开 Issue。`meta list` 的 AND 筛选已由 R2 提供。
 - 不新增文件格式、索引、磁盘字段或身份类型；不读目标正文；不在读取路径启动模型或 runner。
 - 不支持 Windows 原生运行（与 0031–0035 相同，只在 Linux/WSL 上运行）。
 
@@ -99,7 +140,7 @@ arguments：`{ "name": string, "expected_source"?: string }`。name 沿 YanFS 1�
 | 顺序 | 实现范围 | 必须提供的证据 |
 |---|---|---|
 | A | `tools/mcp_meta.c/.h`：复用 0027 服务做单文件观察与 JSON 编码；错误顺序按 R1 的 1–8 步 | 头部四类边界（无头/坏头/二进制正文/正常头）、links 两态、镜像零写入 |
-| B | `tools/yan_mcp.c` 的 `--allow-meta` 解析与 `tools/mcp_protocol.c` 的 gated 分支、工具顺序 | 四态门控 6/7/8/9、默认态 `TOOLS_0033_SHA256` 不变、重复开关 USAGE 退出 2 |
+| B | `tools/yan_mcp.c` 的 `--allow-meta` 解析与 `tools/mcp_protocol.c` 的 gated 分支（两个 meta 工具）、工具顺序 | 四态门控 6/8/8/10、默认态 `TOOLS_0033_SHA256` 不变、重复开关 USAGE 退出 2 |
 | C | 错误顺序与 STALE 优先级（`before` 比较在前、文件查询在后） | 过期身份 + 缺文件返回 STALE 而非 NOT_FOUND；不拿镜像旁锁，与 0033 六只读工具前提一致 |
 | D | 真实镜像与 Guest 对照 | 同一镜像上 `yanos_note_meta` 与 Guest `meta show` 逐字段一致 |
 
@@ -116,20 +157,20 @@ arguments：`{ "name": string, "expected_source"?: string }`。name 沿 YanFS 1�
 | 无 | 6 | `3bbd05c5c7e5adfef17122dbf46a10b2704ee960c8cddf6a163a176c72bab4a2` | 相同 |
 | `--allow-meta` | 7 | `d767ac2ba0a63de15f196d283b60d16282b6812fbd543bff5df20837768165a6` | 不同 |
 | `--allow-write` | 8 | `ba3ad734782509b9ab5a276f154e24e0d2172ae7365a59c14f19e074a58b2830` | 不同 |
-| 两者 | 9 | `cfb226d437f34c233c749fe30637720aeeba0f1054dcecf0686eb93ff697cbe5` | 不同 |
+| 两者 | 10 | 见 VERIFY 执行记录 | 不同 |
 
 四态工具顺序与 R1 表一致；`serverInfo.version` 四态均为 `0035`。默认态哈希与 `TOOLS_0033_SHA256` 逐字节相同，R1-AC1 成立。
 
-### 已知缺口：AC 尚无自动化断言（2026-10-30）
+### AC 自动化断言（2026-10-30 补齐）
 
-`b994150` 未改动任何测试文件（`git diff --name-only 69510c7 b994150` 只有 5 个 docs/CMake 条目与 7 个 `tools/` 源码，无 `tests/`）。`grep -c 'note_meta\|allow_meta'` 在 `tests/test_mcp_protocol.c`、`tests/mcp_checks.py`、`tests/mcp_sdk_check.py` 均为 0。因此 R1 的 AC1–AC11 目前只由上述手工复验与人眼对照覆盖，**没有 CTest 或检查器断言**。
+`b994150` 合入时未改动任何测试文件，R1 的 AC1–AC11 曾只由手工复验覆盖，按 AGENTS.md「完成定义」验收未闭合。该缺口已由 PR #112（`4e345ec`）补齐：新增 `tests/mcp_meta_checks.py`（14 个用例），CMake 注册 `mcp_meta`。R2 的 AC1–AC11 由同一 PR 系列的 `tests/mcp_note_list_checks.py`（18 个断言）覆盖，CMake 注册 `mcp_note_list`。
 
-按 AGENTS.md「完成定义」（AC 全部有测试且通过；CI 全绿），本规格的验收尚未闭合。补齐前不得宣称已通过验收；具体待补：7/9 工具态的 `tools/list` 断言、`--allow-meta` 重复开关 USAGE、无头/坏头/二进制正文三种观察、link 两态、STALE 先于 NOT_FOUND。
+负控（均已还原）：门控改 `bool meta=true` → 报 `ac1_names`；link 状态 `MISSING`→`OK` → 恰好 AC6 变红、前 5 条仍绿；tags AND 改弱为只取首个 → `and_names` 从 `['a-cpu.txt']` 变 `['a-cpu.txt','b-cpu.txt']`。
 
-### 首轮本机验收（2026-10-30，实现方报告）
+### R2 验收记录（2026-10-30）
 
-以下由实现方报告；门控四态已由上面总审核独立复验取代，余项仍待复核：
-
-- 真实镜像 `trap-entry.txt`：`title`/`tags`/`links` 与 Guest 终端 `meta show` 逐字段一致。
-- 调用前后镜像 SHA-256 相同，确认零写入。
+- 完整默认套件 **106/106 通过，0 失败，0 跳过**（含官方 `mcp:sdk` 实际执行，非跳过）。
+- `ctest -N` 可见 `#24 mcp_meta`、`#25 mcp_note_list`。
+- 与 Guest 交叉核对（真实 26 篇库）：`yanos_note_list` 无筛选与 Guest `meta list` 都是 26 篇；`tag:cpu` 两侧都是 `cpu-core`、`csr-map`、`interrupt-wiring`、`mie-mip`、`trap-entry` 五篇。
+- 镜像零写入（调用前后 SHA-256 相同）。
 

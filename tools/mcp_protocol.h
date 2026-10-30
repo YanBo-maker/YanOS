@@ -15,6 +15,7 @@ typedef enum {
     YAN_MCP_STATUS, YAN_MCP_BLOCK_LIST, YAN_MCP_BLOCK_READ,
     YAN_MCP_BLOCK_REFS, YAN_MCP_BLOCK_BACKLINKS,
     YAN_MCP_NOTE_CREATE, YAN_MCP_NOTE_REPLACE, YAN_MCP_NOTE_META,
+    YAN_MCP_NOTE_LIST,
     YAN_MCP_TOOL_ERROR, YAN_MCP_CANCEL
 } YanMcpKind;
 /* No pointers into the decoded document survive parse. Session and active ID
@@ -32,6 +33,10 @@ typedef struct {
     bool dry_run, committed;
     uint8_t text[YAN_MCP_INPUT_MAX];
     uint32_t text_length;
+    /* 0027:83 listing filter: already-deduplicated tag bytes, count 0..16. */
+    uint8_t tag[16][64];
+    uint16_t tag_length[16];
+    uint16_t tag_count;
 } YanMcpRequest;
 bool yan_mcp_id_equal(const YanMcpId *, const YanMcpId *);
 void yan_mcp_parse(const char *, size_t, YanMcpSession *, const YanMcpId *,
