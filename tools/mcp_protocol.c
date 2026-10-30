@@ -231,6 +231,47 @@ static bool block_arguments(YanMcpRequest *r,yyjson_val *args,bool need_id,
     if (r->has_offset && r->offset>0 && !r->has_expected_source) return false;
     return true;
 }
+/* 0027:83 listing arguments: an optional tag array and an optional identity.
+ * Tags are deduplicated here because "at most 16 deduplicated distinct tags"
+ * means a repeated token must not consume a slot; the service documents that
+ * CLI parsers deduplicate before storing (note_metadata_format.h:85-87) and
+ * does no dedup of its own. */
+static bool list_arguments(YanMcpRequest *r,yyjson_val *args)
+{
+    if (!yyjson_is_obj(args) || !fields(args,"tags","expected_source",NULL))
+        return false;
+    yyjson_val *tags=yyjson_obj_get(args,"tags");
+    if (tags) {
+        if (!yyjson_is_arr(tags)) return false;
+        size_t index,max; yyjson_val *item;
+        yyjson_arr_foreach(tags,index,max,item) {
+            if (!yyjson_is_str(item)) return false;
+            size_t length=yyjson_get_len(item);
+            const char *text=yyjson_get_str(item);
+            if (length==0 || length>YAN_NOTE_TAG_MAX || memchr(text,0,length))
+                return false;
+            if (!yan_note_tag_valid((const uint8_t *)text,(uint32_t)length))
+                return false;
+            bool duplicate=false;
+            for (uint16_t s=0;s<r->tag_count;++s)
+                if (r->tag_length[s]==length && !memcmp(r->tag[s],text,length)) {
+                    duplicate=true; break;
+                }
+            if (duplicate) continue;
+            /* More than 16 DISTINCT tags is INVALID; repeated ones are not. */
+            if (r->tag_count>=YAN_NOTE_TAG_MAX_COUNT) return false;
+            memcpy(r->tag[r->tag_count],text,length);
+            r->tag_length[r->tag_count]=(uint16_t)length;
+            r->tag_count+=1u;
+        }
+    }
+    yyjson_val *expected=yyjson_obj_get(args,"expected_source");
+    if (expected) {
+        if (!expected_value(expected,r->expected_source)) return false;
+        r->has_expected_source=true;
+    }
+    return true;
+}
 static bool note_arguments(YanMcpRequest *r,yyjson_val *args)
 {
     if (!yyjson_is_obj(args) ||
@@ -326,10 +367,11 @@ void yan_mcp_parse(const char *text,size_t length,YanMcpSession *session,
                                            : YAN_NOTE_TOOL_NONE;
         /* 0027 metadata is gated by its own --allow-meta so that the default
          * tools/list stays byte-identical to the 0033 six-tool array
-         * (0035-R1-AC1, 0035-R12-AC1). */
+         * (0035-R1-AC1, 0035-R12-AC1). Both metadata tools share the flag. */
         bool meta=r->allow_meta && string_is(name,"yanos_note_meta");
+        bool meta_list=r->allow_meta && string_is(name,"yanos_note_list");
         if (!search && !status && !list && !read && !refs && !backlinks &&
-            note==YAN_NOTE_TOOL_NONE && !meta) goto done;
+            note==YAN_NOTE_TOOL_NONE && !meta && !meta_list) goto done;
         r->kind=YAN_MCP_TOOL_ERROR; r->error=0;
         if (status) { if (!args || yyjson_obj_size(args)==0) r->kind=YAN_MCP_STATUS; }
         else if (search) {
@@ -341,6 +383,9 @@ void yan_mcp_parse(const char *text,size_t length,YanMcpSession *session,
             /* Same name/expected_source shape as the block read tools. */
             if (!args || !block_arguments(r,args,false,false)) goto done;
             r->kind=YAN_MCP_NOTE_META;
+        } else if (meta_list) {
+            if (!args || !list_arguments(r,args)) goto done;
+            r->kind=YAN_MCP_NOTE_LIST;
         } else if (list || refs) {
             if (!args || !block_arguments(r,args,false,false)) goto done;
             r->kind=list ? YAN_MCP_BLOCK_LIST : YAN_MCP_BLOCK_REFS;
@@ -377,14 +422,19 @@ static char *tools_json_join(bool allow_write,bool allow_meta,size_t *length)
     unsigned notes=allow_write ? yan_mcp_note_tool_count() : 0;
     /* tools_json_parts is the always-on 0033 six-tool array and must not gain
      * an entry: 0035-R1-AC1/0035-R12-AC1 pin its byte-identical output when no
-     * extension flag is given. The 0027 metadata tool is therefore appended
-     * from its own gated branch, before the write tools, so the observed order
-     * is six read-only, then yanos_note_meta, then create/replace. */
+     * extension flag is given. Both --allow-meta tools are appended from their
+     * own gated branch, before the write tools, giving the order: six
+     * read-only, yanos_note_meta, yanos_note_list, then create/replace. The
+     * single-note lookup comes first because a caller inspects a note and then
+     * lists; the listing has no ordering dependency on it. Each branch must
+     * add its own byte count to `total` -- forgetting one under-allocates and
+     * overruns the buffer. */
     bool meta=allow_meta;
     size_t total=2;
     for (unsigned i=0;i<sizeof tools_json_parts/sizeof *tools_json_parts;++i)
         total+=strlen(tools_json_parts[i]);
     if (meta) total+=1+strlen(yan_mcp_meta_tool_json());
+    if (meta) total+=1+strlen(yan_mcp_note_list_tool_json());
     for (unsigned i=0;i<notes;++i)
         total+=1+strlen(yan_mcp_note_tool_json(i));
     char *text=malloc(total+1);
@@ -396,6 +446,11 @@ static char *tools_json_join(bool allow_write,bool allow_meta,size_t *length)
     }
     if (meta) {
         const char *tool=yan_mcp_meta_tool_json();
+        size_t n=strlen(tool);
+        text[at++]=','; memcpy(text+at,tool,n); at+=n;
+    }
+    if (meta) {
+        const char *tool=yan_mcp_note_list_tool_json();
         size_t n=strlen(tool);
         text[at++]=','; memcpy(text+at,tool,n); at+=n;
     }

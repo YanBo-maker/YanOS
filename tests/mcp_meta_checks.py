@@ -133,38 +133,53 @@ def test_r1_ac2_only_write_is_eight(binary, root):
         server.close()
 
 
-def test_r1_ac3_meta_only_is_seven(binary, root):
-    """AC3: only --allow-meta -> seven tools, the seventh is the meta tool."""
+def test_r1_ac3_meta_only_is_eight(binary, root):
+    """AC3: only --allow-meta -> eight tools: six read-only, then the two
+    metadata tools (yanos_note_meta, yanos_note_list).
+
+    The count moved 7 -> 8 when the metadata listing was added under the same
+    --allow-meta flag. That is a legal extension of this surface, not a relaxed
+    expectation: the six read-only tools and the write pair are unchanged, and
+    the default (no-flag) list is still asserted byte-identical to the 0033
+    baseline in test_r1_ac1.
+    """
     global CASES
     img = make_image(root / "ac3.img", [("a.txt", b"x\n")])
     server = Server(binary, img, extra=("--allow-meta",))
     try:
         tools = server.tools()
         names = [t["name"] for t in tools]
-        assert len(names) == 7, ("ac3_count", len(names))
+        assert len(names) == 8, ("ac3_count", len(names))
         assert names[:6] == SIX, ("ac3_prefix", names)
         assert names[6] == META_TOOL, ("ac3_seventh", names[6])
+        assert names[7] == "yanos_note_list", ("ac3_eighth", names[7])
+        # The single-note tool keeps its annotations and both schemas.
         tool = tools[6]
         assert tool["annotations"] == ANNOTATIONS, ("ac3_annotations", tool["annotations"])
         for field in ("inputSchema", "outputSchema"):
             schema = tool[field]
             assert schema and schema.get("additionalProperties") is False, \
                 ("ac3_schema", field)
+        # The listing tool carries the same read-only annotation set.
+        assert tools[7]["annotations"] == ANNOTATIONS, "ac3_list_annotations"
         assert WRITE[0] not in names and WRITE[1] not in names, "ac3_write_tools_absent"
         CASES += 1
     finally:
         server.close()
 
 
-def test_r1_ac4_both_flags_is_nine(binary, root):
-    """AC4: both flags -> six read-only, then meta, then create/replace."""
+def test_r1_ac4_both_flags_is_ten(binary, root):
+    """AC4: both flags -> six read-only, then both metadata tools, then
+    create/replace (10 total). The count moved 9 -> 10 for the same reason as
+    AC3 above."""
     global CASES
     img = make_image(root / "ac4.img", [("a.txt", b"x\n")])
     server = Server(binary, img, extra=("--allow-meta", "--allow-write"))
     try:
         names = [t["name"] for t in server.tools()]
-        assert names == SIX + [META_TOOL] + WRITE, ("ac4_order", names)
-        assert len(names) == 9, ("ac4_count", len(names))
+        assert names == SIX + [META_TOOL, "yanos_note_list"] + WRITE, \
+            ("ac4_order", names)
+        assert len(names) == 10, ("ac4_count", len(names))
         CASES += 1
     finally:
         server.close()
@@ -419,8 +434,8 @@ def main():
         root = Path(directory)
         test_r1_ac1_default_is_the_0033_six(binary, root)
         test_r1_ac2_only_write_is_eight(binary, root)
-        test_r1_ac3_meta_only_is_seven(binary, root)
-        test_r1_ac4_both_flags_is_nine(binary, root)
+        test_r1_ac3_meta_only_is_eight(binary, root)
+        test_r1_ac4_both_flags_is_ten(binary, root)
         test_r1_ac5_call_without_flag_is_unknown_tool(binary, root)
         test_r1_ac6_header_fields_and_link_states(binary, root)
         test_r1_ac7_headerless_binary_note(binary, root)

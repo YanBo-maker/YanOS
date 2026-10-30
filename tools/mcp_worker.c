@@ -312,6 +312,13 @@ YanMcpWorkerResult yan_mcp_execute(const YanMcpOptions *options,
             request->expected_source : NULL;
         result.result=(uint32_t)yan_mcp_meta_execute(options->image,request->name,
             expected,payload,length);
+    } else if (request->kind==YAN_MCP_NOTE_LIST) {
+        result.domain=YAN_MCP_DOMAIN_META;
+        const uint8_t *expected=request->has_expected_source ?
+            request->expected_source : NULL;
+        result.result=(uint32_t)yan_mcp_note_list_execute(options->image,
+            request->tag,request->tag_length,request->tag_count,
+            expected,payload,length);
     } else if (request->kind==YAN_MCP_BLOCK_LIST || request->kind==YAN_MCP_BLOCK_READ ||
         request->kind==YAN_MCP_BLOCK_REFS || request->kind==YAN_MCP_BLOCK_BACKLINKS) {
         result.domain=YAN_MCP_DOMAIN_BLOCK;

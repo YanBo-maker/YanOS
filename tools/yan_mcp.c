@@ -323,7 +323,7 @@ static bool handle(Server *s,const char *line,size_t length)
         return queued;
     }
     if (request.kind==YAN_MCP_SEARCH || request.kind==YAN_MCP_STATUS ||
-        request.kind==YAN_MCP_NOTE_META ||
+        request.kind==YAN_MCP_NOTE_META || request.kind==YAN_MCP_NOTE_LIST ||
         request.kind==YAN_MCP_BLOCK_LIST || request.kind==YAN_MCP_BLOCK_READ ||
         request.kind==YAN_MCP_BLOCK_REFS || request.kind==YAN_MCP_BLOCK_BACKLINKS) {
         if (s->task.active) return enqueue(s,&request,NULL,0,"BUSY",false);

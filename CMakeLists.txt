@@ -614,6 +614,17 @@ if(BUILD_TESTING)
                 SKIP_RETURN_CODE 77 LABELS
                 "0041-R1-AC1;0041-R1-AC2;0041-R1-AC3;0041-R1-AC4;0041-R1-AC5;0041-R1-AC6;0041-R1-AC7;0041-R1-AC8;0041-R1-AC9;0041-R1-AC10;0041-R1-AC11")
         endif()
+        # The gated 0027:83 metadata listing (yanos_note_list). Separate test
+        # so a failure names the listing rather than the single-note tool; both
+        # drive a real yan_mcp over stdio.
+        if(Python3_Interpreter_FOUND AND TARGET yan_mcp)
+            add_test(NAME mcp_note_list COMMAND "${Python3_EXECUTABLE}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_note_list_checks.py"
+                $<TARGET_FILE:yan_mcp>)
+            set_tests_properties(mcp_note_list PROPERTIES TIMEOUT 240
+                SKIP_RETURN_CODE 77 LABELS
+                "0027-list;0041-meta-surface")
+        endif()
         if(Python3_Interpreter_FOUND)
             add_test(NAME block_query_oracle COMMAND "${Python3_EXECUTABLE}" -B
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/block_page_oracle.py"

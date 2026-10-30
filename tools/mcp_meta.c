@@ -246,3 +246,177 @@ const char *yan_mcp_meta_result_name(YanMcpMetaResult result)
     }
     return "IO";
 }
+
+/* --------------------------------------------------------- 0027:83 listing
+
+ * The listing is a names-only surface: "meta list sorts by ASCII file name
+ * ascending, one name per line, then OK meta list shown=N; at most 16
+ * deduplicated distinct tag filters, several of them ANDed; with no filter it
+ * lists every file with a valid header or no header, and an old header-less
+ * file simply has no tags. Every file's header must be checked first: any
+ * broken header is ERROR METADATA with no list and no OK, never a partial
+ * list. An empty list still succeeds." (0027:83)
+ *
+ * That "check every header first" rule is why the names are collected into
+ * calloc'd storage and only encoded after yan_note_list returns: the service
+ * already reserves the whole directory and delivers no callback when any
+ * header is broken, so this layer must not stream either. */
+
+static const char list_tool_json[] =
+"{\"name\":\"yanos_note_list\",\"description\":\"只读列出笔记库的文件名，按 ASCII 名称升序，可选按 0027 标签筛选（多个 tag 为 AND，最多 16 个去重后不同的 tag）。本工具只返回名单，不返回每个文件的元数据；单文件字段请用 yanos_note_meta。无 tags 时列出全部文件（含无头的旧文件，其标签为空）。按 0027:83，必须先检查全库每个文件的头：任意一个坏头即返回 METADATA，不返回半份名单；空名单仍算成功。本工具仅在带 --allow-meta 启动时出现，理由是保护默认启动态 tools/list 与 0033 六工具逐字节相同（0035-R1-AC1、0035-R12-AC1），不是新增产品读开关；该开关不改变镜像绑定方式。\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"tags\":{\"type\":\"array\",\"maxItems\":16,\"items\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":63}},\"expected_source\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"}}},\"outputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schema_version\",\"operation\",\"source_sha256\",\"names\",\"shown\",\"complete\"],\"properties\":{\"schema_version\":{\"const\":1},\"operation\":{\"const\":\"note_list\"},\"source_sha256\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"},\"names\":{\"type\":\"array\",\"items\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31}},\"shown\":{\"type\":\"integer\",\"minimum\":0},\"complete\":{\"const\":true}}},\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,\"idempotentHint\":true,\"openWorldHint\":false}}";
+
+const char *yan_mcp_note_list_tool_json(void) { return list_tool_json; }
+
+/* Callback storage: the service borrows each name only for the synchronous
+ * call, so the collector copies it. `overflow` would mean more names than the
+ * mounted capacity, which can only be a service bug, not a user error. */
+typedef struct {
+    char (*names)[32];
+    uint32_t capacity;
+    uint32_t count;
+    bool overflow;
+} ListCollect;
+
+static bool list_collect(void *opaque, const char *name)
+{
+    ListCollect *collect = opaque;
+    if (collect->count >= collect->capacity) {
+        collect->overflow = true;
+        return false;
+    }
+    memcpy(collect->names[collect->count], name, 32u);
+    collect->names[collect->count][31] = 0;
+    collect->count += 1u;
+    return true;
+}
+
+static YanMcpMetaResult encode_list(const uint8_t source[32],
+                                    const ListCollect *collect, char **payload,
+                                    size_t *length)
+{
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    if (!doc) return YAN_MCP_META_IO;
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+    yyjson_mut_val *names = root ? yyjson_mut_arr(doc) : NULL;
+    bool ok = root && names &&
+        yyjson_mut_obj_add_uint(doc, root, "schema_version", 1) &&
+        yyjson_mut_obj_add_str(doc, root, "operation", "note_list") &&
+        add_sha256(doc, root, "source_sha256", source);
+    for (uint32_t i = 0; ok && i < collect->count; ++i)
+        ok = yyjson_mut_arr_add_strcpy(doc, names, collect->names[i]);
+    ok = ok && yyjson_mut_obj_add_val(doc, root, "names", names) &&
+        yyjson_mut_obj_add_uint(doc, root, "shown", collect->count) &&
+        yyjson_mut_obj_add_bool(doc, root, "complete", true);
+    if (ok) *payload = yyjson_mut_write_opts(doc, 0, NULL, length, NULL);
+    yyjson_mut_doc_free(doc);
+    return *payload ? YAN_MCP_META_OK : YAN_MCP_META_IO;
+}
+
+YanMcpMetaResult yan_mcp_note_list_execute(const char *image,
+                                           const uint8_t tags[16][64],
+                                           const uint16_t tag_lengths[16],
+                                           uint16_t tag_count,
+                                           const uint8_t *expected,
+                                           char **payload, size_t *length)
+{
+    if (!payload || !length) return YAN_MCP_META_INVALID;
+    *payload = NULL;
+    *length = 0;
+    if (!image || !*image) return YAN_MCP_META_INVALID;
+    /* Argument rules run before any source I/O: at most 16 deduplicated
+     * filters (0027:83) and each one a legal tag. Zero length is refused here
+     * rather than in the service so a caller sees INVALID with no I/O. */
+    if (tag_count > YAN_NOTE_TAG_MAX_COUNT) return YAN_MCP_META_INVALID;
+    YanNoteTagFilter filter;
+    memset(&filter, 0, sizeof filter);
+    for (uint16_t i = 0; i < tag_count; ++i) {
+        if (tag_lengths[i] == 0 || tag_lengths[i] > YAN_NOTE_TAG_MAX ||
+            !yan_note_tag_valid(tags[i], tag_lengths[i]))
+            return YAN_MCP_META_INVALID;
+    }
+    filter.count = tag_count;
+    for (uint16_t i = 0; i < tag_count; ++i) {
+        filter.length[i] = tag_lengths[i];
+        memcpy(filter.tag[i], tags[i], tag_lengths[i]);
+    }
+    uint8_t expect[32], before[32], after[32];
+    bool has_expected = expected != NULL;
+    if (has_expected) memcpy(expect, expected, sizeof expect);
+
+    YanSemanticPosix adapter;
+    memset(&adapter, 0, sizeof adapter);
+    adapter.image_fd = adapter.index_fd = -1;
+    YanMcpMetaResult result = map_open(
+        yan_semantic_posix_open_image_ex(&adapter, image));
+    if (result != YAN_MCP_META_OK) return result;
+
+    uint32_t capacity = adapter.fs.entry_capacity;
+    YanNoteEntry *entries = NULL;
+    char (*sort_name)[32] = NULL;
+    uint16_t *sort_index = NULL;
+    YanNoteContext *note = NULL;
+    ListCollect collect;
+    memset(&collect, 0, sizeof collect);
+    if (capacity == 0u) {
+        result = YAN_MCP_META_INVALID;
+        goto out;
+    }
+    entries = calloc(capacity, sizeof *entries);
+    sort_name = calloc(capacity, sizeof *sort_name);
+    sort_index = calloc(capacity, sizeof *sort_index);
+    note = calloc(1, sizeof *note);
+    collect.names = calloc(capacity, sizeof *collect.names);
+    collect.capacity = capacity;
+    if (!entries || !sort_name || !sort_index || !note || !collect.names) {
+        result = YAN_MCP_META_IO;
+        goto out;
+    }
+    result = map_note(yan_note_init(note, &adapter.fs, entries, sort_name,
+                                    sort_index));
+    if (result != YAN_MCP_META_OK) goto out;
+
+    YanSemanticSource source;
+    yan_semantic_posix_bind_source(&adapter, &source);
+    result = map_semantic(yan_semantic_source_digest(&source, before));
+    if (result != YAN_MCP_META_OK) goto out;
+    /* STALE before the whole-library scan, matching the block tools' order: a
+     * stale identity must beat a METADATA that the scan would have found. */
+    if (has_expected && memcmp(expect, before, 32) != 0) {
+        result = YAN_MCP_META_STALE;
+        goto out;
+    }
+
+    /* One broken header anywhere means no names and no count (0027:83). The
+     * service reserves the directory first and calls back only after every
+     * header validated, so nothing here can publish a partial list. */
+    result = map_note(yan_note_list(note, tag_count ? &filter : NULL,
+                                    list_collect, &collect, NULL));
+    if (result != YAN_MCP_META_OK) goto out;
+    if (collect.overflow) {
+        result = YAN_MCP_META_IO;
+        goto out;
+    }
+
+    result = map_semantic(yan_semantic_source_digest(&source, after));
+    if (result != YAN_MCP_META_OK) goto out;
+    if (memcmp(before, after, 32) != 0) {
+        result = YAN_MCP_META_STALE;
+        goto out;
+    }
+    result = encode_list(after, &collect, payload, length);
+
+out:
+    free(collect.names);
+    free(note);
+    free(sort_index);
+    free(sort_name);
+    free(entries);
+    (void)yan_semantic_posix_cleanup(&adapter);
+    if (result != YAN_MCP_META_OK) {
+        free(*payload);
+        *payload = NULL;
+        *length = 0;
+    }
+    return result;
+}
