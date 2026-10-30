@@ -155,9 +155,9 @@ arguments：`{ "tags"?: string[], "expected_source"?: string }`。`tags` 可省�
 | 启动开关 | 工具数 | `tools` 成员 SHA-256 | 与 0033 基线 |
 |---|---|---|---|
 | 无 | 6 | `3bbd05c5c7e5adfef17122dbf46a10b2704ee960c8cddf6a163a176c72bab4a2` | 相同 |
-| `--allow-meta` | 7 | `d767ac2ba0a63de15f196d283b60d16282b6812fbd543bff5df20837768165a6` | 不同 |
+| `--allow-meta` | 8 | `06064af069202df525140bcde8eeed540b20a70219fbac1cd17aadecef39e53e` | 不同 |
 | `--allow-write` | 8 | `ba3ad734782509b9ab5a276f154e24e0d2172ae7365a59c14f19e074a58b2830` | 不同 |
-| 两者 | 10 | 见 VERIFY 执行记录 | 不同 |
+| 两者 | 10 | `cff29342bba39087a8cf875c6890866720e21e60ae640c6c4d1eba94899a90fa` | 不同 |
 
 四态工具顺序与 R1 表一致；`serverInfo.version` 四态均为 `0035`。默认态哈希与 `TOOLS_0033_SHA256` 逐字节相同，R1-AC1 成立。
 
