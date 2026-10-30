@@ -30,13 +30,24 @@ static bool seconds(const char *s,unsigned *out)
     if (!n) return false;
     *out=n; return true;
 }
-static bool options(int argc,char **argv,YanMcpOptions *o,bool *allow_write)
+/* --allow-meta exists only to protect the default byte-identical tool list:
+ * 0035-R1-AC1 and 0035-R12-AC1 require tools/list to match the 0033 six-tool
+ * array exactly when no extension flag is given, so the optional 0027
+ * metadata tool must stay off by default. It is not a product read toggle and
+ * it deliberately takes no value and no bit in the required-argument bitmap,
+ * so --disk-image alone still selects the single image served (0035-R11). */
+static bool options(int argc,char **argv,YanMcpOptions *o,bool *allow_write,
+                    bool *allow_meta)
 {
     memset(o,0,sizeof *o); o->startup=o->request=120; unsigned seen=0;
     for (int i=1;i<argc;) {
         if (!strcmp(argv[i],"--allow-write")) {
             if (*allow_write) return false;
             *allow_write=true; ++i; continue;
+        }
+        if (!strcmp(argv[i],"--allow-meta")) {
+            if (*allow_meta) return false;
+            *allow_meta=true; ++i; continue;
         }
         if (i+1>=argc) return false;
         unsigned bit; const char **p=NULL;
@@ -312,6 +323,7 @@ static bool handle(Server *s,const char *line,size_t length)
         return queued;
     }
     if (request.kind==YAN_MCP_SEARCH || request.kind==YAN_MCP_STATUS ||
+        request.kind==YAN_MCP_NOTE_META ||
         request.kind==YAN_MCP_BLOCK_LIST || request.kind==YAN_MCP_BLOCK_READ ||
         request.kind==YAN_MCP_BLOCK_REFS || request.kind==YAN_MCP_BLOCK_BACKLINKS) {
         if (s->task.active) return enqueue(s,&request,NULL,0,"BUSY",false);
@@ -362,9 +374,10 @@ int main(int argc,char **argv)
 {
     Server *s=calloc(1,sizeof *s);
     if (!s) { fputs("ERROR IO\n",stderr); return 5; }
-    bool allow_write=false;
-    if (!options(argc,argv,&s->options,&allow_write)) { free(s); fputs("ERROR USAGE\n",stderr); return 2; }
+    bool allow_write=false, allow_meta=false;
+    if (!options(argc,argv,&s->options,&allow_write,&allow_meta)) { free(s); fputs("ERROR USAGE\n",stderr); return 2; }
     s->session.allow_write=allow_write;
+    s->session.allow_meta=allow_meta;
     struct sigaction action={0}; action.sa_handler=interrupt; sigemptyset(&action.sa_mask);
     bool ready=sigaction(SIGINT,&action,NULL)==0 && sigaction(SIGTERM,&action,NULL)==0;
     /* The harness may ignore child exits or block control signals. Own our

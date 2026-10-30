@@ -285,10 +285,17 @@ if(YAN_BUILD_SEMANTIC)
     target_link_libraries(yan_mcp_note PUBLIC yan_note_write yan_semantic_posix
                           PRIVATE yyjson::yyjson)
     target_compile_options(yan_mcp_note PRIVATE ${YAN_WARNINGS})
+    # 0027 metadata observation over MCP, gated by --allow-meta so the default
+    # tools/list stays byte-identical to the 0033 six-tool array.
+    add_library(yan_mcp_meta STATIC tools/mcp_meta.c)
+    target_include_directories(yan_mcp_meta PUBLIC tools)
+    target_link_libraries(yan_mcp_meta PUBLIC yan_note yan_semantic_posix
+                          PRIVATE yyjson::yyjson)
+    target_compile_options(yan_mcp_meta PRIVATE ${YAN_WARNINGS})
     add_library(yan_mcp_protocol STATIC tools/mcp_protocol.c)
     target_include_directories(yan_mcp_protocol PUBLIC tools)
     target_link_libraries(yan_mcp_protocol PUBLIC yan_semantic_text yan_blocks_format
-                          yan_note_format yan_mcp_note yyjson::yyjson)
+                          yan_note_format yan_mcp_note yan_mcp_meta yyjson::yyjson)
     target_compile_options(yan_mcp_protocol PRIVATE ${YAN_WARNINGS})
     add_executable(yan_mcp tools/yan_mcp.c tools/mcp_worker.c)
     target_link_libraries(yan_mcp PRIVATE yan_mcp_protocol yan_semantic_posix yan_block_query

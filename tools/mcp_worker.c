@@ -1,4 +1,5 @@
 #include "mcp_worker.h"
+#include "mcp_meta.h"
 #include "semantic_json.h"
 #include "semantic_posix.h"
 #include "semantic_llama.h"
@@ -268,12 +269,15 @@ bool yan_mcp_worker_frame_valid(const YanMcpWorkerHeader *header,size_t received
 {
     if (!header || header->length>YAN_MCP_OUTPUT_MAX) return false;
     if (received_bytes!=sizeof *header+header->length) return false;
-    if (header->domain!=YAN_MCP_DOMAIN_SEMANTIC && header->domain!=YAN_MCP_DOMAIN_BLOCK)
+    if (header->domain!=YAN_MCP_DOMAIN_SEMANTIC && header->domain!=YAN_MCP_DOMAIN_BLOCK
+        && header->domain!=YAN_MCP_DOMAIN_META)
         return false;
     if (header->result==0) return header->length>0;
     if (header->length!=0) return false;
     if (header->domain==YAN_MCP_DOMAIN_SEMANTIC)
         return header->result<=YAN_SEMANTIC_NOT_FOUND;
+    if (header->domain==YAN_MCP_DOMAIN_META)
+        return header->result<=YAN_MCP_META_IO;
     return header->result<=YAN_BLOCK_QUERY_UNSUPPORTED;
 }
 const char *yan_mcp_worker_token(const YanMcpWorkerHeader *header)
@@ -286,6 +290,12 @@ const char *yan_mcp_worker_token(const YanMcpWorkerHeader *header)
             return yan_semantic_result_name((YanSemanticResult)header->result);
         return "IO";
     }
+    if (header->domain==YAN_MCP_DOMAIN_META) {
+        if (header->result==0) return NULL;
+        if (header->result<=YAN_MCP_META_IO)
+            return yan_mcp_meta_result_name((YanMcpMetaResult)header->result);
+        return "IO";
+    }
     if (header->result==0) return NULL;
     if (header->result<=YAN_BLOCK_QUERY_UNSUPPORTED)
         return yan_block_query_result_name((YanBlockQueryResult)header->result);
@@ -296,7 +306,13 @@ YanMcpWorkerResult yan_mcp_execute(const YanMcpOptions *options,
     char **payload,size_t *length)
 {
     YanMcpWorkerResult result;
-    if (request->kind==YAN_MCP_BLOCK_LIST || request->kind==YAN_MCP_BLOCK_READ ||
+    if (request->kind==YAN_MCP_NOTE_META) {
+        result.domain=YAN_MCP_DOMAIN_META;
+        const uint8_t *expected=request->has_expected_source ?
+            request->expected_source : NULL;
+        result.result=(uint32_t)yan_mcp_meta_execute(options->image,request->name,
+            expected,payload,length);
+    } else if (request->kind==YAN_MCP_BLOCK_LIST || request->kind==YAN_MCP_BLOCK_READ ||
         request->kind==YAN_MCP_BLOCK_REFS || request->kind==YAN_MCP_BLOCK_BACKLINKS) {
         result.domain=YAN_MCP_DOMAIN_BLOCK;
         result.result=(uint32_t)execute_block(options,request,cancel,payload,length);
