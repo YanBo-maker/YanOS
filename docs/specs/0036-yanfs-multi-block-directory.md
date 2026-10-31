@@ -29,7 +29,7 @@
 本规格的做法见 0036-R3：一次性 bump arena。
 
 - `os/guest.ld` 在 .bss 之后导出 `__yan_arena_start`，并定义 `__yan_arena_end = 0x80000000 + 32 MiB`（`yan_run` 默认 RAM 改为 64 MiB，环形缓冲区在 RAM 顶部 0x83FFC000，闫博 2026-10-20 裁定）。
-- `yan_run` 加载 ELF 时检查 `__yan_arena_end ≤ 环形缓冲区基址`，不满足就拒绝启动。
+- `yan_run` 加载 ELF 时，对**导出了 arena 符号**的镜像检查 `__yan_arena_end ≤ 环形缓冲区基址`，不满足就拒绝启动；不导出这两个符号的旧测试镜像不参与该检查（判据与取舍见 0036-R3 同名需求条）。
 - arena 只分配不释放。启动时先读目录头得到容量 N，再按 N 一次性分配所有与文件数有关的存储，此后不再分配。
 - Host 侧的工具和测试改用 calloc 分配同样大小的内存。
 
@@ -118,7 +118,7 @@
 Guest 增加一次性 bump arena：
 
 - `os/guest.ld` 在所有加载段（包括 .bss 里的启动栈和 `.tohost`）之后导出 `__yan_arena_start`（16 字节对齐），并定义 `__yan_arena_end = 0x80000000 + 32 MiB`。
-- `yan_run` 加载 ELF 时检查 `__yan_arena_start ≤ __yan_arena_end ≤ 环形缓冲区基址`，且 arena 不与任何加载段重叠；不满足，或者生产终端 ELF 缺少这两个符号，就打印原因并以非 0 退出。
+- `yan_run` 加载 ELF 时，**若该 ELF 导出了 arena 符号**，则检查 `__yan_arena_start ≤ __yan_arena_end ≤ 环形缓冲区基址`，且 arena 不与任何加载段重叠，不满足就打印原因并以非 0 退出；**只导出一个符号属于不一致，同样拒绝**（打印「exports only one of」）。**两个都不导出的 ELF 跳过这项检查**：这类镜像是不定义 arena 的旧测试镜像（`tests/guest/link.ld` 不导出这两个符号），它们的启动布局由各自的链接脚本负责；0036 之后的生产终端由 `os/guest.ld` 导出两个符号，因此始终受完整检查。
 - bump 分配要检查对齐后的加法溢出和越界。每次分配先把当前指针按 16 向上取整，再加上请求的字节数。
 - 启动顺序：读块 0，校验 magic、version、D、N（`N = 64·D−1`，`D ≤ 64`），通过后才分配 → 从 arena 依次分配目录缓存 (N+1)×64 B、上表 #1–#6（#4 一份）→ 初始化各服务 → 挂载。arena 不够时，启动报告初始化失败（新增一个 APP_REASON），不运行 shell。
 - 之后不再分配。挂载容量与启动时不同的镜像返回 INVALID。
@@ -131,6 +131,8 @@ Guest 增加一次性 bump arena：
 - 默认 RAM：`tools/yan_run.c:122` 的 `ram_size` 由 16 MiB 改为 64 MiB；环形缓冲区仍在 RAM 顶部 16 KiB，基址变为 0x83FFC000。测试驱动里写死的 16 MiB 改为 64 MiB：`tests/guest/block_drive.c:636`、`tests/guest/run_runtime.sh:288`、`tests/guest/run_console.sh:334`、`tests/terminal_runtime_driver.c:636`。`tests/guest/run_golden.sh:141` 和 `tools/yan_difftest.c:87` 保持 16 MiB（golden trace 含该值）。
 - 0036-R3-AC4：Given 不带 `--ram` 运行 `yan_run`，Then RAM 为 64 MiB，环形缓冲区基址为 0x83FFC000，`__yan_arena_end`（0x82000000）≤ 该基址，启动检查通过；上述 4 个测试驱动不再含 16 MiB 字面值，原有 Guest 测试全部通过；golden 与 difftest 输出不变。
 - 0036-R3-AC3：Given 把 `__yan_arena_end` 链接到环形缓冲区基址之上的测试 ELF，Then `yan_run` 以非 0 退出且不执行 Guest；Given arena 被人为缩小到放不下 N=4095 的测试 ELF，Then 启动报告初始化失败，镜像 SHA-256 不变。
+- 0036-R3-AC5：Given 只导出 `__yan_arena_start`、或只导出 `__yan_arena_end` 的 ELF，When 用 `yan_run` 加载，Then 打印「exports only one of」并以非 0 退出；Given 两个符号都不导出的 ELF，Then 跳过 arena 检查并正常加载。
+  - 本 AC 记录**既有取舍**而非新增设计要求：旧测试镜像不定义 arena，其启动布局由各自的链接脚本负责（`tests/guest/link.ld` 不导出这两个符号）。把「缺符号放行」写成明文，是因为它此前只存在于 `tools/yan_run.c` 的注释里，规格中无处可查（见 [Issue #74](https://github.com/YanBo-maker/YanOS/issues/74)）。
 
 ### 0036-R4：上层服务在大容量下行为正确
 search（线性与索引）、带标签的 search、`links`、`backlinks`、`related`、`block refs/backlinks`、0033 MCP 块工具，都按 N 工作，不再有写死的 63。搜索、related 和块反链保留原显示上限及 total 语义。
@@ -744,3 +746,22 @@ PR精确head的[CI 40739247812](https://github.com/YanBo-maker/YanOS/actions/run
 **这些分支在生产路径上不可达**：唯一的调用方是 `apps/yanfs_terminal/main.c:400-436` 的 Guest 启动序列，全部传栈对象 `&arena` 的地址，构造函数时不存在 NULL。本约束的目的是让将来误传 NULL 的调用方 fail closed（拿中性值）而不是崩溃，不是在修复现存缺陷。补齐测试同理——防未来，不是修 bug。
 
 本条款只记录契约归属与可达性，不改变 arena 的接口、行为或内存预算；0036-R3 的分配顺序与用量验收保持。
+
+#### Issue #74：arena 符号检查的适用范围收窄（2026-10-31）
+
+**语义收窄经 captain 依用户全权授权批准（2026-10-31）**，理由见下：0036 前后 ELF 的符号存在性天然区分生产与测试镜像，故「导出才检查」不是放宽，而是把既有取舍写明。
+
+`tools/yan_run.c:349` 的条件是 `start_status == YAN_OK || end_status == YAN_OK`——任一符号命中才进入检查，两个都不导出时整块跳过。原 R3 需求条（`:121`）写的是「不满足，**或者生产终端 ELF 缺少这两个符号**，就打印原因并以非 0 退出」，与实现不一致；设计段的 `:32` 又只写「不满足」，未提缺符号。**同一规格一处宽一处严。**
+
+实测依据（`riscv64-linux-gnu-nm`，12 个可用的 `yanfs_terminal.elf`）：
+
+| 构建时期 | arena 符号数 |
+|---|---|
+| 0036 之前（`build/0033-*`、`editor-release` 等） | 0 |
+| 0036 之后（`build/dsh-smoke`、`build/dsh-verify`，2026-10-30） | 2（`82000000 A __yan_arena_end`、`801c18f0 D __yan_arena_start`） |
+
+`tests/guest/link.ld`（被 6 个以上测试脚本使用）不导出这两个符号，`grep -c yan_arena` = 0。因此「导出符号」等价于「0036 之后的生产终端」；若坚持缺符号也拒绝，每个现有测试 ELF 都将无法加载。
+
+改动：`:32` 与 `:121` 收窄为「导出 arena 符号的 ELF 才检查」，并补 0036-R3-AC5 覆盖实现已支持但此前无处可查的两个分支（只导出一个 → 拒绝；都不导出 → 跳过）。`tools/yan_run.c` **未改动**——A 方案下现有 `||` 行为正确。
+
+已知未覆盖：`run_arena_reject.py`（AC3）只测「end 越过环形基址」与「arena 太小」，「只导出一个符号」分支此前零测试，由 AC5 补齐期望。
