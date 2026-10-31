@@ -91,21 +91,26 @@ static void test_overflow_and_out_of_range_do_not_move(void)
  * which is the single-mutation case a mutation harness actually produces (each
  * mutant removes exactly one guard).
  *
+ * The buffer is named `scratch` rather than `bytes`: the file already has a
+ * file-scope `bytes` fixture, and MSVC rejects the shadowing under C4459
+ * (treated as an error here). GCC does not warn, so only the Windows job
+ * catches that.
+ *
  * The NULL-vs-empty distinction is pinned too, so an implementation that
  * clamped a NULL arena into a plausible-looking empty one would fail here
  * instead of passing on a technicality. */
 static void test_null_arena_is_rejected(void)
 {
-    /* Initialised so the address is well-defined; the guards never read it. */
-    unsigned char bytes[64] = {0};
+    /* Address must be well-defined; the guards never read the contents. */
+    unsigned char scratch[64] = {0};
 
     /* Crash level: probed first, so a broken used() guard is reached before
      * init() could take the process down. */
     TEST_ASSERT_EQUAL_UINT32(0u,
-        (uint32_t)yan_arena_used(NULL, bytes));
+        (uint32_t)yan_arena_used(NULL, scratch));
 
     /* Crash level: reached whenever the used() guard above is intact. */
-    yan_arena_init(NULL, bytes, bytes + sizeof bytes);
+    yan_arena_init(NULL, scratch, scratch + sizeof scratch);
 
     /* Crash level: this one dereferences arena->next right after the guard. */
     TEST_ASSERT_NULL(yan_arena_alloc(NULL, 1u));
@@ -115,9 +120,9 @@ static void test_null_arena_is_rejected(void)
      * well and confirm the two paths agree. */
     {
         YanArena empty;
-        yan_arena_init(&empty, bytes, bytes);
-        TEST_ASSERT_EQUAL_UINT32((uint32_t)yan_arena_used(NULL, bytes),
-                                 (uint32_t)yan_arena_used(&empty, bytes));
+        yan_arena_init(&empty, scratch, scratch);
+        TEST_ASSERT_EQUAL_UINT32((uint32_t)yan_arena_used(NULL, scratch),
+                                 (uint32_t)yan_arena_used(&empty, scratch));
     }
 }
 
