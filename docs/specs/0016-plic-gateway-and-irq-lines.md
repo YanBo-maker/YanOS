@@ -156,7 +156,7 @@ void yan_plic_set_level(YanPlic *plic, uint32_t source, bool asserted);
 | A11 | 多源独立 | 源 A 在 in-service 期间，源 B 的 assert/claim 不受影响 |
 | A12 | `pending` 寄存器只读 | 写入被忽略，读数反映网关状态 |
 
-**需刻意反转的既有断言**：`tests/test_plic.c:227` 的 `gateway_is_not_latched`（连同 223–226 行注释）断言"in-service 期间再次 raise 立刻重新拉起 MEIP"。该用例**重写为锁存语义**（即 A4 + A5），而不是删除——旧注释自己声明了"这是一条被测试覆盖的声明，而不是意外"，因此反转也必须留下同等强度的声明。`RUN_TEST` 名称随之更新。
+**需刻意反转的既有断言**：`tests/test_plic.c` 里当时名为 `gateway_is_not_latched` 的用例（连同其上方注释）断言"in-service 期间再次 raise 立刻重新拉起 MEIP"。该用例**重写为锁存语义**（即 A4 + A5），而不是删除——旧注释自己声明了"这是一条被测试覆盖的声明，而不是意外"，因此反转也必须留下同等强度的声明。`RUN_TEST` 名称随之更新，现为 `gateway_holds_a_claimed_source_closed`。
 
 ### B. 平台接线（`tests/test_machine.c` / `tests/test_interrupt.c`）
 
