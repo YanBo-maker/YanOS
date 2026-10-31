@@ -53,9 +53,15 @@ unset(YAN_RISCV_GCC CACHE)
 find_program(YAN_RISCV_GCC NAMES ${_yan_gcc_names})
 if(YAN_RISCV_GCC)
     get_filename_component(_yan_riscv_dir "${YAN_RISCV_GCC}" DIRECTORY)
+    # An empty YAN_RISCV_PREFIX would expand to a bare `readelf`, which
+    # find_program would resolve to the host tool -- wrong format for RISC-V.
+    set(_yan_readelf_names riscv64-linux-gnu-readelf
+        riscv64-unknown-elf-readelf riscv32-unknown-elf-readelf)
+    if(YAN_RISCV_PREFIX)
+        list(INSERT _yan_readelf_names 0 "${YAN_RISCV_PREFIX}readelf")
+    endif()
     find_program(YAN_RISCV_READELF
-                 NAMES ${YAN_RISCV_PREFIX}readelf riscv64-linux-gnu-readelf
-                       riscv64-unknown-elf-readelf riscv32-unknown-elf-readelf
+                 NAMES ${_yan_readelf_names}
                  HINTS "${_yan_riscv_dir}")
     # Issue #106: the Guest ELF is made reproducible with `strip --strip-debug`.
     # NOT `-s`: the linker emits a FILE symbol per object named after its random
@@ -64,9 +70,15 @@ if(YAN_RISCV_GCC)
     # yan_image_find_symbol(), so a fully stripped ELF never halts (measured:
     # "stopped after 5000000 steps without reaching tohost"). --strip-debug
     # drops exactly the debug/FILE entries, leaving .symtab and `tohost` intact.
+    # Same empty-prefix hazard as readelf above: a bare `strip` in NAMES would
+    # match the host tool, which cannot read a RISC-V ELF.
+    set(_yan_strip_names riscv64-linux-gnu-strip
+        riscv64-unknown-elf-strip riscv32-unknown-elf-strip)
+    if(YAN_RISCV_PREFIX)
+        list(INSERT _yan_strip_names 0 "${YAN_RISCV_PREFIX}strip")
+    endif()
     find_program(YAN_RISCV_STRIP
-                 NAMES ${YAN_RISCV_PREFIX}strip riscv64-linux-gnu-strip
-                       riscv64-unknown-elf-strip riscv32-unknown-elf-strip
+                 NAMES ${_yan_strip_names}
                  HINTS "${_yan_riscv_dir}")
 endif()
 
