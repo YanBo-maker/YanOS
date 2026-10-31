@@ -1416,6 +1416,15 @@ if(BUILD_TESTING)
                 # 0036-R3: an N=127 (D=2) image mounts and boots normally now
                 # that the services size their tables from the image. No cross
                 # compiler is needed.
+                #
+                # Labelled 0036-R3 only, with no AC number on purpose. This
+                # test checks that a >63-file image boots, reports no
+                # ERROR CAPACITY and leaves the image unmodified; it never
+                # touches the arena, so it is NOT evidence for R3-AC1 (the
+                # four capacity points) or R3-AC2 (the 32 MiB budget). Those
+                # are covered by arena_accounting and arena_budget. An AC label
+                # here made `ctest -L '^0036-R3-AC1$'` return this test too and
+                # let it pose as AC coverage.
                 add_test(NAME capacity_guard
                     COMMAND "${Python3_EXECUTABLE}" -B
                             "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_capacity_guard.py"
@@ -1424,7 +1433,7 @@ if(BUILD_TESTING)
                             --mkfs "$<TARGET_FILE:yan_mkfs>"
                             --guest "${YAN_TERMINAL_ELF}")
                 set_tests_properties(capacity_guard PROPERTIES TIMEOUT 300
-                                     LABELS "0036-R3-AC1;0036-R3-AC2")
+                                     LABELS "0036-R3")
                 add_test(NAME guest_editor_faults
                     COMMAND "${Python3_EXECUTABLE}" -B
                             "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_editor_faults.py"
