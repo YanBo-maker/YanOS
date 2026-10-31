@@ -69,33 +69,11 @@ ISA 行为遵循 Spec → Test → Implementation：先写用例并确认预期�
 
 0032交付阶段（2026-10-18，历史测量）：该阶段生成的CTest定义含17实际组、10默认mutation puregate，10个puregate已随默认回归执行；完整默认Linux Release114/114（111.66 s）、ASan/UBSan114/114（172.64 s）、Windows70/70（67.44 s），0失败、0SKIP。新增块26项实际缺陷专项通过，统一17/17（322.77 s）零失败/零SKIP通过，指定suite/owner/assertion与负控保留；已保存注册查询分别为Release131总/114默认/17实际/10puregate、ASan114总/114默认/0实际/10puregate（mutation OFF）、Windows70总/70默认/0实际/9puregate；查询不作新回归。独立第3轮恢复完成集成技术审核，第4轮精确树冻结对齐及F4-D1修后复核已通过，9b59954精确树九项总审已通过，功能11b0c247已提交并建立PR #36，对应功能head三项远端默认CI通过；项目所有者已批准PR #36合入main（d8804be），最终head b58432b三项远端默认CI亦已通过，配置范围与当前状态详见[STATUS](docs/STATUS.md)，旧0031及更早结果保留具名历史。
 
-0031 I8修后当前本机配置（2026-10-17）：注册保持106默认/122总、16实际组/9puregate；完整Release106/106（83.83 s）、ASan/UBSan106/106（126.47 s）、统一实际16/16（285.08 s，-j3）通过，0失败、0SKIP。MCP15个指定suite/owner/assertion缺陷及负控全部通过；Windows编译输入未变，旧65/65（45.68 s）仅保留其配置范围。新生产SDK/真实模型复验另列；独立审核、PR/CI与维护者合入状态见[STATUS](docs/STATUS.md)。
-
-0031 I8修复前本机配置（2026-10-17，历史树）：Linux工具/provider开启注册106默认、122含实际变异，16实际组、9默认puregate；默认Release106/106（65.97 s）、ASan/UBSan106/106（179.64 s）、Windows65/65（45.68 s）通过。首轮实际15/16（322.48 s）是检测桥harness失败历史；修后统一16/16（279.58 s，-j3）通过，MCP13个指定suite/owner/断言缺陷与负控齐全。ASan最后测试桥变动后四套件4/4（22.93 s）为定向后验，不作完整106组重跑；不能用注册数量或默认回归代替实际检测力。随后发现I8继承信号状态问题，旧树提交准许已暂停；后续当前复验见前段，不沿用旧13缺陷记录作新15清单通过，旧树准许不恢复。旧0030及此前验收保持具名历史，最新状态见[STATUS](docs/STATUS.md)。
-
-0030本机复验（2026-10-16）：Linux工具/provider开启默认102组、含实际变异117组，仍十五实际组和八默认puregate；Release102/102（270.73 s）、ASan/UBSan102/102（406.37 s）、Windows65/65（123.03 s），统一实际变异15/15（380.18 s，-j3），均0失败、0SKIP。semantic扩至26个指定suite/owner/具体断言缺陷。JSON40场景、1个Unity内16个分配注入点与显式真实模型JSON验收分别记录；不把其场景数当CTest组数。首轮夹具隔离失败及修复、最终独立审核/CI/维护者状态见[STATUS](docs/STATUS.md)。
-
-0029冻结树本机验收（2026-10-15）：Linux同时开启TOOLS与SEMANTIC，默认100组、开启实际变异后115组，含八个默认puregate；Release100/100（294.77 s）、ASan/UBSan100/100（423.51 s）、Windows65/65（141.66 s），统一十五组实际变异15/15（321.87 s），均0失败、0SKIP。Windows不包含Linux provider/POSIX，不能把计数直接等同Linux覆盖。semantic19个指定suite/owner/具体断言缺陷与实际负控、puregate10项通过；真实生产OFF工具效果由独立手动脚本另验。日志和效果边界见[STATUS](docs/STATUS.md)，远端CI与维护者批准另行记录。
-
-0028本机验收（2026-10-14复测）：Linux默认90组、开启实际变异后104组，Windows默认58组；Release90/90（92.36 s）、ASan/UBSan90/90（154.99 s）、Windows MSVC58/58（42.50 s），统一十四组实际变异14/14（274.04 s），均0失败、0SKIP。七个默认puregate不计实际变异组；新增关系18个缺陷匹配指定suite、owner和具体断言。本机验收、远端CI与维护者批准分别记录，证据见[STATUS](docs/STATUS.md)。
-
-0027本机验收（2026-10-08）：Linux注册默认81组、开启实际变异后94组，Windows默认52组；Release81/81（54.70 s）、ASan/UBSan81/81（93.49 s）、Windows MSVC52/52（20.63 s），统一十三组实际变异13/13（190.50 s），均0失败、0SKIP。六个默认puregate不算实际变异组，过滤仍使用`-E '_mutation$'`与`-R '_mutation$'`。实际检出须匹配指定suite、owner及具体断言；注入锚点失效属于harness，修后重新执行，不计检出。本机验证、远端CI与维护者合入审查分别记录。
-
 变异检查默认关闭，合并前显式运行。0026词项搜索与索引本机验收（2026-10-07）：Linux默认67组、开启实际变异后79组，Windows默认41组；Release67/67（37.91 s）、ASan/UBSan67/67（75.33 s）、Windows MSVC41/41（20.19 s），十二组实际变异统一12/12（203.40 s），均0失败、0SKIP。新增term20个缺陷须命中指定suite、owner及具体断言；no-effect、wrong-owner、same-owner wrong-assertion与多suite harness优先负控均保留，0存活、0harness。五个默认puregate不算实际变异组，`-E '_mutation$'`保留它们。覆盖与证据见 [STATUS](docs/STATUS.md)，本机通过不代替远端CI或维护者审查。
 
 历史0025知识检索本机验收（2026-10-07）：Linux默认55组、开启实际变异后66组；Release55/55（32.50 s）、ASan/UBSan55/55（51.39 s）、Windows MSVC32/32（4.25 s），十一组实际变异11/11（142.77 s），均0失败、0SKIP。Search17个缺陷命中指定owner和具体断言；真实no-effect、wrong-owner与同owner wrong-assertion控制均已复验，0存活、0harness error。四个默认mutation puregate及Guest脚本门禁保留在默认套件中，本机通过不代替远端CI或维护者审查。证据与覆盖边界见 [STATUS](docs/STATUS.md)。
 
-历史0024重命名与复制本机验收：Linux默认49组、开启实际变异后59组；Release49/49（19.29 s）、ASan/UBSan49/49（36.98 s），十组实际变异10/10（97.01 s，-j3），Windows MSVC默认29/29（2.27 s），均0失败、0SKIP。FS19个与终端24个实际缺陷均命中指定owner及具体断言，0存活、0harness error。新默认Guest文件管理及故障验收由Linux工具配置注册，Windows计数不能直接与其比较；边界与证据见 [STATUS](docs/STATUS.md)。`-E '_mutation$'`保留默认puregate，`-R '_mutation$'`只选十组实际变异。
-
 历史Git整合测量：2026-10-05 Git整合与兼容复测：Windows MSVC Debug本机29/29（4.02 s）；Linux Release默认47/47（17.67 s）、ASan/UBSan默认47/47（31.65 s）、十组实际变异10/10（88.14 s，均-j3），0失败、0SKIP。Linux注册仍为默认47组、开实际变异57组，Windows本机配置不包含Linux工具与真实Guest验收；本机通过不代替远端CI或PR审核。命令与证据见 [STATUS](docs/STATUS.md)。
-
-编辑器交付测量：2026-10-05多行编辑配置注册默认 **47组**、开启实际变异后 **57组**；Release默认 **47/47（28.88 s）**，Debug ASan/UBSan默认 **47/47（48.86 s）**。十组实际变异一次运行 **10/10（130.76 s，-j3）**；编辑器11个非等价缺陷均命中指定owner及具体断言，0存活、0harness error。三个默认puregate核分类纪律，原生同owner无关断言控制已补齐。以上均无失败、无SKIP，命令与证据见 [STATUS](docs/STATUS.md)。
-
-历史测量：2026-10-04终端文件操作配置注册默认 **43组**、开启实际变异后 **52组**；Release默认 **43/43（50.40 s）**，Debug ASan/UBSan默认 **43/43（77.88 s）**。九组实际变异一次运行 **9/9（86.57 s，-j3）**；新终端组20个非等价缺陷均命中具名具体断言，0存活、0harness error。以上均无失败、无SKIP，命令与证据见 [STATUS](docs/STATUS.md)。
-
-历史测量：YanFS 于 2026-10-03 的 Linux 工具配置注册默认 **37 组**、开启变异后 **45 组**；Release 默认 **37/37（34.67 s）**、Debug ASan/UBSan 默认 **37/37（56.59 s）**。八组实际变异分开执行：原七组 **7/7（165.16 s）**，YanFS 一组 **1/1（7.18 s）**，十个非等价缺陷全部命中 owner 断言；均无失败、无 SKIP，不拼接为一次八组的耗时。
-
-同日 0020 的历史配置为默认 **32 组**、开启变异后 **39 组**；Release **32/32（21.10 s）**、ASan/UBSan **32/32（22.99 s）**、七组变异 **7/7（157.64 s）**。配置、证据与历史测量见 [STATUS](docs/STATUS.md)。每次提交前重新测量并记录配置、命令、通过与跳过数量，历史耗时仅作参考。
 
 ### 提交前总审核检查清单
 

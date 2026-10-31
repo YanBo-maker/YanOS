@@ -54,7 +54,7 @@ AC 全部有测试且通过；CI 全绿；审查结论为可合并；STATUS 已�
 
 阶段交付的文档动作只有这四件：
 
-1. 阶段验证明细（注册数、通过数、耗时、审核轮次、证据日志路径）只写在该阶段规格的「VERIFY 执行记录」，并在 PR 描述里摘要。STATUS、README、CONTRIBUTING 不再复写这些计数。
+1. 阶段验证明细（注册数、通过数、耗时、审核轮次、证据日志路径）只写在该阶段规格的「VERIFY 执行记录」，并在 PR 描述里摘要。STATUS、README、CONTRIBUTING 不再复写这些计数。历史阶段的**测量方法论 caveat**（如「计数不能直接等同覆盖」「历史耗时仅作参考」「定向后验不作完整重跑」）写在 `STATUS-history.md` 对应阶段段落，并加 `**测量caveat**：` 前缀以便检索；不写进 CONTRIBUTING。
 2. STATUS 只做三处更新：替换「当前阶段」；在「已交付能力」加一行；覆盖边界有变化时改对应条目。
 3. 开始新阶段、替换「当前阶段」时，旧段落原样追加到 `docs/STATUS-history.md` 末尾。
 4. 阶段合入 main 后，总审核按 [0034](docs/specs/0034-ci-guest-tests-and-status-archive.md) R7 把 `MONITOR_REPORT.md` 归档到仓库外并重置为通道头。
