@@ -264,13 +264,17 @@ static uint32_t fx_ref_crc_multi(const uint8_t *directory,
                                  const uint8_t *replacement)
 {
     uint32_t crc = UINT32_C(0xffffffff);
-    for (uint32_t block = 0; block < directory_blocks; ++block) {
-        const uint8_t *base = block == replaced_block
+    /* `dir_block`, not `block`: os/yanfs.h declares yan_fs_metadata_crc with a
+     * parameter named `block`, and MSVC reports the shadowing as C4459, which
+     * the project promotes to an error under /WX. GCC does not warn, so this
+     * only fails on the Windows job. */
+    for (uint32_t dir_block = 0; dir_block < directory_blocks; ++dir_block) {
+        const uint8_t *base = dir_block == replaced_block
                                   ? replacement
-                                  : directory + (size_t)block * YAN_FS_BLOCK_SIZE;
+                                  : directory + (size_t)dir_block * YAN_FS_BLOCK_SIZE;
         for (uint32_t offset = 0; offset < YAN_FS_BLOCK_SIZE; ++offset) {
             uint32_t byte = (uint32_t)base[offset];
-            if (block == 0u && offset >= 60u && offset < 64u) {
+            if (dir_block == 0u && offset >= 60u && offset < 64u) {
                 byte = 0u;
             }
             crc ^= byte;
