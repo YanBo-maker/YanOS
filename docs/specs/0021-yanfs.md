@@ -10,6 +10,8 @@ Guest 已能通过块协议把内容写进 Host 镜像，并在新进程读回�
 
 ## SPEC
 
+> 后续扩展：[0036](0036-yanfs-multi-block-directory.md) 扩展本规格的盘上格式：新增 version 2，目录从块 0 一块扩展为 mkfs 时确定的 D 块（默认 1023 个文件，最多 4095 个），`entry_capacity` 由 63 变为 `64·D−1`，`list` 的游标上界与槽位上界改为镜像实际容量 N。v1 盘上定义不变，旧镜像继续可用；本规格的 v1 部分（单块目录、63 文件、cursor=63）保留其阶段范围，容量相关语句以 0036 为准。来源编码、分页、MCP schema 与其余校验保持不变；0041 在其上补齐元数据的 MCP 只读面，不改格式。
+
 ### 设计选择
 
 1. **一个根目录、连续数据区间。** 每文件占一个连续 extent（起始块与块数），目录最多 63 文件，名称区分大小写。没有子目录、文件描述符或部分写入 API。目录已记录全部分配，因此无需另写位图；从低地址寻找能容纳整个文件的第一段空闲区间。代价是碎片可能让空间充足的磁盘仍无法容纳大文件。
@@ -59,7 +61,9 @@ CRC 覆盖完整 4096 字节，计算时将偏移 60–63 当作零。采用 IEE
 
 ### 挂载检查
 
-mount 先查询容量，再完整读取块 0 到 scratch，验证后才发布 metadata 缓存。依次检查：实际容量范围、magic/version/block_size/entry_capacity、容量完全一致、CRC、全部保留零、名称规范与填充、空槽/空文件规范、重复名、size/count、extent 范围与两两重叠。
+mount 先查询容量，再读入目录块，校验通过后才让调用方看到它，失败则清空。具体顺序：读块 0 到 scratch，校验头部字段；头部通过后把块 0 复制进 metadata 缓存，并把其余目录块直接读进缓存；再对整个目录做 CRC 与分配不变量校验。校验失败时在释放 busy 之前清空缓存并把名称下标计数归零。依次检查：实际容量范围、magic/version/block_size/entry_capacity、容量完全一致、CRC、全部保留零、名称规范与填充、空槽/空文件规范、重复名、size/count、extent 范围与两两重叠。
+
+调用方观察不到未校验的目录，这一点由两件事共同保证：busy 在整段操作（含每一次回调）期间持有，任何重入调用都得到 BUSY 而不是半填的缓存；以及失败路径的清空。cache 里的字节在校验完成前就已经写入，因此**不变量是“没有观察者能看到未校验的目录”，不是“校验通过后才写入缓存”**。
 
 设备容量不在 1..UINT32_MAX 或 magic 正确但 version 不为 1 时返回 UNSUPPORTED；magic 错误及其余字段、CRC、分配不变量失败返回 CORRUPT。验证失败保持 UNMOUNTED，不修复、不格式化、不写介质。目录没有数据 CRC，挂载不读取每个数据块，因此不能保证“目录有效就等于所有内容正确”。metadata CRC 恰好碰撞时仍可能无法检测某些内容改变，不宣传为任意损坏保证。
 
@@ -96,10 +100,12 @@ I/O 或响应协议错误把实例改为 FAULTED，首次操作返回 IO 或 PRO
 
 #define YAN_FS_BLOCK_SIZE UINT32_C(4096)
 #define YAN_FS_MAX_FILES UINT32_C(63)
+#define YAN_FS_MAX_DIR_BLOCKS UINT32_C(64)   /* 0036: v2 目录块数上限 */
 #define YAN_FS_NAME_MAX UINT32_C(31)
 #define YAN_FS_HEADER_SIZE UINT32_C(64)
 #define YAN_FS_ENTRY_SIZE UINT32_C(64)
 #define YAN_FS_VERSION UINT32_C(1)
+#define YAN_FS_VERSION_2 UINT32_C(2)         /* 0036: 多块目录 */
 
 typedef enum {
     YAN_FS_OK = 0, YAN_FS_END = 1, YAN_FS_INVALID = 2,
@@ -132,11 +138,19 @@ typedef struct {
     YanFsState state;
     bool busy;
     uint32_t capacity_blocks;
-    uint8_t metadata[4096];
+    uint8_t *directory;        /* 0036-R3: 调用方持有，大小为 directory_blocks × 4096 */
+    uint32_t directory_blocks; /* v1 为 1，v2 为 1..64 */
+    uint32_t entry_capacity;   /* 64·directory_blocks − 1 */
+    uint16_t *name_order;      /* 0036-R8: 调用方持有，entry_capacity 个 uint16 */
+    uint32_t name_order_count;
     uint8_t scratch[4096];
+    uint64_t source_token;     /* 0026 */
+    bool source_cacheable;
 } YanFs;
 
-YanFsResult yan_fs_init(YanFs *, YanFsBlockIo);
+YanFsResult yan_fs_init_directory(YanFs *, YanFsBlockIo, uint8_t *directory,
+                                  uint32_t directory_blocks,
+                                  uint16_t *name_order);
 YanFsResult yan_fs_mount(YanFs *);
 YanFsResult yan_fs_unmount(YanFs *);
 YanFsResult yan_fs_list(YanFs *, uint32_t *cursor, YanFsInfo *out);
@@ -150,6 +164,14 @@ YanFsResult yan_fs_remove(YanFs *, const char *name);
 /* 纯编码辅助函数，不执行 I/O，不给 Guest 提供格式化设备的入口。 */
 YanFsResult yan_fs_format_metadata(uint8_t out[4096], uint32_t capacity_blocks);
 uint32_t yan_fs_metadata_crc(const uint8_t block[4096]);
+/* 0036 多块目录的纯辅助函数：v1（D=1）是原格式；D>1 写 version 2，CRC 覆盖全部 D 块。 */
+YanFsResult yan_fs_format_directory(uint8_t *out, uint32_t directory_blocks,
+                                    uint32_t capacity_blocks);
+uint32_t yan_fs_directory_crc(const uint8_t *directory,
+                              uint32_t directory_blocks);
+/* 0036-R3：只校验启动分配决策所需的头部字段，不分配、不写盘、不看 CRC。 */
+YanFsResult yan_fs_probe(const YanFsBlockIo *io, uint8_t scratch[4096],
+                         uint32_t *directory_blocks);
 ```
 
 公开类型、字段与枚举见下列声明。公开 C struct 只描述内存上下文，其字段不能用于磁盘序列化，也不能由调用者绕过 API 修改状态或缓存。
