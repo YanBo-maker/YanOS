@@ -43,33 +43,69 @@ static YanFsIoResult copy_write(void *context, uint32_t lba, const uint8_t in[40
                ? YAN_FS_IO_OK : YAN_FS_IO_ERROR;
 }
 
-YanFsResult yan_image_lock(const char *image, int operation, int *fd)
+YanFsResult yan_image_lock_errno(const char *image, int operation, int *fd,
+                                 int *lock_errno)
 {
+    if (lock_errno != NULL) *lock_errno = 0;
     if (image == NULL || fd == NULL ||
         (operation != LOCK_EX && operation != LOCK_SH)) {
         return YAN_FS_INVALID;
     }
+    /* Issue #53: realpath failing is "the image is not there", not a generic
+     * I/O fault. The caller can then say which, using the errno we hand back. */
     char *resolved = realpath(image, NULL);
-    if (resolved == NULL) return YAN_FS_IO;
+    if (resolved == NULL) {
+        int error = errno;
+        if (lock_errno != NULL) *lock_errno = error;
+        /* ELOOP means a symlink loop or, with the kernel's limit, too many
+         * links; that is still "cannot resolve" rather than "not found". */
+        return error == ENOENT || error == ENOTDIR ? YAN_FS_NOT_FOUND
+                                                   : YAN_FS_IO;
+    }
     size_t length = strlen(resolved);
     char *path = malloc(length + sizeof ".lock");
     if (path == NULL) {
+        /* malloc sets errno to ENOMEM on glibc, but the standard does not
+         * require it; record ENOMEM explicitly so the diagnostic is never
+         * "Success". */
+        if (lock_errno != NULL) *lock_errno = ENOMEM;
         free(resolved);
         return YAN_FS_IO;
     }
     memcpy(path, resolved, length);
     memcpy(path + length, ".lock", sizeof ".lock");
     free(resolved);
-    int lock_fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    /* O_NOFOLLOW: <image>.lock must not be a symbolic link. host/image_migrate.c
+     * already opens its output that way; the two paths now agree. This is
+     * hardening, not a proven exploitable path: a symlinked lock file only
+     * redirects where the lock is taken. */
+    int lock_fd = open(path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0644);
+    /* free() is allowed to clobber errno, so capture it BEFORE releasing the
+     * path buffer. This ordering bug is why the diagnostic used to lose the
+     * reason even when the code was returning the right errno. */
+    int open_error = lock_fd < 0 ? errno : 0;
     free(path);
-    if (lock_fd < 0) return YAN_FS_IO;
+    if (lock_fd < 0) {
+        if (lock_errno != NULL) *lock_errno = open_error;
+        return YAN_FS_IO;
+    }
     if (flock(lock_fd, operation | LOCK_NB) != 0) {
         int error = errno;
         (void)close(lock_fd);
-        return error == EWOULDBLOCK ? YAN_FS_BUSY : YAN_FS_IO;
+        if (error == EWOULDBLOCK) {
+            /* Contention: no errno, BUSY is the whole story. */
+            return YAN_FS_BUSY;
+        }
+        if (lock_errno != NULL) *lock_errno = error;
+        return YAN_FS_IO;
     }
     *fd = lock_fd;
     return YAN_FS_OK;
+}
+
+YanFsResult yan_image_lock(const char *image, int operation, int *fd)
+{
+    return yan_image_lock_errno(image, operation, fd, NULL);
 }
 
 YanFsResult yan_note_write_check(const char *name, const uint8_t *text,
