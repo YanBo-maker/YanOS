@@ -140,6 +140,9 @@ BUILD_TESTING OFF/SEMANTIC ON生产server实算SHA-256 `8f95984e296a29a53eea6df3
 
 修后生产OFF官方SDK三模式实际版本/两工具/取消重用/active-close通过，见`build/search-mcp-i8-sdk-production.log`。生产真实两固定查询40出处复验通过，见`search-mcp-i8-real-production.log`；server SHA为`57785ce3b8f36d506a1faa91945f3c117b48b126521b77d8e4171c5a661b144e`，模型/runner身份保持。新输入快照为`mcp-source-freeze-i8.json`；旧13缺陷、12故障与旧完整回归结果保留对应旧树历史，不冒作修后完整验证。修后完整Release106/106（83.83 s，0失败/0SKIP）已通过，见`build/search-mcp-i8-release-final.log`；另存`mcp-i8-release-LastTest.log`核当前14原生/19wire/13fault/pure6。完整ASan/UBSan106/106（126.47 s，0失败/0SKIP）亦已通过，见`build/search-mcp-i8-asan-final.log`及另存`mcp-i8-asan-LastTest.log`。Windows编译输入未变，旧65/65（45.68 s）仅在其原配置范围继续作为证据。统一16实际组16/16（285.08 s，-j3）亦通过，见`build/search-mcp-i8-all-actual.log`及另存`mcp-i8-actual-LastTest.log`（79137字节）；MCP157.20 s，15条DETECTED逐项匹配suite/owner/assertion，baseline/no-effect/wrong-owner/wrong-assertion负控通过，0存活/0harness。15份I8输入SHA快照与当前文件一致。同独立会话必要修复复核及新exact树九审待完成，当前不得沿旧准许提交，PR/CI/维护者合入仍待。
 
+**测量caveat**：ASan 最后测试桥变动后四套件 4/4（22.93 s）为**定向后验，不作完整 106 组重跑**；**不能用注册数量或默认回归代替实际检测力**；随后发现 I8 继承信号状态问题，旧树提交准许已暂停，后续当前复验见前段，不沿用旧 13 缺陷记录作新 15 清单通过，**旧树准许不恢复**。
+
+
 ### 0031 功能提交与远端验证（2026-10-17）
 
 原独立角色第4轮与唯一I8必要修复复核已完成，I1–I8无未闭合finding；新树`b06cb8f79632524ffc3343c2e6499097a23a4897`九项总审通过，旧18b038提交准许仍撤回。完整能力提交`4452e11c5b109549350c9a33593bc33f3e647b36`与该树一致，规格提交06463a34及失败/修复历史保留，已推送并建立[PR #34](https://github.com/YanBo-maker/YanOS/pull/34)。上述冻结时点“必要复核/九审/PR/CI待”的记录保留，其当前状态由本节取代。
@@ -183,6 +186,8 @@ BUILD_TESTING OFF/SEMANTIC ON生产server实算SHA-256 `8f95984e296a29a53eea6df3
 
 实现与本机可靠性、JSON原文/身份验收完成；独立最终文档对齐及九项总审核通过，功能提交对应远端CI通过，所有者已批准PR #32合入main，不把0030通过写入0029历史。首轮100/102、98/102、63/65及阶段“待终局”记录保留为当时执行快照，由本条最终复验取代当前验证状态。
 
+**测量caveat**：JSON 40 场景、1 个 Unity 内 16 个分配注入点与显式真实模型 JSON 验收分别记录，**不把其场景数当CTest组数**。
+
 ### 0030 功能交付与远端CI（2026-10-16）
 
 规格提交`3e84826fcc48fd37bcc4259e46d81a09d4815c84`与功能提交`5299136172ab30594501cb978240ed69298e6acc`保留，[PR #32](https://github.com/YanBo-maker/YanOS/pull/32)已于2026-10-16 20:41:20 +08:00经所有者明确批准合入main，merge为`5170cf0772c1384a2bba1ed22fdb70bb053faca9`。合并树与已审交付文档提交8b635e5相同，规格3e84826、实现5299136和文档8b635e5阶段历史保留。独立只读子Agent第4轮及同角色必要复核关闭F1–F4，完整实现、实际证据和全文文档对齐通过；总审核九项通过，功能树为`0fd3637832b934e27d50e275d17af86ca1e929b4`。F1/F2修正下一步与历史导读的当前导航，F3修正全局当前102/117并保留0029具名历史，F4准确限定JSON分配失败的已验范围；历史数字和锁定行为不改。
@@ -207,6 +212,8 @@ BUILD_TESTING OFF生产工具重新构建，最终实际工具SHA-256 `19cb7a9df
 真实效果脚本`tests/semantic_model_check.py`由操作员显式运行，实际调用生产工具和外部模型，不使用fixture向量冒充模型；它不注册默认CTest、不进入普通CI。手动提供模型、runner与`/usr/bin/time`，缺生产工具硬失败，缺外部依赖明确77并保持效果待验。通用命令见README；fake向量/独立oracle验证可靠性，不能替代这项人工触发的真实效果验收。
 
 本机完整验收、真实复验及独立dsh/总审核已完成。功能提交`9ad39eddbe88e9abda5fe107e5989512917ff92d`已建立[PR #30](https://github.com/YanBo-maker/YanOS/pull/30)，保留前置Spec Lock `e29e04b`。2026-10-15，[CI运行38613451617](https://github.com/YanBo-maker/YanOS/actions/runs/38613451617)对应上述功能head，三项成功：Linux Release68/68（35.36 s）、Linux Debug ASan68/68（87.95 s）、Windows Debug65/65（90.61 s），均0失败、0SKIP。远端TOOLS/SEMANTIC均关闭，不等同本机工具/provider开启的100组、十五组实际变异或人工真实模型验收。项目所有者随后明确批准PR #30合入main，合并提交为`79fdde6a07eabff6f0f50cf0e90e0bc2cdb45cee`，树与已审8c8f2fe完全一致；前置规格e29e04b、功能9ad39ed及状态8c8f2fe阶段提交保留。
+
+**测量caveat**：Windows 不包含 Linux provider/POSIX，**不能把计数直接等同Linux覆盖**。
 
 提交前fake runner的执行位固定为100755，并移除provider/CLI测试自行chmod的两行，避免测试改变tracked文件模式。配套后验provider单项1/1（12.45 s）保持24场景，CLI单项1/1（1.81 s）保持31场景，日志为`build/search-semantic-fixture-mode-check.log`与`search-semantic-fixture-cli-check.log`。生产代码与断言不变，上述完整回归耗时保留原执行，不冒称因包装修正重跑。以下分项初验、失败与待验文字保留为当时阶段记录，由本节最新冻结树结果取代其当前状态，不删旧结论。
 
@@ -364,7 +371,7 @@ filtered term首轮Linux专项CTest4/4通过：原生13例及独立oracle的108�
 
 - 规格批准：mv/cp拒覆盖；rename原槽、同名零I/O；copy新槽新extent逐块复制任意二进制并清零尾块，数据成功后发布目录；状态顺序与故障边界沿既有契约，编辑态不执行两命令。
 - 实现：文件系统rename/copy、终端mv/cp、真实Guest与故障验收已完成，磁盘格式、块协议及编辑模式保持。
-- 验证：本机Windows默认29/29（2.27 s）、Linux Release默认49/49（19.29 s）、ASan/UBSan默认49/49（36.98 s）、十组实际变异10/10（97.01 s），0失败、0SKIP；当前Linux注册49默认、开启实际变异后59组。分项与边界见「重命名与复制验收」。
+- 验证：本机Windows默认29/29（2.27 s）、Linux Release默认49/49（19.29 s）、ASan/UBSan默认49/49（36.98 s）、十组实际变异10/10（97.01 s），0失败、0SKIP；当前Linux注册49默认、开启实际变异后59组。分项与边界见「重命名与复制验收」。**测量caveat**：新默认 Guest 文件管理及故障验收由 Linux 工具配置注册，**Windows 计数不能直接与其比较**；`-E '_mutation$'` 保留默认 puregate，`-R '_mutation$'` 只选十组实际变异。
 - 用户审查：整体SPEC与PR #18合入均已批准；学习与理解程度仍由项目所有者判断。
 
 ### 已交付多行编辑基线
@@ -385,6 +392,8 @@ filtered term首轮Linux专项CTest4/4通过：原生13例及独立oracle的108�
 下列保留当时交付与审查状态；后续PR #16的合入批准见“Git整合与Windows兼容复测（2026-10-05）”。
 
 YanFS 初版整体实现与验证完成，交付待用户审查。[0021](specs/0021-yanfs.md) 于2026-10-03经项目所有者批准并锁定；格式化、挂载、列目录、读取、创建、整文件覆盖、删除和空间回收按同一格式交付。该阶段分支为 `codex/yanfs`，提交 `24b80bb`；持久化后端此前交付在 `d2efd72`。本轮批准终端方案不改变YanFS交付审查状态。
+
+**测量caveat**：八组实际变异分开执行（原七组 7/7（165.16 s）、YanFS 一组 1/1（7.18 s）），**不拼接为一次八组的耗时**。
 
 - 规格批准：单根目录最多 63 文件，连续 extent 分配，覆盖先写新数据再发布目录；唯一元数据块写失败可能导致拒挂，不承诺断电一致性。
 - 实现：FS 核心、Linux mkfs、Guest 块适配与整体用例已完成；名称与输出边界、失败后的缓存发布、完整响应消费等审查项已修复。
@@ -570,6 +579,8 @@ Host 变异逐项绑定表中指定的测试断言，无关断言失败负控不
 修复前同日总审核实测 Release **31/31，22.84 s**、Debug ASan/UBSan **31/31，24.54 s**、全部变异组 **7/7，154.95 s**。本轮修改 Python 判据并新增负控，未重跑 ASan 全量与其余六组变异；这些历史结果不记为当前 39 组全量通过。外部参考层本轮未运行。
 
 组合用例覆盖已完成响应的快速路径、背压下的阻塞与中断唤醒，以及写入后重新启动读回。Host 在两个模拟器进程之间独立核对全部 32768 字节，reader 逐字节核对目标块、快速路径块与邻块，再确认镜像未被改动。成功写响应要求完整写入及 `fflush` 成功；当前实现不保证断电持久性或失败写回滚，I/O 失败后拒绝后续读写，关闭并重新打开才能恢复使用。该次测量时后端语义尚待规格裁定；2026-10-03的批准与锁定见[0020](specs/0020-persistent-block-image.md)及本页“历史测量：0020 持久化块镜像（2026-10-03）”。
+
+**测量caveat**：每次提交前重新测量并记录配置、命令、通过与跳过数量，**历史耗时仅作参考**。
 
 ### 历史测量：M2a
 
