@@ -598,6 +598,22 @@ static void test_error_scope_and_invalid_inputs(void)
     TEST_ASSERT_EQUAL_UINT32(0, reads);
     TEST_ASSERT_EQUAL_INT(YAN_BLOCK_QUERY_INVALID,
         yan_block_query_list(&query, "bad", NULL, NULL));
+    /* 0041/#41: `out` aliasing the context object must be refused.
+     *
+     * This case exists to pin the `overlaps(out, size, query, sizeof *query)`
+     * guard in output_usable(). It is written so that `overlaps` is the ONLY
+     * check that can reject it:
+     *   - out is not NULL             -> the `out != NULL` check passes
+     *   - out points at a live object -> span(out, size) passes
+     *   - size is a legal object size -> span's wrap test passes
+     * The pointer merely aliases `query`, which only `overlaps` detects. Delete
+     * that guard and this assertion is the one that fails.
+     *
+     * The guard runs before any I/O, so nothing may be read. */
+    TEST_ASSERT_EQUAL_INT(YAN_BLOCK_QUERY_INVALID,
+        yan_block_query_list(&query, "bad", NULL,
+                             (YanBlockQueryList *)(void *)&query));
+    TEST_ASSERT_EQUAL_UINT32(0, reads);
     TEST_ASSERT_EQUAL_INT(YAN_BLOCK_QUERY_INVALID,
         yan_block_query_list(NULL, "bad", NULL, &list_result));
     YanBlockQuery empty;

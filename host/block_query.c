@@ -14,6 +14,13 @@ static bool span(const void *p, size_t n)
 {
     return (p != NULL || n == 0) && n <= UINTPTR_MAX - (uintptr_t)p;
 }
+/* True when the two byte ranges intersect. PRECONDITION: each side must already
+ * have passed span(), which is what proves that a + an and b + bn cannot wrap.
+ * This helper deliberately does not repeat that check: span() is the single
+ * place that owns the wrap rule, and every caller here runs it first (see
+ * output_usable and yan_block_query_init). Adding a second copy would be the
+ * duplicate defence this file is meant to avoid -- but it is also why removing
+ * the span() gate above would be unsafe. */
 static bool overlaps(const void *a, size_t an, const void *b, size_t bn)
 {
     return an && bn && (uintptr_t)a < (uintptr_t)b + bn &&
