@@ -33,8 +33,9 @@
  * The four tables total 1540096 bytes. key.count is the real uint32 occurrence
  * count (at most the posting capacity); the per-line score caps each group at
  * 255, never the stored count. Per-query atom keys/cursors verify identity
- * through each key's posting list and exact byte adjacency. The 63-entry
- * directory snapshot, the rank table and the complete linear fallback backend
+ * through each key's posting list and exact byte adjacency. The directory
+ * snapshot -- `entry_capacity` entries, sized by the image rather than by a
+ * fixed 63 -- the rank table and the complete linear fallback backend
  * are bounded derived scratch; 0027 adds the metadata prefix/info/workspace and
  * the eligibility flags inside that embedded linear object, so the index's
  * protected span already covers the whole filtered-query scratch. The whole
