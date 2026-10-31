@@ -269,8 +269,29 @@ def files_rejection_case(mkfs, work):
               "R1-AC3 %s exits 2, got %d" % (label, proc.returncode))
         check(proc.stdout == b"",
               "R1-AC3 %s prints nothing on stdout" % label)
-        check(proc.stderr != b"",
-              "R1-AC3 %s explains itself on stderr" % label)
+        # Issue #99: assert the WHOLE diagnostic line, not merely that stderr is
+        # non-empty. A non-empty check passes for any message at all, including
+        # the usage banner, so it never proved the tool explains THIS rejection.
+        # Every expected string below was captured from the binary with repr()
+        # and checked to end in exactly one newline; none was written from
+        # memory. The two shapes are:
+        #   invalid <option> '<the raw text the user typed>'
+        #   --blocks N cannot hold a <D>-block directory
+        # The raw text is echoed verbatim (empty string, leading space, sign and
+        # all), so quoting it back distinguishes "rejected as malformed" from
+        # "rejected for being out of range" without either sharing a message.
+        files_value = extra[extra.index("--files") + 1]
+        if label == "too-small-blocks":
+            # --files is well formed here; the geometry is what cannot work
+            # (4095 files needs D=64 blocks, --blocks 64 supplies only D=1).
+            expected = (b"yan_mkfs: --blocks 64 cannot hold a 64-block "
+                        b"directory\n")
+        else:
+            expected = (b"yan_mkfs: invalid --files '"
+                        + files_value.encode("utf-8") + b"'\n")
+        check(proc.stderr == expected,
+              "R1-AC3 %s stderr is exactly %r, got %r"
+              % (label, expected, proc.stderr))
         check(not os.path.exists(path),
               "R1-AC3 %s creates no image" % label)
 
