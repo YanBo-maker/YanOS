@@ -356,6 +356,8 @@ filtered term首轮Linux专项CTest4/4通过：原生13例及独立oracle的108�
 
 上面两条锁定后补齐段保留当时“尚待执行”的历史记录；现已由17重复/17不同组、真实耗尽rebuildOK/零I/O/UNCACHEABLE零计数永久测试验证取代，批准依据和旧原文不删。阅读 [0026](specs/0026-term-search-index.md)、[term接口](../os/search_terms.h)、[index](../os/search_terms_index.c)、[独立oracle](../tests/search_terms_reference.py)。整体规格及PR #22合入已获所有者批准，理解程度由项目所有者判断。
 
+**测量caveat**：五个默认puregate不算实际变异组，`-E '_mutation$'`保留它们；变异检查默认关闭，合并前显式运行。
+
 ### 已交付字面检索基线
 
 当前交付：知识检索基础设施，[0025](specs/0025-knowledge-search.md) 于2026-10-06 13:10 +08:00经项目所有者批准并锁定。
