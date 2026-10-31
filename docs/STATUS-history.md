@@ -915,3 +915,10 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 用法入口与平台覆盖说明收尾：在 `yan_run --disk-image` 示例旁说明Linux/WSL旁锁、锁冲突退出码及Windows限制；明确Windows的文档判据自测与Linux的MCP服务验收范围。程序行为、工具参数和CI配置保持。
 
 前一组六项文档修正已随[PR #100](https://github.com/YanBo-maker/YanOS/pull/100)以`2233ea8`合入main；其合入前验证已核对，合入后的[主线CI](https://github.com/YanBo-maker/YanOS/actions/runs/40892892526)已由Actions API确认通过。本阶段不新增Windows原生MCP支持，0035、0036整体仍为Approved，0040为Implemented；学习理解程度由项目所有者判断。
+
+
+### 2026-10-31：PR #113/#114 合入前的当前阶段
+
+## 当前阶段
+
+0041 笔记元数据的 MCP 只读工具：新增只读工具 `yanos_note_meta`，由独立开关 `--allow-meta` 门控，与 `--allow-write` 正交，补齐 [0027](specs/0027-note-metadata.md) 元数据观察缺失的 MCP 用户面。工具返回 title/created/modified/tag/link（含 link 的 OK/MISSING）与 `has_header`，不返回正文、不读目标正文判定链接健康、不预检正文，因此无头旧文件与二进制正文照常观察，头部损坏报 METADATA。默认启动态仍与 0033 六工具逐字节相同，`serverInfo.version` 保持 `0035`。已随[PR #109](https://github.com/YanBo-maker/YanOS/pull/109)以 merge commit `b994150` 合入 main。

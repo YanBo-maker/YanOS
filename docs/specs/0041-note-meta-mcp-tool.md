@@ -1,13 +1,15 @@
 # 0041：笔记元数据的 MCP 只读工具
 
-- **意图**：Agent 不开 Guest 终端也能读到一篇笔记的 0027 元数据（title、created、modified、tag、link 及其悬空状态），补齐 0027 观察能力缺失的 MCP 用户面，使 Agent 能在不破坏头的前提下读懂并整文件覆盖笔记。依据：[0005 决策](../decisions/0005-note-meta-mcp-tool.md)（闫博 2026-10-30 裁定）。
+- **意图**：Agent 不开 Guest 终端也能读到一篇笔记的 0027 元数据（title、created、modified、tag、link 及其悬空状态），也能按标签筛选列出全库文件名，补齐 0027 观察与名单能力缺失的 MCP 用户面，使 Agent 能在不破坏头的前提下读懂笔记、整文件覆盖笔记，并自己找到「哪些笔记命中某个主题」。依据：[0005 决策](../decisions/0005-note-meta-mcp-tool.md)（闫博 2026-10-30 裁定）。
 - **状态**：Approved（2026-10-30，闫博）
-- **supersedes**：无整份替代。本规格扩展 [0033](0033-block-mcp-navigation.md) 与 [0035](0035-agent-writable-knowledge.md) 的工具集合：新增一个只读工具 `yanos_note_meta`，由独立启动开关 `--allow-meta` 门控。0033 的六个工具、0035 的 R1–R12 与两个写工具的行为和验收条件均不改变；0035-R1-AC1 / R2-AC1 / R12-AC1 描述的仍是 0035 阶段的工具面。
+- **supersedes**：无整份替代。本规格扩展 [0033](0033-block-mcp-navigation.md) 与 [0035](0035-agent-writable-knowledge.md) 的工具集合：新增两个只读工具 `yanos_note_meta`、`yanos_note_list`，同由独立启动开关 `--allow-meta` 门控（R1 为单文件观察，R2 为全库名单与 tag AND 筛选）。0033 的六个工具、0035 的 R1–R12 与两个写工具的行为和验收条件均不改变；0035-R1-AC1 / R2-AC1 / R12-AC1 描述的仍是 0035 阶段的工具面。
 - **成功标准**（从闫博的角度看）：
   1. Agent 不看终端就能说出一篇笔记声明了哪些标题、日期、标签和链接，以及哪些链接已经指不到文件。
-  2. 不开任何开关时，MCP 对外表现与 0033 完全一样；要不要多这个工具由启动者显式决定。
+  2. 不开任何开关时，MCP 对外表现与 0033 完全一样；要不要多这两个工具由启动者显式决定。
   3. Agent 能靠这个工具把一篇带头笔记读全，再整文件覆盖回去时头不丢。
   4. 读一篇没有头的旧笔记、或正文是二进制的笔记，不被当成错误；坏头则明确报 METADATA。
+  5. Agent 不看终端就能问出「库里有哪些笔记命中某个主题」，拿到按名称排好序的文件名名单。
+  6. 多个标签求交集（AND）：问「同时带这两个标签的笔记」，只拿到两边都有的那些；没有命中是正常回答（空名单），不是错误。
 
 ## 三栏边界
 
@@ -15,15 +17,15 @@
 |---|---|---|
 | 加两个只读工具（`yanos_note_meta`、`yanos_note_list`），同由 `--allow-meta` 开启，与 `--allow-write` 正交 | meta 的写入面（title/tag/link/date 的增删改）；不带 `--allow-meta` 时出现在工具列表 | description 的措辞 |
 | link 状态两态 `OK`/`MISSING`，只看目标文件是否存在 | 读目标正文判定链接健康；引入第三态；复用 0032 的 `OK/DANGLING_FILE/DANGLING_BLOCK` | — |
-| 单文件观察只校验目标头 | 导入 0027:83 的 list 全库预检（任意坏头即 METADATA、不出半份名单） | — |
+| 单文件观察只校验目标头 | 导入 0027:85 的 list 全库预检（任意坏头即 METADATA、不出半份名单） | — |
 | 正文内容不参与判定，对二进制正文照常返回元数据 | 在观察路径返回 INVALID_TEXT / TOO_LARGE（二者属 0027 的 update 路径） | — |
-| `meta list` 的 tag AND 筛选由 R2 提供；`yanos_note_list` 只返名单 | 让 `yanos_note_list` 返回每文件元数据；流式输出半份名单；把 `search` 的 `tag:` 操作符（0027:97）塞进本工具 | `search` 侧操作的 Issue 编号与拆法 |
+| `meta list` 的 tag AND 筛选由 R2 提供；`yanos_note_list` 只返名单 | 让 `yanos_note_list` 返回每文件元数据；流式输出半份名单；把 `search` 的 `tag:` 操作符（0027:99）塞进本工具 | `search` 侧操作的 Issue 编号与拆法 |
 
 ## 需求与验收
 
 ### 0041-R1：新增只读工具 yanos_note_meta，由 --allow-meta 单独开启
 
-`yanos_note_meta` 只读，补齐 0027 元数据观察的 MCP 用户面（Guest 侧对应用户面是 `meta show`，0027:45–83）。只由启动开关 `--allow-meta` 启用，与 `--allow-write` 正交，默认关闭。`--allow-meta` 不带参数值；重复出现按现有选项解析规则返回启动 USAGE、退出 2（沿用 0031:23 的未知或重复选项规则）。
+`yanos_note_meta` 只读，补齐 0027 元数据观察的 MCP 用户面（Guest 侧对应用户面是 `meta show`，0027:47–85）。只由启动开关 `--allow-meta` 启用，与 `--allow-write` 正交，默认关闭。`--allow-meta` 不带参数值；重复出现按现有选项解析规则返回启动 USAGE、退出 2（沿用 0031:23 的未知或重复选项规则）。
 
 arguments：`{ "name": string, "expected_source"?: string }`。name 沿 YanFS 1–31 字节名称规则；expected_source 为 64 个小写十六进制字符（沿 0030 身份）。未知字段、非法 name、含 NUL 或格式错误的 expected_source 均 INVALID，零来源 I/O。
 
@@ -40,11 +42,11 @@ arguments：`{ "name": string, "expected_source"?: string }`。name 沿 YanFS 1�
 | links | `[{name, state}]`（≤16） | 文件顺序；`name` 为目标文件名，`state` 见下 |
 | complete | boolean（固定 `true`） | 本次观察是完整的前缀观察，不含分页或截断；为后续可能的分页保留常量位 |
 
-`has_header=false` 时 title/created/modified 为 null、tags/links 为空数组，这是合法的旧笔记观察，不是错误（0027:15「没有完整 9 字节 `@yan-note` 前缀的文件是旧格式，元数据为空」、0027:87）。`title`/`created`/`modified` 是「声明即返回」，不做日历有效性二次判断——0027 的格式校验已在解析时完成，能走到这里就是合法值。
+`has_header=false` 时 title/created/modified 为 null、tags/links 为空数组，这是合法的旧笔记观察，不是错误（0027:17「没有完整 9 字节 `@yan-note` 前缀的文件是旧格式，元数据为空」、0027:89）。`title`/`created`/`modified` 是「声明即返回」，不做日历有效性二次判断——0027 的格式校验已在解析时完成，能走到这里就是合法值。
 
-**link 状态两态 `OK` / `MISSING`**：`OK` 表示目标文件存在，`MISSING` 表示目标文件不存在。判定只做一次目录 stat，**不读目标正文**（0027:81「LINK 状态只看目标文件存在，不读目标正文；DANGLING 不是 FS 错误」）。`MISSING` 与 Guest 终端 `meta show` 输出的 `DANGLING` 语义完全相同（0027:76–77 的输出示例为 `LINK irq.txt OK` 与 `LINK missing.txt DANGLING`），本规格改用 `MISSING` 只因为 MCP 侧以「目标是否存在」为唯一判据。**本工具的 `MISSING` 与 `yanos_index_status` 的 `state` 枚举值 `MISSING`（索引缺失）不是同一个概念**，两者出现在不同的 operation 下，不得互相解释。目标存在但 stat 返回其它错误时，整个调用失败并报该错误，不降级成 `MISSING`。
+**link 状态两态 `OK` / `MISSING`**：`OK` 表示目标文件存在，`MISSING` 表示目标文件不存在。判定只做一次目录 stat，**不读目标正文**（0027:83「LINK 状态只看目标文件存在，不读目标正文；DANGLING 不是 FS 错误」）。`MISSING` 与 Guest 终端 `meta show` 输出的 `DANGLING` 语义完全相同（0027:78–79 的输出示例为 `LINK irq.txt OK` 与 `LINK missing.txt DANGLING`），本规格改用 `MISSING` 只因为 MCP 侧以「目标是否存在」为唯一判据。**本工具的 `MISSING` 与 `yanos_index_status` 的 `state` 枚举值 `MISSING`（索引缺失）不是同一个概念**，两者出现在不同的 operation 下，不得互相解释。目标存在但 stat 返回其它错误时，整个调用失败并报该错误，不降级成 `MISSING`。
 
-单文件观察只校验目标头，不导入 0027:83 的 list 全库预检规则（0027:83 规定 `meta list` 必须先检查全部文件的头、发现任意坏头即 ERROR METADATA、不出半份名单；那是全库列举的规则）。头不合法（marker 缺失、版本未知、头未闭合、字段非法等）返回 METADATA；这是普通内容错误，不使 FS 进入 FAULTED，同实例后续调用仍可用。**正文内容不参与判定**：本工具只读识别并校验头所需的 prefix，不全文预检正文，因此正文为二进制的笔记照常返回元数据，观察路径永不产生 INVALID_TEXT 或 TOO_LARGE（二者属 0027 的 update 路径，0027:87、0027:154）。
+单文件观察只校验目标头，不导入 0027:85 的 list 全库预检规则（0027:85 规定 `meta list` 必须先检查全部文件的头、发现任意坏头即 ERROR METADATA、不出半份名单；那是全库列举的规则）。头不合法（marker 缺失、版本未知、头未闭合、字段非法等）返回 METADATA；这是普通内容错误，不使 FS 进入 FAULTED，同实例后续调用仍可用。**正文内容不参与判定**：本工具只读识别并校验头所需的 prefix，不全文预检正文，因此正文为二进制的笔记照常返回元数据，观察路径永不产生 INVALID_TEXT 或 TOO_LARGE（二者属 0027 的 update 路径，0027:89、0027:156）。
 
 错误顺序沿 0033:44 的既有优先级，第一条命中即返回：
 
@@ -88,17 +90,17 @@ arguments：`{ "name": string, "expected_source"?: string }`。name 沿 YanFS 1�
 
 ### 0041-R2：新增只读工具 yanos_note_list，同由 --allow-meta 开启
 
-`yanos_note_list` 只读，补齐 0027:83 的 `meta list` 在 MCP 侧的用户面：列出笔记库的文件名，可按标签筛选。它只由既有的 `--allow-meta` 启用（不新增开关），与 `--allow-write` 正交，默认关闭。
+`yanos_note_list` 只读，补齐 0027:85 的 `meta list` 在 MCP 侧的用户面：列出笔记库的文件名，可按标签筛选。它只由既有的 `--allow-meta` 启用（不新增开关），与 `--allow-write` 正交，默认关闭。
 
-**本工具只返回名单，不返回每个文件的元数据**——单文件字段仍由 R1 的 `yanos_note_meta` 提供。这是 0027:83 的既有语义，也是两条工具的分界。
+**本工具只返回名单，不返回每个文件的元数据**——单文件字段仍由 R1 的 `yanos_note_meta` 提供。这是 0027:85 的既有语义，也是两条工具的分界。
 
 arguments：`{ "tags"?: string[], "expected_source"?: string }`。`tags` 可省略或为空表示不筛选；每项为 1–63 字节的标签原文，**最多 16 个去重后不同**的标签，重复 token 先去重再计配额（`note_metadata_format.h:85-87` 要求调用方去重）。`expected_source` 为 64 个小写十六进制字符（沿 0030 身份）。未知字段、tags 超 16、空标签、超 63 字节、含 NUL 或格式错误的 expected_source 均 INVALID，零来源 I/O。
 
 成功对象沿用 0033 的公共成员（`schema_version`=1、`operation`="note_list"、`source_sha256`），另加 `names`（string[]，ASCII 文件名升序）、`shown`（整数，等于 `names` 长度）、`complete`（常量 true）。
 
-**筛选与列出**：多个 `tags` 为 AND（文件须同时含全部标签）。无 `tags` 时列出全部文件，**含无头的旧文件**（其标签视为空集合，0027:83）。**空结果仍成功**：`names` 为空数组、`shown` 为 0，不是错误。
+**筛选与列出**：多个 `tags` 为 AND（文件须同时含全部标签）。无 `tags` 时列出全部文件，**含无头的旧文件**（其标签视为空集合，0027:85）。**空结果仍成功**：`names` 为空数组、`shown` 为 0，不是错误。
 
-**全库预检**：按 0027:83，必须先检查库中每个文件的头；**任一坏头即返回 METADATA，不返回半份名单、不返回 OK**。因此本工具不能在扫描过程中流式输出——必须先完成全库校验，再构造响应。单文件观察（R1）不做此预检，两者的错误规则不同，不得混用。
+**全库预检**：按 0027:85，必须先检查库中每个文件的头；**任一坏头即返回 METADATA，不返回半份名单、不返回 OK**。因此本工具不能在扫描过程中流式输出——必须先完成全库校验，再构造响应。单文件观察（R1）不做此预检，两者的错误规则不同，不得混用。
 
 错误顺序沿 R1 与 0033:44，第一条命中即返回：
 
@@ -131,7 +133,7 @@ arguments：`{ "tags"?: string[], "expected_source"?: string }`。`tags` 可省�
 
 - 不改 0033 六个工具与 0035 两个写工具的任何行为、schema、注解或错误 token。
 - 不提供 meta 的写入面：不新增 `yanos_note_meta_set` 之类工具；改 meta 仍走 Guest 终端或 0035 的整文件覆盖。
-- 不提供 `search` 的 `tag:` 操作符（0027:97）：它走检索结果而非文件名单，返回形状与错误规则都不同（tag-only 为 ERROR USAGE、要求至少一个 0026 关键词组），另开 Issue。`meta list` 的 AND 筛选已由 R2 提供。
+- 不提供 `search` 的 `tag:` 操作符（0027:99）：它走检索结果而非文件名单，返回形状与错误规则都不同（tag-only 为 ERROR USAGE、要求至少一个 0026 关键词组），另开 Issue。`meta list` 的 AND 筛选已由 R2 提供。
 - 不新增文件格式、索引、磁盘字段或身份类型；不读目标正文；不在读取路径启动模型或 runner。
 - 不支持 Windows 原生运行（与 0031–0035 相同，只在 Linux/WSL 上运行）。
 
@@ -148,9 +150,9 @@ arguments：`{ "tags"?: string[], "expected_source"?: string }`。`tags` 可省�
 
 ## VERIFY 执行记录
 
-### 总审核独立复验（2026-10-30，main `b994150`）
+### 总审核独立复验（2026-10-31，含 `yanos_note_list` 的 main，即 PR #113 合入后）
 
-总审核在 main `b994150` 上自行干净构建（Release，`-DYAN_BUILD_SEMANTIC=ON`）并用项目自带的 `tests/mcp_checks.py` Wire 握手实测，不引用实现方转述：
+总审核在含 `yanos_note_list` 的树上（PR #113 合入后的 main）自行干净构建（Release，`-DYAN_BUILD_SEMANTIC=ON`）并用项目自带的 `tests/mcp_checks.py` Wire 握手实测，不引用实现方转述。下表四个值与实测逐字节相同；**这些值不可能在 `b994150` 上测得**——该提交的 `tools/mcp_meta.c` 里没有 `yanos_note_list`（`git show b994150:tools/mcp_meta.c | grep -c yanos_note_list` → 0），8/10 态自 PR #113（`21a3d58`）起才存在。
 
 | 启动开关 | 工具数 | `tools` 成员 SHA-256 | 与 0033 基线 |
 |---|---|---|---|
@@ -163,7 +165,7 @@ arguments：`{ "tags"?: string[], "expected_source"?: string }`。`tags` 可省�
 
 ### AC 自动化断言（2026-10-30 补齐）
 
-`b994150` 合入时未改动任何测试文件，R1 的 AC1–AC11 曾只由手工复验覆盖，按 AGENTS.md「完成定义」验收未闭合。该缺口已由 PR #112（`4e345ec`）补齐：新增 `tests/mcp_meta_checks.py`（14 个用例），CMake 注册 `mcp_meta`。R2 的 AC1–AC11 由同一 PR 系列的 `tests/mcp_note_list_checks.py`（18 个断言）覆盖，CMake 注册 `mcp_note_list`。
+`b994150` 合入时未改动任何测试文件，R1 的 AC1–AC11 曾只由手工复验覆盖，按 AGENTS.md「完成定义」验收未闭合。该缺口已由 PR #112（`4e345ec`）补齐：新增 `tests/mcp_meta_checks.py`（14 个用例），CMake 注册 `mcp_meta`。R2 的 AC1–AC11 由同一 PR 系列的 `tests/mcp_note_list_checks.py`（17 个用例）覆盖，CMake 注册 `mcp_note_list`。
 
 负控（均已还原）：门控改 `bool meta=true` → 报 `ac1_names`；link 状态 `MISSING`→`OK` → 恰好 AC6 变红、前 5 条仍绿；tags AND 改弱为只取首个 → `and_names` 从 `['a-cpu.txt']` 变 `['a-cpu.txt','b-cpu.txt']`。
 
