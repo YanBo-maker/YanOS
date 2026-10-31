@@ -271,12 +271,18 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
          "${CMAKE_CURRENT_SOURCE_DIR}/os/block_peek.h"
          "${CMAKE_CURRENT_SOURCE_DIR}/os/note_metadata_format_internal.h")
 
+    # The link and strip command lines live in variables so the build and the
+    # reproducibility test (#106) share ONE definition. If the test re-spelled
+    # them it could drift from what the build actually does and then "prove" a
+    # property the real artefact does not have.
+    set(YAN_TERMINAL_LINK_FLAGS
+        -std=c17 -march=rv32im -mabi=ilp32
+        -mcmodel=medany -static -nostdlib -nostartfiles -ffreestanding
+        -fno-builtin -fno-stack-protector -O2
+        -Wall -Wextra -Wpedantic -Werror)
     add_custom_command(OUTPUT "${YAN_TERMINAL_ELF}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/guest-apps"
-        COMMAND "${YAN_RISCV_GCC}" -std=c17 -march=rv32im -mabi=ilp32
-                -mcmodel=medany -static -nostdlib -nostartfiles -ffreestanding
-                -fno-builtin -fno-stack-protector -O2
-                -Wall -Wextra -Wpedantic -Werror
+        COMMAND "${YAN_RISCV_GCC}" ${YAN_TERMINAL_LINK_FLAGS}
                 -I "${CMAKE_CURRENT_SOURCE_DIR}/os"
                 -T "${CMAKE_CURRENT_SOURCE_DIR}/os/guest.ld"
                 ${_yan_terminal_sources} -Wl,--build-id=none -o "${YAN_TERMINAL_ELF}.unstripped"
@@ -292,6 +298,16 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
                 "${CMAKE_CURRENT_SOURCE_DIR}/os/guest.ld"
         VERBATIM)
     add_custom_target(yanfs_terminal ALL DEPENDS "${YAN_TERMINAL_ELF}")
+
+    # Everything the reproducibility test needs to replay the same recipe in a
+    # private directory. `__IN__` marks where the unstripped input goes, and
+    # `__OUT__` where the result goes; the test substitutes both.
+    string(REPLACE ";" " " _yan_link_flags_str "${YAN_TERMINAL_LINK_FLAGS}")
+    string(REPLACE ";" " " _yan_sources_str "${_yan_terminal_sources}")
+    set(YAN_TERMINAL_LINK_COMMAND
+        "${YAN_RISCV_GCC} ${_yan_link_flags_str} -I ${CMAKE_CURRENT_SOURCE_DIR}/os -T ${CMAKE_CURRENT_SOURCE_DIR}/os/guest.ld ${_yan_sources_str} -Wl,--build-id=none -o __OUT__")
+    set(YAN_TERMINAL_STRIP_COMMAND
+        "${YAN_RISCV_STRIP} --strip-debug __IN__ -o __OUT__")
 endif()
 
 if(YAN_BUILD_SEMANTIC)
@@ -1113,19 +1129,24 @@ if(BUILD_TESTING)
                         --work "${CMAKE_BINARY_DIR}/shell-launcher")
             set_tests_properties(shell_launcher PROPERTIES TIMEOUT 180)
             if(TARGET yanfs_terminal AND TARGET yan_mkfs AND TARGET yan_run)
-                # Issue #106: the Guest ELF must be byte-reproducible. Runs two
-                # full rebuilds and compares, so it measures build determinism
-                # rather than strip idempotence. It also asserts `tohost` is
-                # still in .symtab, because `strip -s` would be reproducible but
-                # would break yan_run's halt-word lookup.
+                # Issue #106: the Guest ELF must be byte-reproducible. The test
+                # replays the terminal link+strip recipe into a PRIVATE temp
+                # directory three times and compares the bytes, so it measures
+                # build determinism rather than strip idempotence, and it never
+                # deletes or rewrites the shared ELF. That matters: an earlier
+                # revision re-linked ${YAN_TERMINAL_ELF} in place and the file
+                # was absent for ~3.5 s, so parallel Guest tests read a missing
+                # ELF and died with ERROR OUTPUT_OR_IO. It also asserts `tohost`
+                # is still in .symtab, because `strip -s` would be reproducible
+                # but would break yan_run's halt-word lookup.
                 if(YAN_RISCV_STRIP AND YAN_RISCV_READELF)
                     add_test(NAME guest_elf_reproducible
                         COMMAND "${Python3_EXECUTABLE}" -B
                                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_guest_reproducible.py"
-                                --cmake "${CMAKE_COMMAND}"
-                                --build "${CMAKE_BINARY_DIR}"
                                 --elf "${YAN_TERMINAL_ELF}"
-                                --readelf "${YAN_RISCV_READELF}")
+                                --readelf "${YAN_RISCV_READELF}"
+                                --link-command "${YAN_TERMINAL_LINK_COMMAND}"
+                                --strip-command "${YAN_TERMINAL_STRIP_COMMAND}")
                     set_tests_properties(guest_elf_reproducible PROPERTIES
                                          TIMEOUT 300 LABELS "issue106")
                 endif()
