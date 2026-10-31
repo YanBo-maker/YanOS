@@ -248,12 +248,29 @@ int main(int argc, char **argv)
     /* The side lock is taken before the image is opened and is held until the
      * process exits: another writer must not replace the inode under us. */
     if (options.disk_image != NULL) {
-        YanFsResult locked = yan_image_lock(options.disk_image, LOCK_EX, &lock_fd);
+        int lock_errno = 0;
+        YanFsResult locked =
+            yan_image_lock_errno(options.disk_image, LOCK_EX, &lock_fd,
+                                 &lock_errno);
         if (locked != YAN_FS_OK) {
-            fprintf(stderr, locked == YAN_FS_BUSY
-                    ? "yan_run: disk image '%s' is locked by another writer\n"
-                    : "yan_run: cannot lock disk image '%s'\n",
-                    options.disk_image);
+            /* Issue #53: name the cause. Three unrelated failures used to print
+             * the same sentence, so a missing image and an unwritable directory
+             * were indistinguishable. The errno is reported verbatim rather
+             * than translated, so the reader sees exactly what the kernel said. */
+            if (locked == YAN_FS_BUSY) {
+                fprintf(stderr,
+                        "yan_run: disk image '%s' is locked by another writer\n",
+                        options.disk_image);
+            } else if (locked == YAN_FS_NOT_FOUND) {
+                fprintf(stderr,
+                        "yan_run: disk image '%s' does not exist: %s\n",
+                        options.disk_image, strerror(lock_errno));
+            } else {
+                fprintf(stderr,
+                        "yan_run: cannot lock disk image '%s': %s\n",
+                        options.disk_image,
+                        lock_errno != 0 ? strerror(lock_errno) : "unknown error");
+            }
             return EXIT_HOST_ERROR;
         }
     }
