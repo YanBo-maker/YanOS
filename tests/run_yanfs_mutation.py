@@ -675,8 +675,8 @@ def self_test_run_suites():
     A harness symptom on either suite must win over an owner failure on the
     other; the owner must fail on the required assertion, not merely on some
     assertion of the same test; an owner failure must win over a wrong-owner
-    failure. This runs without a compiler, so yanfs_mutation_gate covers it in
-    the default suite.
+    failure. This runs without a compiler, so yanfs_mutation_classifier covers
+    it in the default suite.
     """
     marker = "OWNER-ASSERTION-MARKER"
     pass_suite = (0, unity_suite([("a", "PASS"), ("b", "PASS")]), b"")
