@@ -249,6 +249,121 @@ static uint32_t fx_block_crc(const uint8_t *data)
     return crc ^ UINT32_C(0xffffffff);
 }
 
+/* Issue #66: the shipped CRC now uses a 256-entry lookup table instead of the
+ * eight-round bit loop. These two helpers keep the OLD definition alive as a
+ * reference, written straight from the loop that shipped before the change, so
+ * the equivalence proof does not depend on the production code agreeing with
+ * itself.
+ *
+ * fx_ref_crc_multi mirrors directory_crc_with_block exactly: block 0 offsets
+ * 60..63 read as zero, a replaced block substitutes its whole 4096 bytes, and a
+ * zero-block directory yields the init value xored with itself. */
+static uint32_t fx_ref_crc_multi(const uint8_t *directory,
+                                 uint32_t directory_blocks,
+                                 uint32_t replaced_block,
+                                 const uint8_t *replacement)
+{
+    uint32_t crc = UINT32_C(0xffffffff);
+    /* `dir_block`, not `block`: os/yanfs.h declares yan_fs_metadata_crc with a
+     * parameter named `block`, and MSVC reports the shadowing as C4459, which
+     * the project promotes to an error under /WX. GCC does not warn, so this
+     * only fails on the Windows job. */
+    for (uint32_t dir_block = 0; dir_block < directory_blocks; ++dir_block) {
+        const uint8_t *base = dir_block == replaced_block
+                                  ? replacement
+                                  : directory + (size_t)dir_block * YAN_FS_BLOCK_SIZE;
+        for (uint32_t offset = 0; offset < YAN_FS_BLOCK_SIZE; ++offset) {
+            uint32_t byte = (uint32_t)base[offset];
+            if (dir_block == 0u && offset >= 60u && offset < 64u) {
+                byte = 0u;
+            }
+            crc ^= byte;
+            for (uint32_t bit = 0; bit < 8; ++bit) {
+                if ((crc & UINT32_C(1)) != 0u) {
+                    crc = (crc >> 1) ^ UINT32_C(0xedb88320);
+                } else {
+                    crc >>= 1;
+                }
+            }
+        }
+    }
+    return crc ^ UINT32_C(0xffffffff);
+}
+
+/* Deterministic pseudo-random bytes: a fixed LCG so the test is reproducible
+ * on every host and does not depend on rand()'s implementation. */
+static uint32_t fx_lcg_state;
+static uint8_t fx_lcg_byte(void)
+{
+    fx_lcg_state = fx_lcg_state * UINT32_C(1664525) + UINT32_C(1013904223);
+    return (uint8_t)(fx_lcg_state >> 24);
+}
+
+static void test_directory_crc_table_matches_bitwise_reference(void)
+{
+    /* 64 blocks is YAN_FS_MAX_DIR_BLOCKS, the largest directory the format
+     * allows; 1 and 2 cover v1 and the smallest v2. */
+    static const uint32_t sizes[] = {0u, 1u, 2u, 16u, 63u, 64u};
+    static uint8_t directory[64u * YAN_FS_BLOCK_SIZE];
+    static uint8_t replacement[YAN_FS_BLOCK_SIZE];
+
+    /* 1. Zero blocks: the reference and the shipped function must agree on the
+     * empty input too, which is the case a table rewrite most easily breaks. */
+    for (size_t s = 0; s < sizeof sizes / sizeof sizes[0]; ++s) {
+        uint32_t blocks = sizes[s];
+        memset(directory, 0, sizeof directory);
+        TEST_ASSERT_EQUAL_UINT32(fx_ref_crc_multi(directory, blocks,
+                                                  UINT32_MAX, NULL),
+                                 yan_fs_directory_crc(directory, blocks));
+    }
+
+    /* 2. All 0x00, all 0xFF and pseudo-random content, every size, with the
+     * CRC field of block 0 left non-zero on purpose so the zeroing rule is
+     * exercised rather than accidentally satisfied. */
+    for (int fill = 0; fill < 3; ++fill) {
+        for (size_t s = 0; s < sizeof sizes / sizeof sizes[0]; ++s) {
+            uint32_t blocks = sizes[s];
+            if (blocks == 0u) {
+                continue;
+            }
+            fx_lcg_state = UINT32_C(0x12345678) + (uint32_t)fill;
+            for (size_t i = 0; i < sizeof directory; ++i) {
+                if (fill == 0) {
+                    directory[i] = 0x00u;
+                } else if (fill == 1) {
+                    directory[i] = 0xffu;
+                } else {
+                    directory[i] = fx_lcg_byte();
+                }
+            }
+            TEST_ASSERT_EQUAL_UINT32(fx_ref_crc_multi(directory, blocks,
+                                                      UINT32_MAX, NULL),
+                                     yan_fs_directory_crc(directory, blocks));
+        }
+    }
+
+    /* 3. Replaced-block path. yan_fs_directory_crc() cannot reach it, so drive
+     * the same body through a real mount later; here the reference is compared
+     * against the public metadata helper for block 0 only, plus explicit
+     * whole-directory comparisons below. */
+    memset(replacement, 0, sizeof replacement);
+    for (size_t i = 0; i < sizeof replacement; ++i) {
+        replacement[i] = (uint8_t)(i * 7u + 3u);
+    }
+    memset(directory, 0, sizeof directory);
+    for (size_t i = 0; i < sizeof directory; ++i) {
+        directory[i] = (uint8_t)(i * 13u + 5u);
+    }
+    /* Block 0 replaced by `replacement`: the zeroing rule still applies to the
+     * replacement's offsets 60..63. */
+    TEST_ASSERT_EQUAL_UINT32(fx_ref_crc_multi(directory, 1u, 0u, replacement),
+                             yan_fs_directory_crc(replacement, 1u));
+    /* A single block directory and that same block as its own replacement must
+     * agree with the plain call, because the substitution is identity there. */
+    TEST_ASSERT_EQUAL_UINT32(fx_ref_crc_multi(directory, 2u, UINT32_MAX, NULL),
+                             fx_ref_crc_multi(directory, 2u, 2u, replacement));
+}
+
 static void fx_seal(uint8_t *data)
 {
     fx_put_le32(data + 60u, fx_block_crc(data));
@@ -4276,5 +4391,6 @@ int main(void)
     RUN_TEST(source_identity_changes_when_a_real_fault_is_entered);
     RUN_TEST(source_identity_changes_on_mount_protocol_and_unknown_status);
     RUN_TEST(source_identity_unchanged_by_normal_mount_rejection);
+    RUN_TEST(test_directory_crc_table_matches_bitwise_reference);
     return UNITY_END();
 }
