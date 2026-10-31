@@ -649,6 +649,20 @@ def run_ac2(args, root, fixtures, ordinary_image, ordinary_sha,
             assert_exact(replace_source, replace_preview["source_sha256"],
                          "replace preview identity")
 
+            # A rejected commit must leave the image untouched, so the closed
+            # loop below starts from exactly the previewed bytes. The stale
+            # identity cannot match the note that now exists, and STALE is
+            # decided before every per-note check (0035-R10 ordering).
+            stale_source = "0" * 64
+            check_error(learning, "yanos_note_replace",
+                        {"name": LEARNING, "text": updated.decode("utf-8"),
+                         "expected_source": stale_source},
+                        "STALE", "replace commit with stale identity")
+            assert_exact(learning_image.read_bytes(), before_replace,
+                         "learning image after stale replace")
+            assert_exact(decode_v1(learning_image), created_files,
+                         "on-disk bytes after stale replace")
+
             replaced, error = learning.call(
                 "yanos_note_replace",
                 {"name": LEARNING, "text": updated.decode("utf-8"),
