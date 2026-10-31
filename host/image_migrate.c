@@ -956,13 +956,21 @@ YanImageMigrateResult yan_image_migrate(const char *from, const char *to,
     char *assets_path = NULL;
     bool source_assets = false;
 
-    YanFsResult locked = yan_image_lock(from, LOCK_SH, &lock_fd);
+    /* Issue #136: report the syscall's own reason in the message. The migrate
+     * error enum has no NOT_FOUND member, so the CODE stays IO -- changing it
+     * would alter how callers branch on a failed migration -- but the message
+     * now names the cause instead of saying only "cannot lock". A missing
+     * source and an unwritable directory produced the same sentence before. */
+    int lock_errno = 0;
+    YanFsResult locked =
+        yan_image_lock_errno(from, LOCK_SH, &lock_fd, &lock_errno);
     if (locked == YAN_FS_BUSY) {
         MIG_FAIL(YAN_IMAGE_MIGRATE_BUSY,
                  "source image is locked by another writer");
     }
     if (locked != YAN_FS_OK) {
-        MIG_FAIL(YAN_IMAGE_MIGRATE_IO, "cannot lock the source image");
+        MIG_FAIL(YAN_IMAGE_MIGRATE_IO, "cannot lock the source image: %s",
+                 lock_errno != 0 ? strerror(lock_errno) : "unknown error");
     }
 
     old_real = realpath(from, NULL);
