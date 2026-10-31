@@ -1389,10 +1389,17 @@ if(BUILD_TESTING)
                                      SKIP_RETURN_CODE 77 TIMEOUT 600)
             endif()
         endif()
-        add_test(NAME yanfs_mutation_gate
+        # Renamed from yanfs_mutation_gate: this item only exercises the verdict
+        # classifier (classify_run) on synthetic runs plus the mocked run_suites
+        # controls. It never compiles a mutant, so a green result here says
+        # nothing about whether the tests can detect a real defect. The real
+        # check is the CTest item `yanfs_mutation`, registered only under
+        # YAN_ENABLE_MUTATION_TESTS (mutation block near the end of this file)
+        # and run by the Linux CI job.
+        add_test(NAME yanfs_mutation_classifier
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_yanfs_mutation_gate.py")
-        set_tests_properties(yanfs_mutation_gate PROPERTIES TIMEOUT 120)
+        set_tests_properties(yanfs_mutation_classifier PROPERTIES TIMEOUT 120)
         add_test(NAME terminal_mutation_gate
             COMMAND "${Python3_EXECUTABLE}" -B
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_terminal_mutation_gate.py")

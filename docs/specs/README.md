@@ -24,7 +24,7 @@
 | [0018](0018-block-protocol.md) | 块请求协议 | Implemented | 无 | 无 |
 | [0019](0019-cooperative-runtime.md) | 协作式运行时 | Implemented | 无 | 无 |
 | [0020](0020-persistent-block-image.md) | 持久化块镜像 | Implemented | 无 | 无 |
-| [0021](0021-yanfs.md) | YanFS | Implemented | 无 | 无 |
+| [0021](0021-yanfs.md) | YanFS | Implemented | 无 | [0036](0036-yanfs-multi-block-directory.md)（仅盘上格式扩展与目录容量；v1 定义不变） |
 | [0022](0022-terminal-file-operations.md) | Guest 终端文件操作 | Implemented | 无 | 无 |
 | [0023](0023-multiline-text-editor.md) | 多行文本编辑 | Implemented | 无 | 无 |
 | [0024](0024-file-rename-copy.md) | 文件重命名与复制 | Implemented | 无 | 无 |

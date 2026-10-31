@@ -62,7 +62,7 @@ jobs:
           echo "YAN_DEPS=$deps" >> "$GITHUB_ENV"
       - name: Configure (Linux, Guest)
         if: runner.os == 'Linux'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DYAN_ENABLE_SANITIZERS=${{ matrix.sanitizers }} -DYAN_BUILD_TOOLS=ON -DYAN_RISCV_PREFIX=riscv64-linux-gnu- -DYAN_BUILD_SEMANTIC=ON -DCMAKE_PREFIX_PATH="$YAN_DEPS" -DYAN_MCP_SDK_PYTHON="$YAN_DEPS/mcp-venv/bin/python"
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DYAN_ENABLE_SANITIZERS=${{ matrix.sanitizers }} -DYAN_BUILD_TOOLS=ON -DYAN_RISCV_PREFIX=riscv64-linux-gnu- -DYAN_BUILD_SEMANTIC=ON -DYAN_ENABLE_MUTATION_TESTS=ON -DCMAKE_PREFIX_PATH="$YAN_DEPS" -DYAN_MCP_SDK_PYTHON="$YAN_DEPS/mcp-venv/bin/python"
       - name: Check Guest toolchain and registration
         if: runner.os == 'Linux'
         shell: bash
@@ -100,7 +100,12 @@ jobs:
         run: |
           set -o pipefail
           ctest --test-dir build -N | sed -n 's/^  Test *#[0-9]*: //p' | sort
-          ctest --test-dir build --build-config ${{ matrix.config }} --output-on-failure 2>&1 | tee ctest.log
+          # The mutation groups are registered (YAN_ENABLE_MUTATION_TESTS is ON
+          # for Linux) but run in their own step below; exclude only the real
+          # mutation items here. The `_mutation_classifier` / `_mutation_gate`
+          # judges stay in the default suite on purpose: they are cheap pure
+          # classifier checks, and CONTRIBUTING relies on them being present.
+          ctest --test-dir build --build-config ${{ matrix.config }} -E '_mutation$' --output-on-failure 2>&1 | tee ctest.log
           cp build/Testing/Temporary/LastTest.log build/Testing/Temporary/LastTest-full.log
           ctest --test-dir build --build-config ${{ matrix.config }} -V -R '^(mcp_note|mcp_note_tool|mcp_sdk|mcp_stdio)$' 2>&1 | grep -E ': (PASS|.*:PASS$|[0-9]+ Tests 0 Failures)|tests passed'
           if [ ! -f ctest.log ]; then
@@ -111,6 +116,18 @@ jobs:
             echo "::error::存在被跳过的测试（见上方列表）"
             exit 1
           fi
+      # The real mutation check: it compiles each mutant, swaps it into a
+      # scratch copy of the source and runs the suite, so a green result here
+      # means the tests actually detect these defects. Measured on the Release
+      # configuration: yanfs_mutation = 19 mutants in 19 s. Registered only
+      # under YAN_ENABLE_MUTATION_TESTS, which the Configure step sets for
+      # Linux; CONTRIBUTING documents the same flag for local runs.
+      - name: Mutation (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -o pipefail
+          ctest --test-dir build --build-config ${{ matrix.config }} -R '^yanfs_mutation$' --output-on-failure 2>&1 | tee mutation.log
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -118,6 +135,7 @@ jobs:
           name: test-evidence-${{ matrix.os }}-${{ matrix.config }}-sanitizers-${{ matrix.sanitizers }}
           path: |
             ctest.log
+            mutation.log
             build/Testing/Temporary/
             build/yanfs-4095-performance/
             build/CMakeCache.txt
