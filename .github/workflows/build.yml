@@ -122,6 +122,24 @@ jobs:
       # configuration: yanfs_mutation = 19 mutants in 19 s. Registered only
       # under YAN_ENABLE_MUTATION_TESTS, which the Configure step sets for
       # Linux; CONTRIBUTING documents the same flag for local runs.
+      # Issue #75: these three tests print the numbers that make their verdict
+      # checkable -- the arena size for each N, the rejection code, whether the
+      # image SHA stayed the same. `ctest` without -V swallows a passing test's
+      # stdout, so those numbers never reached CI. Verified locally: without -V
+      # the log contains zero occurrences of "0036-R3-AC2 measured",
+      # "load_bytes=", "sha=unchanged" or "N=127 boot=ok"; with -V all appear.
+      #
+      # No grep here on purpose: filtering the stream is what would drop the
+      # numbers again. The full verbose output goes to the log and the
+      # artifact, and tee preserves ctest's exit status through pipefail.
+      - name: Measured numbers (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -o pipefail
+          ctest --test-dir build --build-config ${{ matrix.config }} -V \
+            -R '^(arena_budget|arena_reject|capacity_guard)$' \
+            2>&1 | tee measured-numbers.log
       - name: Mutation (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -136,6 +154,7 @@ jobs:
           path: |
             ctest.log
             mutation.log
+            measured-numbers.log
             build/Testing/Temporary/
             build/yanfs-4095-performance/
             build/CMakeCache.txt
