@@ -392,6 +392,225 @@ static void test_0036_R2_init_directory_rejects_bad_arguments(void)
     free(first);
 }
 
+/* The v2 directory-block count must be 1..YAN_FS_MAX_DIR_BLOCKS. Issue #103:
+ * deleting that range check left the whole default suite green, because the
+ * only existing out-of-range case left ``entry_capacity`` inconsistent and was
+ * therefore rejected by the later consistency check instead of the range check.
+ *
+ * To make the range check the ONLY possible rejector, every case here writes a
+ * ``blocks`` value together with the matching ``entry_capacity``
+ * (blocks*64 - 1), so the consistency check at os/yanfs.c:838 would accept the
+ * header. ``entry_capacity`` is a u32, so blocks=0 cannot be matched by any
+ * value except the wrapped 0xffffffff; that case is written with 0xffffffff to
+ * keep the same "only the range can reject" property.
+ *
+ * probe() is used because it stops after validate_header: the CRC lives in
+ * validate_directory, which probe never reaches, so no reseal is needed. */
+static void test_0036_R2_dir_blocks_range_is_enforced(void)
+{
+    uint8_t scratch[YAN_FS_BLOCK_SIZE];
+    uint32_t blocks = 0u;
+    YanFsBlockIo io = v2_backend();
+
+    v2_start_image(1u, 16u);
+    /* v2_start_image(1, ..) formats a ONE-block image, which
+     * yan_fs_format_directory stamps as version 1 -- and version 1 ignores
+     * data[24] entirely. The header must be declared v2 first, or every case
+     * below would be judged by the v1 path and prove nothing. */
+    device.data[8] = 2u;
+    device.data[9] = device.data[10] = device.data[11] = 0u;
+
+    /* blocks = 0 is below the lower bound; entry_capacity is written to the
+     * wrapped product so only the range check can reject this header. */
+    device.data[24] = 0u;
+    device.data[25] = device.data[26] = device.data[27] = 0u;
+    device.data[20] = 0xffu;
+    device.data[21] = device.data[22] = device.data[23] = 0xffu;
+    blocks = 777u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_CORRUPT,
+                          yan_fs_probe(&io, scratch, &blocks));
+    /* A rejected header must not publish a block count. */
+    TEST_ASSERT_EQUAL_UINT32(777u, blocks);
+
+    /* blocks = YAN_FS_MAX_DIR_BLOCKS + 1 exceeds the upper bound, with the
+     * matching capacity so the consistency check would have accepted it. */
+    device.data[24] = 65u;
+    device.data[25] = device.data[26] = device.data[27] = 0u;
+    device.data[20] = 0x3fu;
+    device.data[21] = 0x10u;
+    device.data[22] = device.data[23] = 0u;   /* 4159 == 65*64 - 1 */
+    TEST_ASSERT_EQUAL_INT(YAN_FS_CORRUPT,
+                          yan_fs_probe(&io, scratch, &blocks));
+
+    /* Far above the bound, same construction. */
+    device.data[24] = 0xffu;
+    device.data[25] = 0xffu;
+    device.data[26] = device.data[27] = 0u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_CORRUPT,
+                          yan_fs_probe(&io, scratch, &blocks));
+
+    /* The two legal boundaries must be accepted: D=1 and D=64. */
+    device.data[24] = 1u;
+    device.data[25] = device.data[26] = device.data[27] = 0u;
+    device.data[20] = 63u;                    /* 1*64 - 1 */
+    device.data[21] = device.data[22] = device.data[23] = 0u;
+    blocks = 0u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_probe(&io, scratch, &blocks));
+    TEST_ASSERT_EQUAL_UINT32(1u, blocks);
+
+    device.data[24] = 64u;
+    device.data[20] = 0xffu;
+    device.data[21] = 0x0fu;
+    device.data[22] = device.data[23] = 0u;   /* 4095 == 64*64 - 1 */
+    blocks = 0u;
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_probe(&io, scratch, &blocks));
+    TEST_ASSERT_EQUAL_UINT32(64u, blocks);
+
+    /* No write may occur on any of the paths above. */
+    TEST_ASSERT_EQUAL_UINT32(0u, device.writes);
+}
+
+/* The same 1..64 rule must also hold on the mount path, which is the entry
+ * point the Guest actually uses. mount cannot be reused on an
+ * already-mounted instance, so this builds the device bytes by hand (the way
+ * v2_start_image does) and mounts exactly once, rather than starting from a
+ * mounted image and tampering with it afterwards.
+ *
+ * Blinding self-check: the illegal header also carries the entry_capacity that
+ * matches its declared D, so the consistency check at os/yanfs.c:838 would
+ * accept it and only the range check at :834 can reject. Without that, mount
+ * would fail for the same reason the old probe case did and prove nothing. */
+static void test_0036_R2_mount_rejects_out_of_range_dir_blocks(void)
+{
+    YanFs fresh;
+    uint32_t dir_blocks = 2u, capacity = 140u;
+
+    v2_start_image(dir_blocks, capacity);
+
+    /* Declare D=0 with the wrapped capacity 0*64-1 = 0xffffffff, which is the
+     * only value that can satisfy the consistency check for D=0. */
+    device.data[24] = 0u;
+    device.data[25] = device.data[26] = device.data[27] = 0u;
+    device.data[20] = 0xffu;
+    device.data[21] = 0xffu;
+    device.data[22] = 0xffu;
+    device.data[23] = 0xffu;
+
+    memset(&fresh, 0, sizeof fresh);
+    TEST_ASSERT_EQUAL_INT(
+        YAN_FS_OK,
+        yan_fs_init_directory(&fresh, v2_backend(), directory, dir_blocks,
+                              v2_name_order));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_CORRUPT, yan_fs_mount(&fresh));
+
+    /* The legal upper boundary must not be rejected by the range check. The
+     * device only holds 140 blocks while D=64 needs 64 directory blocks, so a
+     * full mount cannot succeed here; the header contract is read through
+     * probe, which stops after validate_header. */
+    device.data[24] = 64u;
+    device.data[20] = 0xffu;
+    device.data[21] = 0x0fu;
+    device.data[22] = device.data[23] = 0u;
+    uint8_t scratch[YAN_FS_BLOCK_SIZE];
+    uint32_t probed = 0u;
+    YanFsBlockIo io = v2_backend();
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK, yan_fs_probe(&io, scratch, &probed));
+    TEST_ASSERT_EQUAL_UINT32(64u, probed);
+}
+
+/* yan_fs_init_directory carries the same 1..64 rule (os/yanfs.c:779). The
+ * existing bad-arguments test does pass D=65, but it hands init a 2-block
+ * directory buffer, so with the guard removed init proceeds and clear_directory
+ * writes past the allocation: the run dies with heap corruption instead of
+ * failing an assertion. A crash is not a usable signal (it depends on the
+ * allocator), so this case supplies buffers actually large enough for D=65.
+ * With the guard the call returns INVALID and writes nothing; without it the
+ * call returns OK, which fails the assertion cleanly. */
+static void test_0036_R2_init_directory_range_is_enforced(void)
+{
+    enum { OVERSIZED = V2_MAX_DIR_BLOCKS + 1, ENTRIES = OVERSIZED * 64 };
+    YanFs local;
+    YanFsBlockIo io = v2_backend();
+
+    uint8_t *big_directory = calloc(OVERSIZED, V2_BLOCK);
+    uint16_t *big_name_order = calloc(ENTRIES, sizeof *big_name_order);
+    TEST_ASSERT_NOT_NULL(big_directory);
+    TEST_ASSERT_NOT_NULL(big_name_order);
+
+    /* Upper bound: D = MAX + 1 must be refused, not merely fail later. */
+    memset(&local, 0, sizeof local);
+    TEST_ASSERT_EQUAL_INT(
+        YAN_FS_INVALID,
+        yan_fs_init_directory(&local, io, big_directory, OVERSIZED,
+                              big_name_order));
+    /* The instance must be untouched by a refused init. */
+    TEST_ASSERT_FALSE(local.initialized);
+
+    /* Lower bound: D = 0 must be refused. */
+    memset(&local, 0, sizeof local);
+    TEST_ASSERT_EQUAL_INT(
+        YAN_FS_INVALID,
+        yan_fs_init_directory(&local, io, big_directory, 0u, big_name_order));
+    TEST_ASSERT_FALSE(local.initialized);
+
+    /* Both legal boundaries are accepted with the same buffers. */
+    memset(&local, 0, sizeof local);
+    TEST_ASSERT_EQUAL_INT(
+        YAN_FS_OK,
+        yan_fs_init_directory(&local, io, big_directory, V2_MAX_DIR_BLOCKS,
+                              big_name_order));
+    TEST_ASSERT_TRUE(local.initialized);
+    TEST_ASSERT_EQUAL_UINT32(V2_MAX_DIR_BLOCKS, local.directory_blocks);
+
+    free(big_name_order);
+    free(big_directory);
+}
+
+static void test_0036_R2_format_directory_rejects_bad_dir_blocks(void)
+{
+    /* yan_fs_format_directory carries the same 1..64 rule (os/yanfs.c:171).
+     * Only its success path was exercised before, so the bounds had no test
+     * at all: deleting them would not fail anything.
+     *
+     * Blinding self-check: the same if also rejects capacity_blocks <
+     * directory_blocks, so an out-of-range D paired with a small capacity is
+     * rejected by THAT clause instead. Every out-of-range case below therefore
+     * supplies a capacity strictly above the D it claims, leaving the range
+     * test as the only clause that can fire. */
+    uint8_t *scratch = calloc(V2_MAX_DIR_BLOCKS + 2u, V2_BLOCK);
+    TEST_ASSERT_NOT_NULL(scratch);
+
+    /* Lower bound: D=0 with capacity above it (1 > 0). */
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+                          yan_fs_format_directory(scratch, 0u, 1u));
+    /* Upper bound: D = MAX + 1 with capacity above it. */
+    TEST_ASSERT_EQUAL_INT(
+        YAN_FS_INVALID,
+        yan_fs_format_directory(scratch, V2_MAX_DIR_BLOCKS + 1u,
+                                V2_MAX_DIR_BLOCKS + 2u));
+    /* Both legal boundaries are still accepted. */
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
+                          yan_fs_format_directory(scratch, 1u, 16u));
+    TEST_ASSERT_EQUAL_INT(
+        YAN_FS_OK,
+        yan_fs_format_directory(scratch, V2_MAX_DIR_BLOCKS,
+                                V2_MAX_DIR_BLOCKS + 1u));
+
+    /* The capacity clause is pinned separately, so this test cannot silently
+     * start covering only that one: D=2 with capacity == D must be INVALID
+     * while D=2 with capacity > D is fine. */
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+                          yan_fs_format_directory(scratch, 2u, 2u));
+    TEST_ASSERT_EQUAL_INT(YAN_FS_OK,
+                          yan_fs_format_directory(scratch, 2u, 3u));
+
+    /* A NULL out is INVALID and must not be a back door around the range. */
+    TEST_ASSERT_EQUAL_INT(YAN_FS_INVALID,
+                          yan_fs_format_directory(NULL, 0u, 1u));
+
+    free(scratch);
+}
+
 static void test_0036_R2_external_directory_is_not_caller_scratch(void)
 {
     v2_start_image(2u, 10u);
@@ -457,7 +676,15 @@ static void test_0036_R3_probe_rejects_bad_headers_without_writing(void)
                           yan_fs_probe(&io, scratch, &blocks));
     TEST_ASSERT_EQUAL_UINT32(123u, blocks);
 
-    /* v2 with D outside 1..64. */
+    /* v2 with an entry_capacity that contradicts the declared D.
+     *
+     * This block starts from a D=1 image, so entry_capacity is 63. Raising
+     * data[24] to 65 makes the required capacity 65*64-1 = 4159, so what
+     * rejects this header is the entry_capacity consistency check
+     * (os/yanfs.c:838), NOT the 1..64 range check (:834). The range check is
+     * covered separately, with a matching capacity so that it is the only
+     * possible rejector, by test_0036_R2_dir_blocks_range_is_enforced. Keeping
+     * this case as-is is still useful: it pins the consistency rule. */
     device.data[8] = 2u;
     device.data[24] = 0u;
     device.data[25] = 0u;
@@ -539,6 +766,10 @@ int main(void)
     RUN_TEST(test_0036_R2_v2_mismatch_is_invalid_version_three_unsupported);
     RUN_TEST(test_0036_R2_init_directory_rejects_bad_arguments);
     RUN_TEST(test_0036_R2_external_directory_is_not_caller_scratch);
+    RUN_TEST(test_0036_R2_dir_blocks_range_is_enforced);
+    RUN_TEST(test_0036_R2_mount_rejects_out_of_range_dir_blocks);
+    RUN_TEST(test_0036_R2_format_directory_rejects_bad_dir_blocks);
+    RUN_TEST(test_0036_R2_init_directory_range_is_enforced);
     RUN_TEST(test_0036_R3_probe_reads_v1_and_v2);
     RUN_TEST(test_0036_R3_probe_rejects_bad_headers_without_writing);
     RUN_TEST(test_0036_R8_name_order_is_protected_workspace);
