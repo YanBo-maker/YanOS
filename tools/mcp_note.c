@@ -52,7 +52,16 @@ static YanMcpNoteResult open_note(const char *image, int operation, NoteImage *s
     memset(state, 0, sizeof *state);
     state->adapter.image_fd = state->adapter.index_fd = -1;
     state->lock_fd = -1;
-    YanFsResult locked = yan_image_lock(image, operation, &state->lock_fd);
+    /* Issue #136: use the errno-reporting variant so a missing image reaches
+     * map_fs as YAN_FS_NOT_FOUND instead of collapsing into YAN_FS_IO. 0041:51
+     * puts "opening/mounting the image failed" second in the error order and
+     * requires the ACTUAL error, so a caller is told the file is absent rather
+     * than given a generic I/O failure. errno itself has no place to go here:
+     * this layer reports codes, not text. */
+    int lock_errno = 0;
+    YanFsResult locked =
+        yan_image_lock_errno(image, operation, &state->lock_fd, &lock_errno);
+    (void)lock_errno;
     if (locked != YAN_FS_OK) return map_fs(locked);
     YanImageOpenResult opened = yan_semantic_posix_open_image_ex(&state->adapter, image);
     if (opened == YAN_IMAGE_OPEN_OK) return YAN_MCP_NOTE_OK;
