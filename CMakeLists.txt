@@ -616,14 +616,17 @@ if(BUILD_TESTING)
         endif()
         # The gated 0027:83 metadata listing (yanos_note_list). Separate test
         # so a failure names the listing rather than the single-note tool; both
-        # drive a real yan_mcp over stdio.
+        # drive a real yan_mcp over stdio. The AC labels are spelled one per AC
+        # (not as a coarse group) so `ctest -L 0041-R2-AC<n>` can locate the
+        # test that guards each acceptance criterion, matching how mcp_meta is
+        # labelled. `0027-list` is kept as the 0027-side label.
         if(Python3_Interpreter_FOUND AND TARGET yan_mcp)
             add_test(NAME mcp_note_list COMMAND "${Python3_EXECUTABLE}" -B
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_note_list_checks.py"
                 $<TARGET_FILE:yan_mcp>)
             set_tests_properties(mcp_note_list PROPERTIES TIMEOUT 240
                 SKIP_RETURN_CODE 77 LABELS
-                "0027-list;0041-meta-surface")
+                "0027-list;0041-R2-AC1;0041-R2-AC2;0041-R2-AC3;0041-R2-AC4;0041-R2-AC5;0041-R2-AC6;0041-R2-AC7;0041-R2-AC8;0041-R2-AC9;0041-R2-AC10;0041-R2-AC11")
         endif()
         if(Python3_Interpreter_FOUND)
             add_test(NAME block_query_oracle COMMAND "${Python3_EXECUTABLE}" -B
@@ -1136,6 +1139,18 @@ if(BUILD_TESTING)
                                 --server "$<TARGET_FILE:yan_mcp>")
                     set_tests_properties(guest_learning_note PROPERTIES TIMEOUT 600
                                          LABELS "0035-R8-AC1;0035-R8-AC2;0035-R10-AC3;0035-R11-AC4")
+                    # 0041-R2-AC3 Guest half: the MCP listing names must equal
+                    # `meta list tag:<X>` on the real terminal. Registered only
+                    # where the Guest targets exist, so a platform without the
+                    # toolchain omits it entirely instead of skipping silently.
+                    add_test(NAME guest_note_list_agree
+                        COMMAND "${Python3_EXECUTABLE}" -B
+                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_note_list_agree.py"
+                                --server "$<TARGET_FILE:yan_mcp>"
+                                --run "$<TARGET_FILE:yan_run>"
+                                --guest "${YAN_TERMINAL_ELF}")
+                    set_tests_properties(guest_note_list_agree PROPERTIES TIMEOUT 300
+                                         LABELS "0041-R2-AC3")
                 endif()
             endif()
             if(TARGET yanfs_terminal)

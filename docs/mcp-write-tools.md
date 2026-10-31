@@ -1,20 +1,22 @@
 # 写入类 MCP 工具
 
-本文说明 `yan_mcp` 的 `--allow-write`、两个写工具、镜像旁的锁文件，以及 `notes.img` 和 `learning.img` 怎么各起一个进程。依据 main `2921fed98a55358bb97282b0181072a2769b4e76`（[PR #55](https://github.com/YanBo-maker/YanOS/pull/55) 的合并提交）。下面的 `inputSchema`、`outputSchema` 和 `annotations` 从 [`tools/mcp_note.c`](../tools/mcp_note.c) 的工具 JSON 解析得到，与源码逐字段相同。其余段落只说明这些字段怎么调用。
+本文说明 `yan_mcp` 的 `--allow-write`、两个写工具、镜像旁的锁文件，以及 `notes.img` 和 `learning.img` 怎么各起一个进程。写工具的 `inputSchema`、`outputSchema` 和 `annotations` 从 [`tools/mcp_note.c`](../tools/mcp_note.c) 的工具 JSON 解析得到，与源码逐字段相同；该文件自 `2921fed98a55358bb97282b0181072a2769b4e76`（[PR #55](https://github.com/YanBo-maker/YanOS/pull/55) 的合并提交）起未改动，所以本页写工具字段的逐字段说明仍以它为据。其余段落只说明这些字段怎么调用。
 
 `mcp_note` 在实际 `--allow-write` 服务上读取 `tools/list`，逐项比较本页两个工具的名称、description、annotations、inputSchema 和 outputSchema；字段或类型不同、文档缺失或 JSON 损坏都会让测试失败。检查器在 [`tests/mcp_write_docs.py`](../tests/mcp_write_docs.py)，文档中的 create 输入结构仍通过明确引用与 replace 共享。这次工具列表查询不打开镜像或模型。
 
 在 Linux semantic/MCP 与 Guest 测试目标齐备时，运行 `ctest --test-dir <构建目录> -R '^mcp_note$' --output-on-failure` 可核对真实接口。纯 Python 的 `mcp_write_docs` 测试在配置找到 Python 时注册，用篡改文档和返回值核对检查器；它也在 Windows 运行。官方 SDK 的工具发现验收仍是 `mcp_sdk`。本检查的执行记录见 0035 VERIFY，README、状态和用法说明继续由独立文档审核核对。
 
-规格见 [0035](specs/0035-agent-writable-knowledge.md)，并发裁定见 [0002](decisions/0002-B-write-concurrency.md)。只读六工具的协议见 [0031](specs/0031-mcp-retrieval-tools.md) 和 [0033](specs/0033-block-mcp-navigation.md)。
+规格见 [0035](specs/0035-agent-writable-knowledge.md)，并发裁定见 [0002](decisions/0002-B-write-concurrency.md)。始终可见的六个只读工具协议见 [0031](specs/0031-mcp-retrieval-tools.md) 和 [0033](specs/0033-block-mcp-navigation.md)。
+
+另有两个只读工具（`yanos_note_meta` 单文件元数据、`yanos_note_list` 全库名单与 tag AND 筛选）由**独立开关 `--allow-meta`** 门控，与本文的 `--allow-write` 正交，见 [0041](specs/0041-note-meta-mcp-tool.md)。因此 `tools/list` 有四种形态：不带开关 6 个、仅 `--allow-meta` 8 个、仅 `--allow-write` 8 个、两者同开 10 个（顺序为六只读 → meta → list → create → replace）。`--allow-meta` 只影响只读工具是否出现，不影响本文任何写工具行为。
 
 ## `--allow-write`
 
 `yan_mcp` 的四个路径参数仍然必填：`--disk-image`、`--index`、`--model`、`--runner`。`--allow-write` 是不带值的开关，写两次会以退出码 2 打印 `ERROR USAGE`（[`tools/yan_mcp.c`](../tools/yan_mcp.c) 的 `options`）。默认关闭。
 
-关闭时，`tools/list` 只有 0033 的六个只读工具。调用 `yanos_note_create` 或 `yanos_note_replace` 走和未知工具名同一条路径：JSON-RPC 错误 `-32602`（Invalid params），不进入写工具（[`tools/mcp_protocol.c`](../tools/mcp_protocol.c) 里 `allow_write` 为假时不识别这两个名字）。
+关闭时，`tools/list` 只有始终可见的六个只读工具（带 `--allow-meta` 时再加上那两个 meta 工具，见上节）。调用 `yanos_note_create` 或 `yanos_note_replace` 走和未知工具名同一条路径：JSON-RPC 错误 `-32602`（Invalid params），不进入写工具（[`tools/mcp_protocol.c`](../tools/mcp_protocol.c) 里 `allow_write` 为假时不识别这两个名字）。
 
-打开时，这两个工具接在六个只读工具后面，顺序是 `yanos_note_create`、`yanos_note_replace`。
+打开时，这两个工具接在只读工具之后（只读工具为六个，或带 `--allow-meta` 时为八个），顺序是 `yanos_note_create`、`yanos_note_replace`。
 
 `initialize` 的 `serverInfo` 和现代结果 `_meta` 里的 `io.modelcontextprotocol/serverInfo` 都是 `{"name":"YanOS","version":"0035"}`。版本与开关无关（[`tools/mcp_protocol.c`](../tools/mcp_protocol.c) 的 `SERVER_INFO`）。
 
@@ -58,7 +60,7 @@ build/semantic/yan_mcp --allow-write \
 处理：
 
 - 写工具返回 `{"code":"BUSY"}`：有进程正持有排他锁（正在跑的 `yan_run --disk-image`，或一次还没返回的提交）。预览与提交都是 `LOCK_NB`，不会等。等对方退出后再调。服务里若已有一个工具调用未结束，父进程也会直接返回 `BUSY`，这时还没有去拿文件锁（[`tools/yan_mcp.c`](../tools/yan_mcp.c) 的 `handle`）。
-- 六个只读工具不拿这把锁。
+- 所有只读工具都不拿这把锁：始终可见的六个，以及由 `--allow-meta` 启用的 `yanos_note_meta`、`yanos_note_list` 同样只以只读方式打开镜像。
 - 不要删 `<image>.lock` 来“解锁”。已经持有的 `flock` 挂在打开的描述符上；删掉路径再新建的是另一个文件。
 
 共享锁可以并存。排他锁在已有共享锁或另一把排他锁时返回 `YAN_FS_BUSY`，写工具把它映射成 `BUSY`。

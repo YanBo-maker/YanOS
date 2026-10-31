@@ -105,7 +105,7 @@ def library(root, name="lib.img"):
 # ---------------------------------------------------------------- 1..4 filter
 
 def test_list_all_without_filter(binary, root):
-    """AC1: no tags -> every file, ASCII name ascending, shown matches."""
+    """No tags: every file is listed, ASCII name ascending, shown matches."""
     global CASES
     img = library(root)
     server = Server(binary, img, extra=("--allow-meta",))
@@ -124,7 +124,7 @@ def test_list_all_without_filter(binary, root):
 
 
 def test_single_tag_filter(binary, root):
-    """AC2: one tag -> only the files carrying it."""
+    """One tag: only the files carrying it are listed."""
     global CASES
     img = library(root)
     server = Server(binary, img, extra=("--allow-meta",))
@@ -139,7 +139,7 @@ def test_single_tag_filter(binary, root):
 
 
 def test_two_tags_are_anded(binary, root):
-    """AC3: several tags -> only files carrying ALL of them."""
+    """Several tags are ANDed; filter order does not change the result set."""
     global CASES
     img = library(root)
     server = Server(binary, img, extra=("--allow-meta",))
@@ -157,7 +157,7 @@ def test_two_tags_are_anded(binary, root):
 
 
 def test_empty_result_still_succeeds(binary, root):
-    """AC4: a filter matching nothing is success with an empty list."""
+    """A filter matching nothing is success with an empty list and shown 0."""
     global CASES
     img = library(root)
     server = Server(binary, img, extra=("--allow-meta",))
@@ -175,7 +175,8 @@ def test_empty_result_still_succeeds(binary, root):
 # ------------------------------------------------------- 5 broken header
 
 def test_broken_header_is_metadata_without_partial_list(binary, root):
-    """AC5: one broken header anywhere -> METADATA, and no names at all."""
+    """One broken header anywhere is METADATA, never a partial list, and the
+    filesystem stays usable afterwards."""
     global CASES
     files = list(LIBRARY) + [("f-broken.txt", b"@yan-note\ntitle: T\n@end\n")]
     img = make_image(root / "broken.img", files)
@@ -197,7 +198,7 @@ def test_broken_header_is_metadata_without_partial_list(binary, root):
 
 
 def test_broken_header_with_filter_also_metadata(binary, root):
-    """AC5 (variant): the failure is library-wide, not filter-dependent."""
+    """The broken-header failure is library-wide, not filter-dependent."""
     global CASES
     files = list(LIBRARY) + [("f-broken.txt", b"@yan-note\ntitle: T\n@end\n")]
     img = make_image(root / "broken2.img", files)
@@ -213,7 +214,7 @@ def test_broken_header_with_filter_also_metadata(binary, root):
 # ------------------------------------------------------- 6..8 tag arguments
 
 def test_duplicate_tags_are_deduplicated(binary, root):
-    """AC6: repeated tags behave like a single one."""
+    """Repeated tags behave like a single one and do not consume 16 slots."""
     global CASES
     img = library(root)
     server = Server(binary, img, extra=("--allow-meta",))
@@ -239,7 +240,7 @@ def test_duplicate_tags_are_deduplicated(binary, root):
 
 
 def test_more_than_sixteen_distinct_tags_is_invalid(binary, root):
-    """AC7: 17 distinct tags exceed the budget -> INVALID."""
+    """Seventeen distinct tags exceed the budget; sixteen are still legal."""
     global CASES
     img = library(root)
     server = Server(binary, img, extra=("--allow-meta",))
@@ -257,7 +258,7 @@ def test_more_than_sixteen_distinct_tags_is_invalid(binary, root):
 
 
 def test_bad_tag_bytes_are_invalid(binary, root):
-    """AC8: an empty tag or one over 63 bytes is INVALID."""
+    """An empty tag, an over-long tag or a tag with a space is INVALID."""
     global CASES
     img = library(root)
     server = Server(binary, img, extra=("--allow-meta",))
@@ -277,7 +278,7 @@ def test_bad_tag_bytes_are_invalid(binary, root):
 # ------------------------------------------------------- 9 header-less
 
 def test_headerless_old_note_is_listed(binary, root):
-    """AC9: a header-less old note is listed (it simply has no tags)."""
+    """A header-less old note is listed; it simply carries no tags."""
     global CASES
     img = library(root)
     server = Server(binary, img, extra=("--allow-meta",))
@@ -296,7 +297,7 @@ def test_headerless_old_note_is_listed(binary, root):
 # ------------------------------------------------------- 10 stale ordering
 
 def test_stale_precedes_whole_library_scan(binary, root):
-    """AC10: a stale identity beats a METADATA the scan would have found."""
+    """A stale identity beats a METADATA the whole-library scan would find."""
     global CASES
     files = list(LIBRARY) + [("f-broken.txt", b"@yan-note\ntitle: T\n@end\n")]
     img = make_image(root / "stale.img", files)
@@ -324,7 +325,7 @@ def test_stale_precedes_whole_library_scan(binary, root):
 
 
 def test_fresh_identity_succeeds(binary, root):
-    """AC10 (positive): the current identity is accepted."""
+    """The current identity is accepted, with unchanged names and identity."""
     global CASES
     img = library(root)
     server = Server(binary, img, extra=("--allow-meta",))
@@ -343,9 +344,11 @@ def test_fresh_identity_succeeds(binary, root):
 # ------------------------------------------------------- 11..12 gating
 
 def test_default_start_has_no_meta_tools(binary, root):
-    """AC11: no flag -> six tools, byte-identical to the 0033 baseline."""
+    """No flag: the listing tool is absent from tools/list, calling it behaves
+    exactly like an unknown name, and the image is untouched."""
     global CASES
     img = library(root, "gate.img")
+    before = digest(img)
     server = Server(binary, img, extra=())
     try:
         server.ident += 1
@@ -362,13 +365,15 @@ def test_default_start_has_no_meta_tools(binary, root):
                          params={"name": LIST, "arguments": {}})
         reply = server.wire.get()
         assert reply["error"]["code"] == -32602, ("default_call", reply)
+        # R2-AC10 second half: a refused call must not write the image.
+        assert digest(img) == before, "default_call_wrote_image"
         CASES += 1
     finally:
         server.close()
 
 
 def test_meta_flag_yields_eight_tools(binary, root):
-    """AC12: --allow-meta -> eight tools: six, then both metadata tools."""
+    """--allow-meta adds both metadata tools after the six read-only ones."""
     global CASES
     img = library(root, "gate2.img")
     server = Server(binary, img, extra=("--allow-meta",))
@@ -382,7 +387,7 @@ def test_meta_flag_yields_eight_tools(binary, root):
 
 
 def test_both_flags_yields_ten_tools(binary, root):
-    """AC12 (variant): both flags -> ten tools in the documented order."""
+    """Both flags yield the documented ten-tool order."""
     global CASES
     img = library(root, "gate3.img")
     server = Server(binary, img, extra=("--allow-meta", "--allow-write"))
@@ -396,7 +401,7 @@ def test_both_flags_yields_ten_tools(binary, root):
 
 
 def test_write_only_flag_is_unchanged(binary, root):
-    """Control: --allow-write alone is untouched by the meta surface."""
+    """--allow-write alone is untouched by the metadata surface."""
     global CASES
     img = library(root, "gate4.img")
     server = Server(binary, img, extra=("--allow-write",))

@@ -10,6 +10,8 @@
 
 ## SPEC
 
+> 后续扩展：[0041](0041-note-meta-mcp-tool.md) 把本规格的元数据观察接到 MCP 只读面上：`yanos_note_meta` 返回单文件的 title/created/modified/tag/link，`yanos_note_list` 提供本文「命令及可观察输出」一节的 `meta list` 名单与 tag AND 筛选（含全库预检），两者由 `--allow-meta` 门控。本规格定义的格式、解析规则、全库预检与错误语义保持不变；`search` 的 `tag:` 操作符（本文「标签搜索与既有查询的关系」一节）仍不在 0041，另开 Issue。
+
 ### 文件头及实际状态变化
 
 识别只发生在byte0。没有完整9字节`@yan-note`前缀的文件是旧格式，元数据为空；具有该前缀但marker不合法、版本未知、头未闭合或字段不合法时返回METADATA，不能猜测为空。

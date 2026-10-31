@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-0041 笔记元数据的 MCP 只读工具：新增只读工具 `yanos_note_meta`，由独立开关 `--allow-meta` 门控，与 `--allow-write` 正交，补齐 [0027](specs/0027-note-metadata.md) 元数据观察缺失的 MCP 用户面。工具返回 title/created/modified/tag/link（含 link 的 OK/MISSING）与 `has_header`，不返回正文、不读目标正文判定链接健康、不预检正文，因此无头旧文件与二进制正文照常观察，头部损坏报 METADATA。默认启动态仍与 0033 六工具逐字节相同，`serverInfo.version` 保持 `0035`。已随[PR #109](https://github.com/YanBo-maker/YanOS/pull/109)以 merge commit `b994150` 合入 main。
+0041 笔记元数据的 MCP 只读面：新增两个只读工具，同由独立开关 `--allow-meta` 门控、与 `--allow-write` 正交，补齐 [0027](specs/0027-note-metadata.md) 缺失的 MCP 用户面。`yanos_note_meta` 返回单文件 title/created/modified/tag/link（含 OK/MISSING）与 `has_header`，只校验目标头、不预检正文，无头旧文件与二进制正文照常观察；`yanos_note_list` 提供全库名单与 tag AND 筛选，沿 0027:83 全库预检，任一坏头即 METADATA 且不出半份名单。默认态仍与 0033 六工具逐字节相同，`serverInfo.version` 保持 `0035`。已分别随[PR #109](https://github.com/YanBo-maker/YanOS/pull/109)（`b994150`）与[PR #113](https://github.com/YanBo-maker/YanOS/pull/113)合入 main。
 
 上一阶段「用法入口与平台覆盖说明收尾」已随[PR #100](https://github.com/YanBo-maker/YanOS/pull/100)以`2233ea8`合入main；其合入前验证已核对，合入后的[主线CI](https://github.com/YanBo-maker/YanOS/actions/runs/40892892526)已由Actions API确认通过。0035、0036、0041整体仍为Approved，0040为Implemented；学习理解程度由项目所有者判断。
 
@@ -64,7 +64,7 @@
 
 - 0036 R1已归并格式化参数校验，并补充边界、前导零和错误路径的CLI验收；已随[PR #98](https://github.com/YanBo-maker/YanOS/pull/98)合入main（`55069e9`），原有使用方式保持。[验证记录](specs/0036-yanfs-multi-block-directory.md#r1-issue-63格式化参数校验归并2026-10-29)
 
-- 0041 元数据的 MCP 只读面：`yanos_note_meta` 返回一篇笔记的 title/created/modified/tag/link 与 `has_header`，由 `--allow-meta` 单独开启，与 `--allow-write` 正交；默认态与 0033 六工具逐字节相同。已随[PR #109](https://github.com/YanBo-maker/YanOS/pull/109)合入main（`b994150`）。[0041](specs/0041-note-meta-mcp-tool.md)，[决策 0005](decisions/0005-note-meta-mcp-tool.md)
+- 0041 元数据的 MCP 只读面：`yanos_note_meta` 返回一篇笔记的 title/created/modified/tag/link 与 `has_header`，`yanos_note_list` 返回全库名单并支持 tag AND 筛选（沿 0027:83 全库预检），两者都由 `--allow-meta` 单独开启、与 `--allow-write` 正交；默认态与 0033 六工具逐字节相同。已随[PR #109](https://github.com/YanBo-maker/YanOS/pull/109)（`b994150`）与[PR #113](https://github.com/YanBo-maker/YanOS/pull/113)合入main。[0041](specs/0041-note-meta-mcp-tool.md)，[决策 0005](decisions/0005-note-meta-mcp-tool.md)
 
 ## 覆盖边界
 
