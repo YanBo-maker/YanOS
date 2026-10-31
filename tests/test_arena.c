@@ -115,9 +115,28 @@ static void test_null_arena_is_rejected(void)
     /* Crash level: this one dereferences arena->next right after the guard. */
     TEST_ASSERT_NULL(yan_arena_alloc(NULL, 1u));
 
-    /* A NULL arena must not be confused with an empty one: a real, empty
-     * arena also reports 0 used, so assert through a genuinely valid arena as
-     * well and confirm the two paths agree. */
+    /* Distinctness check. What it DOES catch: an implementation that clamps a
+     * NULL arena into a usable/NON-EMPTY one. Measured: with the two NULL
+     * assertions above removed, this block alone still fails
+     * (`Expected 4096 Was 0`) against a mutant whose used(NULL) returns a
+     * non-zero cursor. So it is not redundant with them.
+     *
+     * What it does NOT catch: an implementation that clamps NULL into a
+     * genuinely EMPTY arena (cursor == start). Both sides then report 0 and the
+     * comparison passes.
+     *
+     * And the honest part: nothing in this test catches that mutant either.
+     * Measured on a clamp whose used(NULL) returns
+     * `(uintptr_t)start - (uintptr_t)start`, the whole suite is green --
+     * `used(NULL) == 0` is exactly what a clamped empty arena reports, and
+     * `alloc(NULL, 1u)` still returns NULL because an empty arena cannot
+     * satisfy a 1-byte request. Detecting that mutant would need an assertion
+     * on state the API does not expose (e.g. that the NULL path never touches
+     * the caller's arena object), which a header-only contract cannot offer.
+     *
+     * So this block and the NULL assertions above are complementary, not
+     * substitutes -- but the coverage has a hole at "NULL behaves like an empty
+     * arena", and the hole is documented here rather than papered over. */
     {
         YanArena empty;
         yan_arena_init(&empty, scratch, scratch);
