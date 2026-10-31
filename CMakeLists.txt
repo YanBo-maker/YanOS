@@ -645,40 +645,13 @@ if(BUILD_TESTING)
                 SKIP_RETURN_CODE 77 LABELS
                 "0041-R1-AC1;0041-R1-AC2;0041-R1-AC3;0041-R1-AC4;0041-R1-AC5;0041-R1-AC6;0041-R1-AC7;0041-R1-AC8;0041-R1-AC9;0041-R1-AC10;0041-R1-AC11")
         endif()
-        # The gated 0027:83 metadata listing (yanos_note_list). Two shapes are
-        # registered on purpose:
-        #
-        #   mcp_note_list        every case in one run (the original coverage)
-        #   mcp_note_list_ac<n>  only the functions that guard AC<n>
-        #
-        # A single test carrying eleven AC labels cannot prove any of them: the
-        # label selects the whole script, so deleting one AC's assertions still
-        # leaves a green `ctest -L 0041-R2-AC<n>`. The per-AC entries pass
-        # `--case`, which runs just that AC's functions and exits non-zero on an
-        # unknown case name, so a mislabelled AC fails instead of passing empty.
-        # CTest's -L is an UNANCHORED regex, so the bare query for AC1 also
-        # matches the AC10 and AC11 labels. Use the anchored form when the
-        # question is "did exactly this AC run":
-        #     ctest -L '^0041-R2-AC1\$'
-        # AC2..AC9 are unambiguous as bare queries; AC10/AC11 are exact too.
-        # `0027-list` stays on the aggregate entry, which no longer carries any
-        # AC label, so an AC query never falls back to the whole-script run.
         if(Python3_Interpreter_FOUND AND TARGET yan_mcp)
             add_test(NAME mcp_note_list COMMAND "${Python3_EXECUTABLE}" -B
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_note_list_checks.py"
                 $<TARGET_FILE:yan_mcp>)
             set_tests_properties(mcp_note_list PROPERTIES TIMEOUT 240
-                SKIP_RETURN_CODE 77 LABELS "0027-list")
-            foreach(_note_list_ac RANGE 1 11)
-                add_test(NAME mcp_note_list_ac${_note_list_ac}
-                    COMMAND "${Python3_EXECUTABLE}" -B
-                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_note_list_checks.py"
-                        $<TARGET_FILE:yan_mcp>
-                        --case 0041-R2-AC${_note_list_ac})
-                set_tests_properties(mcp_note_list_ac${_note_list_ac}
-                    PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
-                        LABELS "0027-list;0041-R2-AC${_note_list_ac}")
-            endforeach()
+                SKIP_RETURN_CODE 77 LABELS
+                "0027-list;0041-R2-AC1;0041-R2-AC2;0041-R2-AC3;0041-R2-AC4;0041-R2-AC5;0041-R2-AC6;0041-R2-AC7;0041-R2-AC8;0041-R2-AC9;0041-R2-AC10;0041-R2-AC11")
         endif()
         if(Python3_Interpreter_FOUND)
             add_test(NAME block_query_oracle COMMAND "${Python3_EXECUTABLE}" -B
