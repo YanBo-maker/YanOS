@@ -15,7 +15,7 @@ record after the footer, a same-owner failure on a different assertion, or a
 missing marker -- must be a survivor/wrong-owner/wrong-assertion or a harness
 error, never a detection. The mocked run_suites controls (one suite harness while
 the other has an owner failure, and friends) run here too, so the default-suite
-yanfs_mutation_gate covers them without a compiler.
+yanfs_mutation_classifier covers them without a compiler.
 
 The real compile-and-run negative controls (a no-effect mutant that must survive
 and a wrong-owner table entry that must not be credited) live in
