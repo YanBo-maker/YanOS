@@ -11,6 +11,13 @@ calling out:
 * Tag filters are ANDed, and duplicates are deduplicated BEFORE the 16-slot
   budget is spent, so ``["cpu","cpu"]`` must behave exactly like ``["cpu"]``.
 
+``--case 0041-R2-AC<n>`` runs only the functions that guard that AC, so a
+labelled ``ctest -L 0041-R2-AC<n>`` proves that AC instead of merely proving
+that the whole script still passes. Without ``--case`` every function runs, so
+the aggregate test keeps its original coverage. An unknown case name is a
+usage error (exit 2) rather than a silent zero-case pass: a typo must never
+look like a green AC.
+
 No existing test expectation is modified here.
 """
 
@@ -95,6 +102,94 @@ LIBRARY = [
     ("c-os.txt", note(["os"])),
     ("d-none.txt", note([])),
     ("e-old.txt", b"no header here\n"),          # header-less old note
+]
+
+# Which functions guard which 0041-R2 AC. A function may guard more than one
+# AC only when it genuinely asserts both (for example the flag-gating function
+# checks the shipped tool surface AND that the refused call does not write).
+# Every AC in AC_CASES must have at least one owner, and every owner must exist
+# as a function, so a renamed or dropped function cannot silently drop an AC.
+AC_CASES = {
+    "0041-R2-AC1": ["test_default_start_has_no_meta_tools"],
+    "0041-R2-AC2": ["test_list_all_without_filter",
+                    "test_headerless_old_note_is_listed"],
+    "0041-R2-AC3": ["test_single_tag_filter"],
+    "0041-R2-AC4": ["test_two_tags_are_anded"],
+    "0041-R2-AC5": ["test_empty_result_still_succeeds"],
+    "0041-R2-AC6": ["test_broken_header_is_metadata_without_partial_list",
+                    "test_broken_header_with_filter_also_metadata"],
+    "0041-R2-AC7": ["test_duplicate_tags_are_deduplicated"],
+    "0041-R2-AC8": ["test_more_than_sixteen_distinct_tags_is_invalid",
+                    "test_bad_tag_bytes_are_invalid"],
+    "0041-R2-AC9": ["test_stale_precedes_whole_library_scan",
+                    "test_fresh_identity_succeeds"],
+    "0041-R2-AC10": ["test_default_start_has_no_meta_tools"],
+    "0041-R2-AC11": ["test_list_is_read_only"],
+}
+
+# Tool-surface functions. AC1 and AC10 own the default-start function; the
+# other three surfaces are asserted by the corresponding 0041-R1 ACs in
+# mcp_meta_checks.py, so they stay in the aggregate run only.
+# Minimum number of assert statements each AC must actually EXECUTE. A per-AC
+# CTest entry proves the AC ran its own functions, not that those functions
+# still assert anything: deleting an assertion (or gutting a function body)
+# leaves a green run as long as nothing raises. Measured with sys.settrace on
+# the real binary; a lowered floor is a deliberate, reviewable edit, while an
+# accidental deletion fails the case.
+MIN_ASSERTS = {
+    "0041-R2-AC1": 5,
+    "0041-R2-AC2": 17,
+    "0041-R2-AC3": 3,
+    "0041-R2-AC4": 4,
+    "0041-R2-AC5": 4,
+    "0041-R2-AC6": 5,
+    "0041-R2-AC7": 7,
+    "0041-R2-AC8": 6,
+    "0041-R2-AC9": 7,
+    "0041-R2-AC10": 5,
+    "0041-R2-AC11": 1,
+}
+
+_THIS_FILE = __file__
+_ASSERT_LINES = {
+    number + 1
+    for number, text in enumerate(open(__file__, encoding="utf-8").read().splitlines())
+    if text.strip().startswith("assert ")
+}
+_EXECUTED = [0]
+
+
+def _count_asserts(frame, event, arg):
+    if event == "call":
+        return _count_asserts
+    if event == "line" and frame.f_code.co_filename == _THIS_FILE:
+        if frame.f_lineno in _ASSERT_LINES:
+            _EXECUTED[0] += 1
+    return _count_asserts
+
+
+SURFACE_ONLY = ["test_meta_flag_yields_eight_tools",
+                "test_both_flags_yields_ten_tools",
+                "test_write_only_flag_is_unchanged"]
+
+ORDER = [
+    "test_list_all_without_filter",
+    "test_single_tag_filter",
+    "test_two_tags_are_anded",
+    "test_empty_result_still_succeeds",
+    "test_broken_header_is_metadata_without_partial_list",
+    "test_broken_header_with_filter_also_metadata",
+    "test_duplicate_tags_are_deduplicated",
+    "test_more_than_sixteen_distinct_tags_is_invalid",
+    "test_bad_tag_bytes_are_invalid",
+    "test_headerless_old_note_is_listed",
+    "test_stale_precedes_whole_library_scan",
+    "test_fresh_identity_succeeds",
+    "test_default_start_has_no_meta_tools",
+    "test_meta_flag_yields_eight_tools",
+    "test_both_flags_yields_ten_tools",
+    "test_write_only_flag_is_unchanged",
+    "test_list_is_read_only",
 ]
 
 
@@ -433,33 +528,73 @@ def test_list_is_read_only(binary, root):
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("usage: mcp_note_list_checks.py YAN_MCP", file=sys.stderr)
+    argv = sys.argv[1:]
+    case = None
+    if "--case" in argv:
+        index = argv.index("--case")
+        if index + 1 >= len(argv):
+            print("FAIL --case needs a value", file=sys.stderr)
+            return 2
+        case = argv[index + 1]
+        del argv[index:index + 2]
+    if len(argv) != 1:
+        print("usage: mcp_note_list_checks.py YAN_MCP [--case 0041-R2-AC<n>]",
+              file=sys.stderr)
         return 2
-    binary = Path(sys.argv[1]).resolve()
+    binary = Path(argv[0]).resolve()
     if not binary.is_file():
         print("FAIL fixture missing: %s" % binary, file=sys.stderr)
         return 1
+
+    # The AC table must stay consistent with the functions that exist, so a
+    # renamed function or a new AC cannot silently shrink a labelled run.
+    declared = set()
+    for names in AC_CASES.values():
+        declared.update(names)
+    known = declared | set(SURFACE_ONLY)
+    missing = sorted(known - set(ORDER))
+    unowned = sorted(set(ORDER) - known)
+    if missing:
+        print("FAIL AC_CASES names unknown functions: %s" % missing,
+              file=sys.stderr)
+        return 1
+    if unowned:
+        print("FAIL functions not owned by any case: %s" % unowned,
+              file=sys.stderr)
+        return 1
+
+    if case is None:
+        selected = list(ORDER)
+    else:
+        if case not in AC_CASES:
+            # A typo must fail loudly: a zero-case run that exits 0 would let a
+            # mislabelled AC look green.
+            print("FAIL unknown case %r; known: %s"
+                  % (case, ", ".join(sorted(AC_CASES))), file=sys.stderr)
+            return 2
+        selected = [n for n in ORDER if n in AC_CASES[case]]
+        if not selected:
+            print("FAIL case %r selects no function" % case, file=sys.stderr)
+            return 1
+
     with tempfile.TemporaryDirectory(prefix="yan-note-list-") as directory:
         root = Path(directory)
-        test_list_all_without_filter(binary, root)
-        test_single_tag_filter(binary, root)
-        test_two_tags_are_anded(binary, root)
-        test_empty_result_still_succeeds(binary, root)
-        test_broken_header_is_metadata_without_partial_list(binary, root)
-        test_broken_header_with_filter_also_metadata(binary, root)
-        test_duplicate_tags_are_deduplicated(binary, root)
-        test_more_than_sixteen_distinct_tags_is_invalid(binary, root)
-        test_bad_tag_bytes_are_invalid(binary, root)
-        test_headerless_old_note_is_listed(binary, root)
-        test_stale_precedes_whole_library_scan(binary, root)
-        test_fresh_identity_succeeds(binary, root)
-        test_default_start_has_no_meta_tools(binary, root)
-        test_meta_flag_yields_eight_tools(binary, root)
-        test_both_flags_yields_ten_tools(binary, root)
-        test_write_only_flag_is_unchanged(binary, root)
-        test_list_is_read_only(binary, root)
-    print("note_list acceptance: %d cases passed" % CASES)
+        _EXECUTED[0] = 0
+        sys.settrace(_count_asserts)
+        try:
+            for name in selected:
+                globals()[name](binary, root)
+        finally:
+            sys.settrace(None)
+    executed = _EXECUTED[0]
+    if case is not None:
+        floor = MIN_ASSERTS[case]
+        if executed < floor:
+            print("FAIL %s executed %d assertions, expected at least %d"
+                  % (case, executed, floor), file=sys.stderr)
+            return 1
+    print("note_list acceptance: %d cases passed, %d assertions%s"
+          % (CASES, executed, "" if case is None else " (%s)" % case))
     return 0
 
 
