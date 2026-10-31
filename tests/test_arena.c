@@ -72,9 +72,53 @@ static void test_overflow_and_out_of_range_do_not_move(void)
     TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)yan_arena_used(&arena, bytes + 64));
 }
 
+/* Issue #107: all three entry points accept a NULL arena, but only alloc() was
+ * asserted before, so the claim "the NULL checks are locked by tests" held for
+ * one of three functions.
+ *
+ * COVERAGE LEVEL -- read this before trusting the test:
+ *   Every one of the three checks is CRASH level, not assertion level.
+ *   Removing any single guard makes the next statement dereference NULL and
+ *   the process dies with SIGSEGV (measured per function: rc=-11). Unity
+ *   therefore never prints a `:FAIL:` line for these; a regression shows up as
+ *   a crashing test binary.
+ *
+ * Because all three crash rather than assert, one function can only ever
+ * observe the FIRST broken call: with two guards removed the run stops at
+ * whichever comes first and the later call is never reached. The order below
+ * puts used() first so its guard is the one probed when several are broken at
+ * once. The init() call is still reached whenever the used() guard is intact,
+ * which is the single-mutation case a mutation harness actually produces (each
+ * mutant removes exactly one guard).
+ *
+ * The NULL-vs-empty distinction is pinned too, so an implementation that
+ * clamped a NULL arena into a plausible-looking empty one would fail here
+ * instead of passing on a technicality. */
 static void test_null_arena_is_rejected(void)
 {
+    /* Initialised so the address is well-defined; the guards never read it. */
+    unsigned char bytes[64] = {0};
+
+    /* Crash level: probed first, so a broken used() guard is reached before
+     * init() could take the process down. */
+    TEST_ASSERT_EQUAL_UINT32(0u,
+        (uint32_t)yan_arena_used(NULL, bytes));
+
+    /* Crash level: reached whenever the used() guard above is intact. */
+    yan_arena_init(NULL, bytes, bytes + sizeof bytes);
+
+    /* Crash level: this one dereferences arena->next right after the guard. */
     TEST_ASSERT_NULL(yan_arena_alloc(NULL, 1u));
+
+    /* A NULL arena must not be confused with an empty one: a real, empty
+     * arena also reports 0 used, so assert through a genuinely valid arena as
+     * well and confirm the two paths agree. */
+    {
+        YanArena empty;
+        yan_arena_init(&empty, bytes, bytes);
+        TEST_ASSERT_EQUAL_UINT32((uint32_t)yan_arena_used(NULL, bytes),
+                                 (uint32_t)yan_arena_used(&empty, bytes));
+    }
 }
 
 int main(void)

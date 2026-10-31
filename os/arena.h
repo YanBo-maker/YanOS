@@ -21,16 +21,28 @@ typedef struct {
 
 /* Places the cursor at `start` with `end` as the first byte past the arena.
  * No validation is performed: a range that is empty or inverted simply makes
- * every allocation fail. */
+ * every allocation fail. A NULL `arena` returns immediately without touching
+ * anything (the return type is void). */
 void yan_arena_init(YanArena *arena, void *start, void *end);
 
 /* Allocates `bytes` at the first 16-byte-aligned address at or after the
  * cursor. Returns NULL without moving the cursor when the aligned address or
  * the addition overflows uintptr_t, or when the result would pass `end`. A
- * zero-byte request returns the aligned cursor without moving it. */
+ * zero-byte request returns the aligned cursor without moving it. A NULL
+ * `arena` returns NULL. */
 void *yan_arena_alloc(YanArena *arena, uint32_t bytes);
 
-/* Bytes consumed from `start` to the cursor, including alignment padding. */
+/* Bytes consumed from `start` to the cursor, including alignment padding.
+ * A NULL `arena` returns 0. */
 uintptr_t yan_arena_used(const YanArena *arena, const void *start);
+
+/* The three entry points share one NULL rule: a NULL `arena` is never
+ * dereferenced, and each returns its neutral value (init: no-op, alloc: NULL,
+ * used: 0). This is a consistency contract inside the module, not an observed
+ * production path -- the only production caller is the Guest startup sequence
+ * in `apps/yanfs_terminal/main.c`, which passes the address of a stack object
+ * on every call, so no NULL can reach these functions there. The rule exists so
+ * that a future caller that does pass NULL fails closed instead of crashing.
+ * The Host test suite drives the NULL cases directly (tests/test_arena.c). */
 
 #endif

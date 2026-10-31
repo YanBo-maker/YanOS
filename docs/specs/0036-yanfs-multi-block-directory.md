@@ -728,3 +728,19 @@ dsh基线脚本曾将Linux64合法超大容量误作拒绝用例，纠正后的1
 PR精确head的[CI 40739247812](https://github.com/YanBo-maker/YanOS/actions/runs/40739247812)三项通过：Release155/155、完整ASan155/155、Windows83/83；三份工件、377项源码身份及两个Linux共54条性能原始记录已核验，范围与限制见仓库外交付材料`E:/YanOS/build/20261029-mkfs-files-validation/ci-40739247812/`。合入后的[main CI 40742512066](https://github.com/YanBo-maker/YanOS/actions/runs/40742512066)也已由Actions API确认completed/success；本次文档修正没有重新逐项核验该main运行的工件，不将PR工件结论冒充main工件复核。
 
 本次仅同步文档事实，源码、测试、接口和磁盘契约保持；0035、0036整体Approved状态不变，非阻塞测试增强单列[Issue #99](https://github.com/YanBo-maker/YanOS/issues/99)。
+
+#### Issue #107：arena 的 NULL 契约归属（2026-10-31）
+
+[Issue #71](https://github.com/YanBo-maker/YanOS/issues/71) 结案时给出的理由「NULL 检查被测试锁定」只对 `yan_arena_alloc` 成立。按提交 `fe78ce8` 的 `tests/test_arena.c`，三项检查的实际状态是：
+
+| 入口 | 代码 | 当时的测试 |
+|---|---|---|
+| `yan_arena_alloc` | 返回 NULL | 有（`test_arena.c:77`） |
+| `yan_arena_init` | 静默返回（void） | 无断言 |
+| `yan_arena_used` | 返回 0 | 无断言 |
+
+**因此该理由应限定为**：`yan_arena_alloc` 的 NULL 检查是测试契约；`yan_arena_init` 与 `yan_arena_used` 的检查属**模块内一致性契约**（三函数统一对 NULL 不读写、返回中性值），由 `os/arena.h` 的文档承载，不声称被测试锁定。
+
+**这些分支在生产路径上不可达**：唯一的调用方是 `apps/yanfs_terminal/main.c:400-436` 的 Guest 启动序列，全部传栈对象 `&arena` 的地址，构造函数时不存在 NULL。本约束的目的是让将来误传 NULL 的调用方 fail closed（拿中性值）而不是崩溃，不是在修复现存缺陷。补齐测试同理——防未来，不是修 bug。
+
+本条款只记录契约归属与可达性，不改变 arena 的接口、行为或内存预算；0036-R3 的分配顺序与用量验收保持。
