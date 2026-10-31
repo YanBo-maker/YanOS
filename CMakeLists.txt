@@ -57,6 +57,17 @@ if(YAN_RISCV_GCC)
                  NAMES ${YAN_RISCV_PREFIX}readelf riscv64-linux-gnu-readelf
                        riscv64-unknown-elf-readelf riscv32-unknown-elf-readelf
                  HINTS "${_yan_riscv_dir}")
+    # Issue #106: the Guest ELF is made reproducible with `strip --strip-debug`.
+    # NOT `-s`: the linker emits a FILE symbol per object named after its random
+    # temp file (ccXXXXXX.o), and `-s` removes .symtab wholesale, which also
+    # deletes `tohost` -- yan_run locates the halt word through
+    # yan_image_find_symbol(), so a fully stripped ELF never halts (measured:
+    # "stopped after 5000000 steps without reaching tohost"). --strip-debug
+    # drops exactly the debug/FILE entries, leaving .symtab and `tohost` intact.
+    find_program(YAN_RISCV_STRIP
+                 NAMES ${YAN_RISCV_PREFIX}strip riscv64-linux-gnu-strip
+                       riscv64-unknown-elf-strip riscv32-unknown-elf-strip
+                 HINTS "${_yan_riscv_dir}")
 endif()
 
 add_library(yan_machine STATIC src/ram.c src/bus.c src/machine.c src/cpu.c src/csr.c
@@ -256,7 +267,15 @@ if(YAN_BUILD_TOOLS AND UNIX AND YAN_RISCV_GCC)
                 -Wall -Wextra -Wpedantic -Werror
                 -I "${CMAKE_CURRENT_SOURCE_DIR}/os"
                 -T "${CMAKE_CURRENT_SOURCE_DIR}/os/guest.ld"
-                ${_yan_terminal_sources} -Wl,--build-id=none -o "${YAN_TERMINAL_ELF}"
+                ${_yan_terminal_sources} -Wl,--build-id=none -o "${YAN_TERMINAL_ELF}.unstripped"
+        # Issue #106: make the ELF byte-reproducible. `--strip-debug` removes
+        # the linker's per-object FILE symbols (named after its random temp
+        # files) and keeps .symtab, so `tohost` survives for yan_run; `-s`
+        # would delete it and the Guest would never halt. Done here rather than
+        # in the test so every consumer of build/ sees the same bytes.
+        COMMAND "${YAN_RISCV_STRIP}" --strip-debug
+                "${YAN_TERMINAL_ELF}.unstripped" -o "${YAN_TERMINAL_ELF}"
+        COMMAND "${CMAKE_COMMAND}" -E remove -f "${YAN_TERMINAL_ELF}.unstripped"
         DEPENDS ${_yan_terminal_sources} ${_yan_terminal_headers}
                 "${CMAKE_CURRENT_SOURCE_DIR}/os/guest.ld"
         VERBATIM)
@@ -614,19 +633,40 @@ if(BUILD_TESTING)
                 SKIP_RETURN_CODE 77 LABELS
                 "0041-R1-AC1;0041-R1-AC2;0041-R1-AC3;0041-R1-AC4;0041-R1-AC5;0041-R1-AC6;0041-R1-AC7;0041-R1-AC8;0041-R1-AC9;0041-R1-AC10;0041-R1-AC11")
         endif()
-        # The gated 0027:83 metadata listing (yanos_note_list). Separate test
-        # so a failure names the listing rather than the single-note tool; both
-        # drive a real yan_mcp over stdio. The AC labels are spelled one per AC
-        # (not as a coarse group) so `ctest -L 0041-R2-AC<n>` can locate the
-        # test that guards each acceptance criterion, matching how mcp_meta is
-        # labelled. `0027-list` is kept as the 0027-side label.
+        # The gated 0027:83 metadata listing (yanos_note_list). Two shapes are
+        # registered on purpose:
+        #
+        #   mcp_note_list        every case in one run (the original coverage)
+        #   mcp_note_list_ac<n>  only the functions that guard AC<n>
+        #
+        # A single test carrying eleven AC labels cannot prove any of them: the
+        # label selects the whole script, so deleting one AC's assertions still
+        # leaves a green `ctest -L 0041-R2-AC<n>`. The per-AC entries pass
+        # `--case`, which runs just that AC's functions and exits non-zero on an
+        # unknown case name, so a mislabelled AC fails instead of passing empty.
+        # CTest's -L is an UNANCHORED regex, so the bare query for AC1 also
+        # matches the AC10 and AC11 labels. Use the anchored form when the
+        # question is "did exactly this AC run":
+        #     ctest -L '^0041-R2-AC1\$'
+        # AC2..AC9 are unambiguous as bare queries; AC10/AC11 are exact too.
+        # `0027-list` stays on the aggregate entry, which no longer carries any
+        # AC label, so an AC query never falls back to the whole-script run.
         if(Python3_Interpreter_FOUND AND TARGET yan_mcp)
             add_test(NAME mcp_note_list COMMAND "${Python3_EXECUTABLE}" -B
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_note_list_checks.py"
                 $<TARGET_FILE:yan_mcp>)
             set_tests_properties(mcp_note_list PROPERTIES TIMEOUT 240
-                SKIP_RETURN_CODE 77 LABELS
-                "0027-list;0041-R2-AC1;0041-R2-AC2;0041-R2-AC3;0041-R2-AC4;0041-R2-AC5;0041-R2-AC6;0041-R2-AC7;0041-R2-AC8;0041-R2-AC9;0041-R2-AC10;0041-R2-AC11")
+                SKIP_RETURN_CODE 77 LABELS "0027-list")
+            foreach(_note_list_ac RANGE 1 11)
+                add_test(NAME mcp_note_list_ac${_note_list_ac}
+                    COMMAND "${Python3_EXECUTABLE}" -B
+                        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_note_list_checks.py"
+                        $<TARGET_FILE:yan_mcp>
+                        --case 0041-R2-AC${_note_list_ac})
+                set_tests_properties(mcp_note_list_ac${_note_list_ac}
+                    PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
+                        LABELS "0027-list;0041-R2-AC${_note_list_ac}")
+            endforeach()
         endif()
         if(Python3_Interpreter_FOUND)
             add_test(NAME block_query_oracle COMMAND "${Python3_EXECUTABLE}" -B
@@ -1066,6 +1106,22 @@ if(BUILD_TESTING)
                         --work "${CMAKE_BINARY_DIR}/shell-launcher")
             set_tests_properties(shell_launcher PROPERTIES TIMEOUT 180)
             if(TARGET yanfs_terminal AND TARGET yan_mkfs AND TARGET yan_run)
+                # Issue #106: the Guest ELF must be byte-reproducible. Runs two
+                # full rebuilds and compares, so it measures build determinism
+                # rather than strip idempotence. It also asserts `tohost` is
+                # still in .symtab, because `strip -s` would be reproducible but
+                # would break yan_run's halt-word lookup.
+                if(YAN_RISCV_STRIP AND YAN_RISCV_READELF)
+                    add_test(NAME guest_elf_reproducible
+                        COMMAND "${Python3_EXECUTABLE}" -B
+                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_guest_reproducible.py"
+                                --cmake "${CMAKE_COMMAND}"
+                                --build "${CMAKE_BINARY_DIR}"
+                                --elf "${YAN_TERMINAL_ELF}"
+                                --readelf "${YAN_RISCV_READELF}")
+                    set_tests_properties(guest_elf_reproducible PROPERTIES
+                                         TIMEOUT 300 LABELS "issue106")
+                endif()
                 # 0025 healthy grep acceptance on the same production ELF: the
                 # approved grammar, byte/line/NUL semantics, long lines and the
                 # two-process edit -> rename/copy -> grep lifecycle. The real
