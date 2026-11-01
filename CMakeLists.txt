@@ -1369,12 +1369,22 @@ if(BUILD_TESTING)
                     set_tests_properties(yanfs_4095_performance PROPERTIES
                         SKIP_RETURN_CODE 77 TIMEOUT 1800
                         LABELS "0040-R4-AC1;0040-R4-AC3;0040-R5-AC1;0040-R5-AC2")
-                    # 0040-R5-AC1: the spec claims "两次计步完全一致" (two runs
-                    # count identically) and nothing tested it. Guest step counts
-                    # come from the simulator's instruction counter, not a clock,
-                    # so they must repeat bit-for-bit; if they ever drift, that
-                    # sentence becomes false and the 0.42% R5 margin loses its
-                    # meaning. Only the 4095 row is repeated, which is the row
+                    # Step-count determinism. NOTE: "两次计步完全一致" is NOT in
+                    # the R5-AC1 text (0040:15, whose only criterion is "每项均
+                    # 不超过 50,000,000 Guest 步"). The claim lives in the VERIFY
+                    # narrative (0040:88), the table preamble (0040:98) and the
+                    # method section (0040:141). This test therefore must not
+                    # carry an AC label: doing so would make
+                    # `ctest -L ^0040-R5-AC1$` return two tests and overstate
+                    # coverage of the budget criterion.
+                    #
+                    # The property is still worth an AC — the 0.42% margin only
+                    # means something if the measurement repeats bit-for-bit — so
+                    # it is being promoted to 0040-R5-AC4 by the docs owner.
+                    # Interim label below; switch it back to "0040-R5-AC4" once
+                    # that AC lands. Guest step counts come from the simulator's
+                    # instruction counter, not a clock, so they must repeat
+                    # exactly. Only the 4095 row is repeated, which is the row
                     # the gate is about, so this costs one extra row rather than
                     # a second full matrix.
                     add_test(NAME yanfs_4095_step_determinism
@@ -1389,7 +1399,7 @@ if(BUILD_TESTING)
                                 --repeat 2)
                     set_tests_properties(yanfs_4095_step_determinism PROPERTIES
                         SKIP_RETURN_CODE 77 TIMEOUT 1800
-                        LABELS "0040-R5-AC1")
+                        LABELS "0040-invariant-step-determinism")
                     set_tests_properties(yanfs_r8_performance PROPERTIES
                                          SKIP_RETURN_CODE 77 TIMEOUT 900
                                          LABELS "0036-R8-AC4")
