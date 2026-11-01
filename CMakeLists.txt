@@ -746,7 +746,8 @@ if(BUILD_TESTING)
     target_include_directories(test_ring_copy PRIVATE os)
     target_compile_options(test_ring_copy PRIVATE ${YAN_WARNINGS})
     add_test(NAME ring_copy COMMAND test_ring_copy)
-    set_tests_properties(ring_copy PROPERTIES TIMEOUT 120 LABELS "0036-R8-AC1")
+    set_tests_properties(ring_copy PROPERTIES TIMEOUT 120
+                             LABELS "0036-R8-AC1;0040-R3-AC3")
 
     # Compile the real freestanding helpers under distinct names. Replacing
     # libc's symbols here would also replace the host runtime and the oracle.
