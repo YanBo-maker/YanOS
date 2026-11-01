@@ -781,7 +781,7 @@ if(BUILD_TESTING)
     target_compile_options(test_yanfs_v2 PRIVATE ${YAN_WARNINGS})
     add_test(NAME yanfs_v2 COMMAND test_yanfs_v2)
     set_tests_properties(yanfs_v2 PROPERTIES TIMEOUT 900
-                         LABELS "0036-R2-AC1;0036-R2-AC2;0036-R2-AC3")
+                         LABELS "0036-R2-AC1;0036-R2-AC2;0036-R2-AC3;0040-R1-AC2")
 
     add_executable(test_yanfs_name_order tests/test_yanfs_name_order.c os/yanfs.c)
     target_include_directories(test_yanfs_name_order PRIVATE os)
@@ -1396,7 +1396,7 @@ if(BUILD_TESTING)
                                 --repeat 2)
                     set_tests_properties(yanfs_4095_step_determinism PROPERTIES
                         SKIP_RETURN_CODE 77 TIMEOUT 1800
-                        LABELS "0040-invariant-step-determinism")
+                        LABELS "0040-R5-AC4")
                     set_tests_properties(yanfs_r8_performance PROPERTIES
                                          SKIP_RETURN_CODE 77 TIMEOUT 900
                                          LABELS "0036-R8-AC4")
