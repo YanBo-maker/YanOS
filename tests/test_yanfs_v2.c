@@ -21,6 +21,11 @@ typedef struct {
     uint32_t blocks;
     uint32_t writes;
     uint32_t reads;
+    /* 0040-R1-AC2: fail on the Nth write (1-based; 0 disables). A v2 commit
+     * writes the entry block and then block 0, so failing write 2 leaves the
+     * first write already reflected in the cache -- the case where the name
+     * index must be rebuilt even though the commit failed. */
+    uint32_t fail_write_at;
 } V2Device;
 
 static V2Device device;
@@ -56,6 +61,9 @@ static YanFsIoResult v2_write(void *context, uint32_t lba,
         return YAN_FS_IO_ERROR;
     }
     ++self->writes;
+    if (self->fail_write_at != 0u && self->writes == self->fail_write_at) {
+        return YAN_FS_IO_ERROR;
+    }
     memcpy(self->data + (size_t)lba * V2_BLOCK, data, V2_BLOCK);
     return YAN_FS_IO_OK;
 }
@@ -757,6 +765,92 @@ static void test_0036_R8_name_order_is_protected_workspace(void)
     TEST_ASSERT_EQUAL_STRING("a", info.name);
 }
 
+/* 0040-R1-AC2: the name index must be rebuilt after a FAILED commit too.
+ *
+ * The failure that matters is a v2 directory whose ENTRY-block write succeeds
+ * and whose block-0 write then fails. commit_entry copies the new bytes into the
+ * published cache immediately after the entry-block write, so the cache already
+ * holds the change while the call still returns an error. Rebuilding the index
+ * only on success would leave it describing the previous directory; find_entry
+ * binary-searches that index, so a later lookup would miss a live name or land
+ * on the wrong slot, and the error would survive into following operations.
+ *
+ * This cannot be observed on a v1 image, nor on v2 slots below 63:
+ * entry_offset(slot) = 64 + slot*64, so slots 0..62 all live in block 0, and
+ * that branch refreshes the cache only after its write SUCCEEDS. The case
+ * therefore fills block 0 and renames a name that lives in block 1.
+ *
+ * Three facts are asserted separately so a failure names which one broke:
+ *   - the index size equals the number of populated cache entries;
+ *   - the index is a permutation of those entries (no repeats, none missing);
+ *   - names ascend strictly along the index, which is what makes the binary
+ *     search in find_entry correct. */
+static void test_0040_R1_AC2_name_index_matches_cache_after_failed_commit(void)
+{
+    /* D=2 gives entry_capacity 127; 64 creates put one entry into block 1. */
+    v2_start_image(2u, 140u);
+    for (uint32_t slot = 0u; slot < 64u; ++slot) {
+        v2_create(slot);
+    }
+    char from[8];
+    v2_slot_name(63u, from);
+    device.writes = 0u;
+    device.fail_write_at = 2u;   /* entry block (block 1) succeeds, block 0 fails */
+    TEST_ASSERT_EQUAL_INT(YAN_FS_IO, yan_fs_rename(&fs, from, "aaa"));
+    device.fail_write_at = 0u;
+
+    const uint32_t slots = fs.entry_capacity;
+    uint32_t live = 0u;
+    for (uint32_t slot = 0u; slot < slots; ++slot) {
+        if (v2_entry(fs.directory, slot)[0] != 0u) {
+            ++live;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        live, fs.name_order_count,
+        "0040_name_index_matches_cache_after_failed_commit: index size does "
+        "not match the populated cache entries");
+
+    bool seen[V2_MAX_DIR_BLOCKS * 64u];
+    for (uint32_t i = 0u; i < V2_MAX_DIR_BLOCKS * 64u; ++i) {
+        seen[i] = false;
+    }
+    for (uint32_t i = 0u; i < fs.name_order_count; ++i) {
+        const uint32_t slot = (uint32_t)v2_name_order[i];
+        TEST_ASSERT_LESS_THAN_UINT32_MESSAGE(
+            slots, slot,
+            "0040_name_index_matches_cache_after_failed_commit: index points "
+            "past the entry capacity");
+        TEST_ASSERT_FALSE_MESSAGE(
+            seen[slot],
+            "0040_name_index_matches_cache_after_failed_commit: index repeats "
+            "a slot");
+        seen[slot] = true;
+        TEST_ASSERT_NOT_EQUAL_UINT8_MESSAGE(
+            0u, v2_entry(fs.directory, slot)[0],
+            "0040_name_index_matches_cache_after_failed_commit: index points "
+            "at an empty cache slot");
+    }
+    for (uint32_t slot = 0u; slot < slots; ++slot) {
+        if (v2_entry(fs.directory, slot)[0] != 0u) {
+            TEST_ASSERT_TRUE_MESSAGE(
+                seen[slot],
+                "0040_name_index_matches_cache_after_failed_commit: a "
+                "populated cache entry is missing from the index");
+        }
+    }
+    for (uint32_t i = 1u; i < fs.name_order_count; ++i) {
+        const char *previous =
+            (const char *)v2_entry(fs.directory, v2_name_order[i - 1u]);
+        const char *current =
+            (const char *)v2_entry(fs.directory, v2_name_order[i]);
+        TEST_ASSERT_TRUE_MESSAGE(
+            strcmp(previous, current) < 0,
+            "0040_name_index_matches_cache_after_failed_commit: index is not "
+            "strictly ascending by name");
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -773,5 +867,6 @@ int main(void)
     RUN_TEST(test_0036_R3_probe_reads_v1_and_v2);
     RUN_TEST(test_0036_R3_probe_rejects_bad_headers_without_writing);
     RUN_TEST(test_0036_R8_name_order_is_protected_workspace);
+    RUN_TEST(test_0040_R1_AC2_name_index_matches_cache_after_failed_commit);
     return UNITY_END();
 }
