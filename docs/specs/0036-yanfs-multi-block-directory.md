@@ -765,3 +765,5 @@ PR精确head的[CI 40739247812](https://github.com/YanBo-maker/YanOS/actions/run
 改动：`:32` 与 `:121` 收窄为「导出 arena 符号的 ELF 才检查」，并补 0036-R3-AC5 覆盖实现已支持但此前无处可查的两个分支（只导出一个 → 拒绝；都不导出 → 跳过）。`tools/yan_run.c` **未改动**——A 方案下现有 `||` 行为正确。
 
 已知未覆盖：`run_arena_reject.py`（AC3）只测「end 越过环形基址」与「arena 太小」，「只导出一个符号」分支此前零测试，由 AC5 补齐期望。
+
+该缺口已于 2026-11-01 闭合（PR #149）：新增 `tests/guest/run_arena_pair.py`，注册名 `arena_pair`、LABELS `0036-R3-AC5`（`CMakeLists.txt:1419-1429`），三用例 only-start / only-end / neither。前两例断言 `yan_run` 以非 0 退出并打印 `exports only one of`；第三例断言两个符号都不导出的 ELF 仍能正常加载运行。三例都由 `--gcc` 现编仅含所需 `.globl` 的最小 loader，不需要镜像。第三例是必要的负对照——只测「导出单个即拒绝」无法区分「正确拒绝一个」与「把所有 ELF 都拒绝」，而后者会破坏所有既有的测试链接器。上面「此前零测试」的记述保留为当时状态。
