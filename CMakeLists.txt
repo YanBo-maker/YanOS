@@ -713,7 +713,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_yanfs PRIVATE yan_fs unity::framework)
     target_compile_options(test_yanfs PRIVATE ${YAN_WARNINGS})
     add_test(NAME yanfs COMMAND test_yanfs)
-    set_tests_properties(yanfs PROPERTIES TIMEOUT 30)
+    set_tests_properties(yanfs PROPERTIES TIMEOUT 30
+                         LABELS "0040-R1-AC1;0040-R2-AC2")
 
     # 0036-R3-AC1: the one-shot bump arena is plain C over uintptr_t, so the
     # Guest's allocation rule is also a native Unity suite.
