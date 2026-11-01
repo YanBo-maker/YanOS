@@ -61,11 +61,42 @@ ISA 行为遵循 Spec → Test → Implementation：先写用例并确认预期�
 
 ### 合并前检查清单
 
+清单分两组：**1、2、3、5、6 是提交者自检**，防的是「虚报」——把没验证的说成验证了；**7 是报告时声明**，防的是「漏报」——把已覆盖的说成未覆盖。（第 4 条「文档自洽核对」由总审核角色执行，不在提交者自检范围内。）其中负控必须读 `:FAIL:` 那一行原文，不能只看「测试红了」。假红有三类来源：环境缺件（只构建了部分 target）、构建失败（跑了旧二进制）、前置失败连锁。**共同点是 `FAIL` 出现了但说的不是要验证的事。**
+
 1. 默认套件全绿：`cmake --build build --parallel && ctest --test-dir build --output-on-failure`。若配置已开启变异，用 `ctest --test-dir build -E '_mutation$' --output-on-failure` 运行默认套件，保留默认的 `note_blocks_mutation_gate`、`mcp_mutation_gate`、`semantic_mutation_gate`、`note_relations_mutation_gate`、`note_metadata_mutation_gate`、`search_terms_mutation_gate`、`search_mutation_gate`、`editor_mutation_gate`、`yanfs_mutation_classifier` 和 `terminal_mutation_gate` 判据负控。这里的 `build` 指**你自己的构建目录**：本机上 `build/` 是各构建目录的容器（`build/agent-*` 等，没有统一的根配置），所以要先 `cmake -S . -B build/<你的目录>` 配置它，否则 `cmake --build build` 会直接报 `Error: could not load cache`（exit 1）。
-2. 变异检查显式跑一次：`cmake -S . -B build -DYAN_BUILD_TOOLS=ON -DYAN_ENABLE_MUTATION_TESTS=ON …` 后运行 `ctest --test-dir build -R '_mutation$'`。开关下实际变异套件在 Linux、工具与依赖齐备时且可选SEMANTIC已开启时是**十七组**：`note_blocks_mutation`、`mcp_mutation`、`semantic_mutation`、`note_relations_mutation`、`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`；默认十个 `*_mutation_gate` 检查分类器，不算实际变异组。另有两组 `difftest_mutation` / `difftest_ref_mutation` **只在检出 NEMU 参考模型时注册**，本地缺参考模型时不在名单里。每一组都必须 **0 存活**，而且**检出只认指定owner及具体断言失败**：无关case或同case的无关断言不计检出；完整footer、逐项PASS/FAIL/IGNORE计数与退出码必须一致。timeout、信号死亡（139 等）、sanitizer 报告、fixture abort、构建失败**一律归 harness error，不计检出**（这两条判据是 2026-09-20 两次门禁缺陷换来的：一次是只加一行 `fputs` 的零行为变化变异体被判成检出，一次是纯崩溃与 fixture abort 被计成检出）。**这一步不能省**：变异检查是"测试真的有检测力"的唯一证据，默认不注册只是因为它慢。
+2. **测试总数与通过率必须同时报**：跑完默认套件后同时给出通过率和注册总数：
+   ```bash
+   ctest --test-dir build --no-tests=error -j4 > /tmp/t.log 2>&1
+   grep -oE "[0-9]+% tests passed[^)]*" /tmp/t.log
+   ctest --test-dir build -N | grep -oE "Total Tests: [0-9]+"
+   ```
+   防的是：CMake 缓存保留旧选项值，导致部分测试根本没注册。此时输出仍是 `100% tests passed`，只看百分比会误报「无回归」。实测出现过漏掉 `-DYAN_BUILD_SEMANTIC=ON` 使整套 MCP 相关测试未注册、总数明显下降而百分比仍为 100% 的情况；**总数变化是唯一信号**，必须与通过率一起看，并对照本地配置说明这是配置差异而非回退。
+3. 变异检查显式跑一次：`cmake -S . -B build -DYAN_BUILD_TOOLS=ON -DYAN_ENABLE_MUTATION_TESTS=ON …` 后运行 `ctest --test-dir build -R '_mutation$'`。开关下实际变异套件在 Linux、工具与依赖齐备时且可选SEMANTIC已开启时是**十七组**：`note_blocks_mutation`、`mcp_mutation`、`semantic_mutation`、`note_relations_mutation`、`note_metadata_mutation`、`search_terms_mutation`、`search_mutation`、`editor_mutation`、`terminal_mutation`、`yanfs_mutation`、`persistent_block_mutation`、`persistent_combined_mutation`、`guest_console_mutation`、`device_mutation`、`guest_runtime_mutation`、`guest_block_mutation`、`guest_m2a_combined_mutation`；默认十个 `*_mutation_gate` 检查分类器，不算实际变异组。另有两组 `difftest_mutation` / `difftest_ref_mutation` **只在检出 NEMU 参考模型时注册**，本地缺参考模型时不在名单里。每一组都必须 **0 存活**，而且**检出只认指定owner及具体断言失败**：无关case或同case的无关断言不计检出；完整footer、逐项PASS/FAIL/IGNORE计数与退出码必须一致。timeout、信号死亡（139 等）、sanitizer 报告、fixture abort、构建失败**一律归 harness error，不计检出**（这两条判据是 2026-09-20 两次门禁缺陷换来的：一次是只加一行 `fputs` 的零行为变化变异体被判成检出，一次是纯崩溃与 fixture abort 被计成检出）。**这一步不能省**：变异检查是"测试真的有检测力"的唯一证据，默认不注册只是因为它慢。
    开启上述变异配置后，`guest_console_mutation_gate` 也会随默认套件执行。它包含共享真实判定函数的检查和实际编译控制，不能计为第十一个 puregate，也不能替代十七组实际变异的统一执行。仅缺外部工具链可返回77；缺本地输入必须硬失败。
-3. 文档自洽核对：由总审核角色核对状态行、规格索引、计数与链接。
-4. **新增或改动被忽略扩展名的工件时，确认它真的能进提交**：判据是 `git add --dry-run <路径>` 是否列出该文件，**不是** `git check-ignore` 的返回码——命中取反规则时它也返回 0。仓库已经踩过一次：golden 基准的 `.jsonl` / `.hex` 被"验证产物不提交"的规则吃掉，基准进不了仓库，测试会在别的机器上静默 SKIP。
+4. 文档自洽核对：由总审核角色核对状态行、规格索引、计数与链接。
+5. **新增或改动被忽略扩展名的工件时，确认它真的能进提交**：判据是 `git add --dry-run <路径>` 是否列出该文件，**不是** `git check-ignore` 的返回码——命中取反规则时它也返回 0。仓库已经踩过一次：golden 基准的 `.jsonl` / `.hex` 被"验证产物不提交"的规则吃掉，基准进不了仓库，测试会在别的机器上静默 SKIP。
+6. **合并前先确认分支基底含最新 `main`，再核对 diff 里的文件都由本分支改过**：两条命令查的是相反方向，必须都跑且基底检查先跑。
+   ```bash
+   # (a) 查「有没有少东西」——必要条件，不是充分条件
+   git fetch origin
+   git merge-base --is-ancestor origin/main HEAD || echo "BASE STALE: 必须重建，不能直接合并"
+
+   # (b) 查「有没有多东西」
+   for f in $(git diff --name-only origin/main HEAD); do
+     n=$(git log --oneline origin/main..HEAD -- "$f" | wc -l)
+     [ "$n" -eq 0 ] && echo "SUSPECT: $f 出现在 diff 里但本分支没提交过它"
+   done
+   ```
+   (a) 防「基于旧 `main`」：基底过期会让 diff 少掉 main 后来加的东西。(b) 防「静默回退别人的改动」：基底过期时合并会覆盖掉别人已合入的修复，**不冲突、CI 全绿、快进成功**，唯一异常是 diff 里多了本分支没改过的文件——因此「没有冲突」不等于「可以合」。**(a) 不通过时 (b) 的结果没有意义。**
+   **(a) 失败不等于分支有害**：落后 1 个提交也会失败；它只表示**不能直接合并，必须重建**。它是必要条件，不是充分条件。
+   **这条本身就是「没输出可能是没问题，也可能是检查没运行」的实例**：作者首次实测 (b) 时输出为空、`[ -eq 0 ]` 报 `integer expression expected`，SUSPECT 永不打印——看起来像「检查通过」，实际是检查静默失效（真因是测试脚本里 `$()` 嵌套导致引号被吃，不是命令本身）。改写后必须实测能命中已知的坏样本，才算这条检查存在。
+7. **报「未验证」前先查 CI 是否已覆盖**：
+   ```bash
+   gh api repos/YanBo-maker/YanOS/actions/runs/<run_id>/jobs \
+     --jq '.jobs[] | "\(.name) = \(.conclusion)"'
+   ```
+   必须用 `gh api` 而不是 `gh pr checks`——后者有缓存，出现过 CI 早已 success 而 CLI 仍显示 pending 的情况，据此判断会误报「卡住」。
+   防的是**系统性低估覆盖**：人容易在 CI 出结果前写「未验证」，然后忘了回来改。把 CI 已覆盖的项留在「未验证」清单里，会让读者以为风险敞着；更糟的是，**同一份清单里若混着真正敞着的风险，就分不出轻重**。报「未验证」前逐项查一次 CI，只有确实没有任务覆盖的才留在这个清单里。
 
 ### 提交前总审核检查清单
 
@@ -76,7 +107,7 @@ ISA 行为遵循 Spec → Test → Implementation：先写用例并确认预期�
 - [ ] **3 STATUS 按三处更新**：替换「当前阶段」；在「已交付能力」加一行；覆盖边界有变化时改对应条目。开始新阶段并替换「当前阶段」时，旧段落原样追加到 `docs/STATUS-history.md` 末尾。阶段验证明细（注册数、通过数、耗时、审核轮次、证据路径）只写在该阶段规格的「VERIFY 执行记录」，并在 PR 描述里摘要；不写入 STATUS、README 或 CONTRIBUTING。锁定规格的改动仍须能指向项目所有者的批准；「规格锁定后被修正」的历史说明留在 `docs/STATUS-history.md`。（依据：0034 R9；`AGENTS.md`「文档与规格的修改权」。）
 - [ ] **4 阶段合入 main 后归档 MONITOR_REPORT**：按 0034 R7 将仓库根 `MONITOR_REPORT.md` 原样复制到仓库外 `E:\YanOS-archive\monitor\`（文件名带日期时间，不覆盖已有归档），SHA-256 与归档前一致后再把原文件重置为通道说明头。不删除该文件，不为归档新增 Git 跟踪文件。未核实的结论不得进入 `README.md`、`docs/STATUS.md` 或规格；`mut-*` / `*-mutation*` 或仓库外副本的失败日志是变异判据，不是回归结论。（依据：0034 R7、R9；`AGENTS.md`「外部监控通道」。）
 - [ ] **5 计数现测**：默认套件数与变异开关下的套件数、以及耗时，都要**当场跑一遍再写**，不得沿用旧数字。（依据：2026-09-20 的事故——`CONTRIBUTING` 里的 25 / 27 在 M2a 注册两个套件后就过期了。）
-- [ ] **6 门禁判据纪律**：变异检查只认断言失败；timeout / 信号 / sanitizer / 构建失败归 harness error；**"存活 0"只有在门禁本身被复验过之后才可引用**。（依据：本轮两次门禁缺陷 + 门禁复验记录。）
+- [ ] **6 门禁判据纪律**：变异检查只认断言失败；timeout / 信号 / sanitizer / 构建失败归 harness error；**"存活 0"只有在门禁本身被复验过之后才可引用**。负控红了要读 `:FAIL:` 那一行原文，确认失败原因对应的是被变异的那个断言，而不是别的。假红有三类来源：环境缺件（只构建了部分 target）、构建失败（跑的是上一次的旧二进制）、前置失败连锁；共同点是 `FAIL` 出现了，但说的不是要验证的事。（依据：本轮两次门禁缺陷 + 门禁复验记录；2026-11-01 编译失败后跑旧二进制导致误判「测试是坏的」。）
 - [ ] **7 `SKIP 77` 的语义**：`SKIP_RETURN_CODE 77` 不得由"被测实现 / 测试程序 / 基线缺失"可达，只能表示缺仓库外依赖（工具链、Unity、参考模型）。移动被测文件后必须硬失败。（依据：实测把 `os/block.c` 移走后两个脚本退 77、CTest 报"100% passed"；该洞自 M1 起存在。）
 - [ ] **8 提交切分**：`git status` 每一项恰好归属一条提交、文档与其所述改动**同批**（不留"代码在第 5 条、文档在第 10 条"的中间态）、每条提交都不让树变红。（依据：`CONTRIBUTING.md`「提交粒度」与 `AGENTS.md`「在短期任务分支开发…配套实现与测试一起验证」。）
 - [ ] **9 越权检查**：本轮是否有 Agent 改了不属于它的文件；未经审核的文档改动按「未记录的行为变化」出裁定（保留 / 回退 / 改写）。（依据：`AGENTS.md`「文档与规格的修改权」中的未经审核改动裁定规则；2026-09-20 批次 B 的先例。）
