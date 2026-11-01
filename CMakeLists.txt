@@ -746,7 +746,8 @@ if(BUILD_TESTING)
     target_include_directories(test_ring_copy PRIVATE os)
     target_compile_options(test_ring_copy PRIVATE ${YAN_WARNINGS})
     add_test(NAME ring_copy COMMAND test_ring_copy)
-    set_tests_properties(ring_copy PROPERTIES TIMEOUT 120 LABELS "0036-R8-AC1")
+    set_tests_properties(ring_copy PROPERTIES TIMEOUT 120
+                         LABELS "0036-R8-AC1;0040-R3-AC3")
 
     # Compile the real freestanding helpers under distinct names. Replacing
     # libc's symbols here would also replace the host runtime and the oracle.
@@ -877,12 +878,13 @@ if(BUILD_TESTING)
     target_compile_options(test_note_blocks_format PRIVATE ${YAN_WARNINGS})
     add_test(NAME note_blocks_format COMMAND test_note_blocks_format)
     set_tests_properties(note_blocks_format PROPERTIES TIMEOUT 30
-                         LABELS "0040-R3-AC1")
+                         LABELS "0040-R3-AC1;0040-R3-AC2")
     add_executable(test_note_blocks tests/test_note_blocks.c)
     target_link_libraries(test_note_blocks PRIVATE yan_blocks unity::framework)
     target_compile_options(test_note_blocks PRIVATE ${YAN_WARNINGS})
     add_test(NAME note_blocks COMMAND test_note_blocks)
-    set_tests_properties(note_blocks PROPERTIES TIMEOUT 60)
+    set_tests_properties(note_blocks PROPERTIES TIMEOUT 60
+                             LABELS "0040-R3-AC2")
     add_executable(test_shell_blocks tests/test_shell_blocks.c)
     target_link_libraries(test_shell_blocks PRIVATE yan_shell unity::framework)
     target_compile_options(test_shell_blocks PRIVATE ${YAN_WARNINGS})
