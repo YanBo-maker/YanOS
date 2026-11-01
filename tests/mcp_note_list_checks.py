@@ -147,7 +147,7 @@ MIN_ASSERTS = {
     "0041-R2-AC8": 6,
     "0041-R2-AC9": 7,
     "0041-R2-AC10": 5,
-    "0041-R2-AC11": 1,
+    "0041-R2-AC11": 3,
 }
 
 _THIS_FILE = __file__
@@ -518,10 +518,19 @@ def test_list_is_read_only(binary, root):
     before = digest(img)
     server = Server(binary, img, extra=("--allow-meta",))
     try:
+        # 0041-R2-AC11 says "任一次成功或失败调用, Then 镜像零写入" -- any call, so
+        # all three shapes need their own evidence. One assert after three calls
+        # would keep the count at 1 no matter how many calls were deleted, which
+        # is exactly the hole Issue #170 reports: a run trimmed to a single call
+        # printed the same "1 assertions" as the full run. Pairing each call with
+        # its own assert makes a deletion lower the executed count, so the
+        # MIN_ASSERTS floor below can see it.
         server.call(LIST, {})                                   # METADATA
+        assert digest(img) == before, "success_call_wrote_image"
         server.call(LIST, {"tags": ["cpu"]})                    # METADATA
+        assert digest(img) == before, "tag_call_wrote_image"
         server.call(LIST, {"expected_source": "0" * 64})        # STALE
-        assert digest(img) == before, "list_wrote_image"
+        assert digest(img) == before, "stale_call_wrote_image"
         CASES += 1
     finally:
         server.close()
