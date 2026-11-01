@@ -33,10 +33,24 @@ Design notes:
 
 3. Every phrase is checked separately and reported by its own :FAIL: line, so a
    failure names which constraint was lost rather than just "README is wrong".
+4. Output is forced to UTF-8 and every phrase is echoed through ascii(). Windows
+   defaults stdout to cp1252, so printing Chinese text there raises
+   UnicodeEncodeError and kills the run *after* the verdict is already known --
+   a CI failure that looks like a logic bug but is only an encoding accident.
+   Forcing UTF-8 fixes the stream; ascii() keeps the log pure ASCII anyway, which
+   also protects readers (log collection, grep, terminals) that assume ASCII.
+   Ubuntu never showed this: its locale is UTF-8, so the same print succeeds.
 """
 import argparse
 import sys
 from pathlib import Path
+
+# Windows Python encodes stdout with the ANSI code page (cp1252), not UTF-8.
+# reconfigure() exists on 3.7+; the hasattr guard keeps older interpreters from
+# failing here instead of on the real check.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 TARGET = "README.md"
 
@@ -70,11 +84,18 @@ def main():
           % (len(REQUIRED), TARGET), flush=True)
     if missing:
         for phrase in missing:
-            print(":FAIL: 0035_R9_AC1_readme_constraints: missing phrase: %r"
-                  % phrase, flush=True)
+            # ascii(), not repr(): these phrases are Chinese, and repr() emits
+            # them literally. Windows stdout defaults to cp1252, where those
+            # code points do not exist, so an f-string with the raw text aborts
+            # the process with UnicodeEncodeError *after* the check has already
+            # decided -- the failure looks like a crash rather than a verdict.
+            # ascii() escapes to \uXXXX, which is pure ASCII, reversible, and
+            # still names the exact phrase.
+            print(":FAIL: 0035_R9_AC1_readme_constraints: missing phrase: %s"
+                  % ascii(phrase), flush=True)
         return 1
     for phrase in REQUIRED:
-        print("  present: %r" % phrase, flush=True)
+        print("  present: %s" % ascii(phrase), flush=True)
     return 0
 
 
