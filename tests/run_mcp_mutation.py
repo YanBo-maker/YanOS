@@ -44,7 +44,8 @@ BUILD_REQUIRED = (
     'libyan_semantic_posix.a', 'libyan_blocks.a', 'libyan_blocks_format.a',
     'libyan_search_text.a', 'libyan_fs.a', 'libyan_semantic_core.a',
     'libyan_semantic_corpus.a', 'libyan_note_format.a',
-    'libyan_mcp_note.a', 'libyan_note_write.a')
+    'libyan_mcp_note.a', 'libyan_note_write.a',
+    'libyan_mcp_meta.a', 'libyan_note.a')
 SUITE_INPUTS = {
     'mcp_protocol': ('tools/mcp_protocol.c', 'host/semantic_text.c',
                      'host/semantic_sha256.c', 'tools/mcp_worker.c'),
@@ -207,6 +208,7 @@ def main():
                 'libyan_block_query.a', 'libyan_semantic_llama.a', 'libyan_semantic_json.a')]
             native_libs += [args.yyjson_lib, unity,
                 args.build/'libyan_mcp_note.a', args.build/'libyan_note_write.a',
+                args.build/'libyan_mcp_meta.a', args.build/'libyan_note.a',
                 *(args.build/n for n in ('libyan_semantic_posix.a', 'libyan_blocks.a',
                     'libyan_blocks_format.a', 'libyan_search_text.a', 'libyan_fs.a')),
                 args.curl_lib,
