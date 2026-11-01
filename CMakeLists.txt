@@ -760,6 +760,24 @@ if(BUILD_TESTING)
                              TIMEOUT 120 LABELS "0036-R8-AC3")
     endif()
 
+    # 0014 layering: "src/transport.c 中不得出现上层词汇（note、markdown、rpc、
+    # block 等）". The file is clean today, so the rule holds -- and nothing was
+    # checking it. One `strncmp(payload, "note", 4)` would couple the channel to
+    # the knowledge format while every behavioural test stayed green, because the
+    # channel still moves exactly the same bytes.
+    # Like the AC3 gate above, this is a source scan: the claim is about what the
+    # source does not contain. Only transport.c is scanned, as the spec scopes it
+    # -- `block` and `note` are legitimate in bus.c/ram.c/image.c.
+    # 0014 predates the R/AC numbering, so the label is the spec number alone.
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME transport_vocabulary_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/ci_transport_vocabulary.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(transport_vocabulary_gate PROPERTIES
+                             TIMEOUT 120 LABELS "0014")
+    endif()
+
     add_executable(test_ring_copy tests/test_ring_copy.c)
     target_include_directories(test_ring_copy PRIVATE os)
     target_compile_options(test_ring_copy PRIVATE ${YAN_WARNINGS})
