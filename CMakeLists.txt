@@ -778,6 +778,23 @@ if(BUILD_TESTING)
                              TIMEOUT 120 LABELS "0014")
     endif()
 
+    # 0017 layering: "os/ 不得包含 tests/ 下的任何头；tests/ 可以包含 os/".
+    # The reverse direction is heavily used -- 24 test files include os/ headers
+    # -- so the rule is meaningful, and nothing checked the forward direction.
+    # One `#include "tests/helpers.h"` inside os/ would invert the dependency and
+    # every test would still pass, because the header exists on disk.
+    # The scan reads #include directives only: os/ names test files in comments in
+    # 8 places, which is documentation and allowed by the spec.
+    # 0017 predates the R/AC numbering, so the label is the spec number alone.
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME layering_gate
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/layering_gate.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(layering_gate PROPERTIES
+                             TIMEOUT 120 LABELS "0017")
+    endif()
+
     add_executable(test_ring_copy tests/test_ring_copy.c)
     target_include_directories(test_ring_copy PRIVATE os)
     target_compile_options(test_ring_copy PRIVATE ${YAN_WARNINGS})
