@@ -1227,7 +1227,7 @@ if(BUILD_TESTING)
                                 --guest "${YAN_TERMINAL_ELF}"
                                 --server "$<TARGET_FILE:yan_mcp>")
                     set_tests_properties(guest_learning_note PROPERTIES TIMEOUT 600
-                                         LABELS "0035-R8-AC1;0035-R8-AC2;0035-R10-AC3;0035-R11-AC4")
+                                         LABELS "0035-R8-AC1;0035-R8-AC2;0035-R10-AC3;0035-R11-AC4;0035-R12-AC2")
                     # 0041-R2-AC3 Guest half: the MCP listing names must equal
                     # `meta list tag:<X>` on the real terminal. Registered only
                     # where the Guest targets exist, so a platform without the
@@ -1368,7 +1368,7 @@ if(BUILD_TESTING)
                                 --cc "${CMAKE_C_COMPILER}")
                     set_tests_properties(yanfs_4095_performance PROPERTIES
                         SKIP_RETURN_CODE 77 TIMEOUT 1800
-                        LABELS "0040-R4-AC1;0040-R4-AC3;0040-R5-AC1;0040-R5-AC2")
+                        LABELS "0036-R5-AC1;0040-R4-AC1;0040-R4-AC3;0040-R5-AC1;0040-R5-AC2")
                     # Step determinism: the spec states "两次计步完全一致" (two
                     # runs count identically) in its VERIFY and methodology
                     # sections (:88, :98, :141), not in an AC. Guest step counts
