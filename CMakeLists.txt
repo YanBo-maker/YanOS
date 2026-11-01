@@ -778,6 +778,21 @@ if(BUILD_TESTING)
                              TIMEOUT 120 LABELS "0014")
     endif()
 
+    # 0035-R9-AC1 has two halves. The description half is guarded by mcp_sdk_check,
+    # which asserts each phrase against the tool description served over MCP. The
+    # README half had no guard at all: nothing in the suite reads README.md, so a
+    # deleted sentence broke the spec while every test stayed green.
+    # A text scan is the only way to check a claim about wording present in a
+    # document -- no behaviour of the binaries reflects it.
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME readme_constraints
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/readme_constraints.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(readme_constraints PROPERTIES
+                             TIMEOUT 120 LABELS "0035-R9-AC1")
+    endif()
+
     add_executable(test_ring_copy tests/test_ring_copy.c)
     target_include_directories(test_ring_copy PRIVATE os)
     target_compile_options(test_ring_copy PRIVATE ${YAN_WARNINGS})
