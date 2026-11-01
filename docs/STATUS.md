@@ -80,7 +80,7 @@
 
 - MCP服务及语义工具的运行平台为Linux/WSL。Windows原生构建不提供 `yan_mcp`，不运行 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk`；它运行的 `mcp_write_docs` 是纯Python检查器自测，不构成MCP服务运行验收。此边界沿用[0035](specs/0035-agent-writable-knowledge.md)，对应[Issue #57](https://github.com/YanBo-maker/YanOS/issues/57)的“明确Linux覆盖”选项；Windows原生支持仍需独立规格与实现。
 
-- CI 矩阵与失败条件见 `.github/workflows/build.yml`：ubuntu-22.04 Debug+ASan、ubuntu-22.04 Release 安装 `gcc-riscv64-linux-gnu` 并打开 `YAN_BUILD_TOOLS`；工具链缺失、Guest 测试未注册、或日志中有 `(Skipped)` 时 Linux 任务失败。windows-2022 Debug 不装该工具链，也不跑 Guest 测试。
+- CI 矩阵与失败条件见 `.github/workflows/build.yml`：ubuntu-22.04 Debug+ASan、ubuntu-22.04 Release 安装 `gcc-riscv64-linux-gnu` 并打开 `YAN_BUILD_TOOLS`；工具链缺失、Guest 测试未注册、或 CTest 汇总列出 `(Skipped)` 测试时 Linux 任务失败。windows-2022 Debug 不装该工具链，也不跑 Guest 测试。
 - 外部验证层仍不在 CI：NEMU 差分（`difftest_*`）、官方 riscv-tests、Sail 签名、ACT4。依赖缺失时这些测试不注册，或按原脚本返回 SKIP，不记为通过。历史测量在归档的「外部验证层」。
 - 差分比较 PC、32 个通用寄存器和结束时的整段 RAM。归档记录的 NEMU riscv32 参考状态没有 CSR，因此 trap、MRET 与中断语义不在差分范围内；`yan_difftest` 不连接 CLINT / PLIC。`yan_run` 映射四个设备窗口并每条指令推进一次 `mtime`。
 - 第三方证据来自官方 riscv-tests 与 Sail 签名，范围是用户态 RV32IM。Guest trap 自检覆盖 MSIP 与 MTIP；MEIP 由 Host 侧测试驱动。
