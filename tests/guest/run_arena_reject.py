@@ -111,10 +111,41 @@ def main():
           "over-arena ELF ran to completion (exit 0)")
     check(b"arena" in result.stderr,
           "over-arena ELF was not rejected with an arena diagnostic")
-    check(result.stdout == b"",
-          "over-arena Guest executed and produced output")
+    # 0036-R3-AC3: "Guest did not execute" needs a trace the Guest itself would
+    # leave. The old assertion here was `stdout == b""`, which is vacuous: this
+    # fixture only writes tohost and spins, so it produces no stdout whether it
+    # runs or not -- measured, the valid ELF's stdout is also empty.
+    #
+    # yan_run's exit code is that trace. 0 means it reached tohost with value 1,
+    # i.e. the Guest ran to its halt word; 5 means the loader refused before
+    # executing anything. The rejected case must therefore be EXIT_HOST_ERROR,
+    # not merely "non-zero" -- a Guest that ran and failed would also be
+    # non-zero, and 4 (never reached tohost) would mean it started but hung.
+    check(result.returncode == 5,
+          "over-arena ELF exit %d is not EXIT_HOST_ERROR(5); the loader did not "
+          "refuse before executing" % result.returncode)
     print("0036-R3-AC3 over=rejected exec=no rc=%d" % result.returncode,
           flush=True)
+
+    # Positive control for the same signal: the identical fixture linked with a
+    # legal arena must exit 0. Without this, `returncode == 5` could pass simply
+    # because everything exits 5, and the negative case would prove nothing
+    # about the Guest failing to run.
+    legal_elf = args.work / "arena_legal.elf"
+    built = run([args.gcc, *runtime.CROSS_FLAGS, "-T",
+                 args.source / "os" / "guest.ld", "-Wl,--build-id=none",
+                 "-o", legal_elf, tiny])
+    if built.returncode != 0:
+        print(":HARNESS-ERROR: legal-arena build failed:\n%s"
+              % built.stderr.decode(errors="replace"))
+        return 2
+    legal = run([args.run, "--image", legal_elf, "--disk", "1",
+                 "--max-steps", "100000"])
+    check(legal.returncode == 0,
+          "legal-arena control did not reach tohost (exit %d, stderr=%r); the "
+          "exit-code signal is not live, so the rejection check above proves "
+          "nothing" % (legal.returncode, legal.stderr[:120]))
+    print("0036-R3-AC3 control=executed rc=%d" % legal.returncode, flush=True)
 
     small_end = start + 0x1000
     small_ld = args.work / "arena_small.ld"
