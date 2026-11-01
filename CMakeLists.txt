@@ -1411,6 +1411,22 @@ if(BUILD_TESTING)
                     set_tests_properties(arena_reject PROPERTIES
                                          SKIP_RETURN_CODE 77 TIMEOUT 900
                                          LABELS "0036-R3-AC3")
+                    # 0036-R3-AC5: both arena symbols or neither. The branch in
+                    # tools/yan_run.c that rejects a program exporting exactly
+                    # one of them had no test before this one. No image is
+                    # needed: all three cases are bare loaders, so --mkfs and
+                    # --guest are deliberately absent.
+                    add_test(NAME arena_pair
+                        COMMAND "${Python3_EXECUTABLE}" -B
+                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_arena_pair.py"
+                                --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                                --work "${CMAKE_BINARY_DIR}/arena-pair"
+                                --gcc "${YAN_RISCV_GCC}"
+                                --readelf "${YAN_RISCV_READELF}"
+                                --run "$<TARGET_FILE:yan_run>")
+                    set_tests_properties(arena_pair PROPERTIES
+                                         SKIP_RETURN_CODE 77 TIMEOUT 900
+                                         LABELS "0036-R3-AC5")
                     add_test(NAME arena_budget
                         COMMAND "${Python3_EXECUTABLE}" -B
                                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_arena_budget.py"
