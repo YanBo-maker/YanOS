@@ -1364,6 +1364,27 @@ if(BUILD_TESTING)
                     set_tests_properties(yanfs_4095_performance PROPERTIES
                         SKIP_RETURN_CODE 77 TIMEOUT 1800
                         LABELS "0040-R4-AC1;0040-R4-AC3;0040-R5-AC1;0040-R5-AC2")
+                    # 0040-R5-AC1: the spec claims "两次计步完全一致" (two runs
+                    # count identically) and nothing tested it. Guest step counts
+                    # come from the simulator's instruction counter, not a clock,
+                    # so they must repeat bit-for-bit; if they ever drift, that
+                    # sentence becomes false and the 0.42% R5 margin loses its
+                    # meaning. Only the 4095 row is repeated, which is the row
+                    # the gate is about, so this costs one extra row rather than
+                    # a second full matrix.
+                    add_test(NAME yanfs_4095_step_determinism
+                        COMMAND "${Python3_EXECUTABLE}" -B
+                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_yanfs_4095_performance.py"
+                                --source "${CMAKE_CURRENT_SOURCE_DIR}"
+                                --work "${CMAKE_BINARY_DIR}/yanfs-4095-determinism"
+                                --mkfs "$<TARGET_FILE:yan_mkfs>"
+                                --guest "${YAN_TERMINAL_ELF}"
+                                --cc "${CMAKE_C_COMPILER}"
+                                --sizes 4095
+                                --repeat 2)
+                    set_tests_properties(yanfs_4095_step_determinism PROPERTIES
+                        SKIP_RETURN_CODE 77 TIMEOUT 1800
+                        LABELS "0040-R5-AC1")
                     set_tests_properties(yanfs_r8_performance PROPERTIES
                                          SKIP_RETURN_CODE 77 TIMEOUT 900
                                          LABELS "0036-R8-AC4")
