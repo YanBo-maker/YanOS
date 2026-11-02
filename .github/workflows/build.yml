@@ -105,14 +105,19 @@ jobs:
           # mutation items here. The `_mutation_classifier` / `_mutation_gate`
           # judges stay in the default suite on purpose: they are cheap pure
           # classifier checks, and CONTRIBUTING relies on them being present.
-          ctest --test-dir build --build-config ${{ matrix.config }} -E '_mutation$' --output-on-failure 2>&1 | tee ctest.log
+          # -V: a passing test prints its measured numbers only in verbose mode,
+          # so this one full run carries the stdout that separate re-runs used to
+          # fetch (Issue #75, Issue #178).
+          ctest --test-dir build --build-config ${{ matrix.config }} -E '_mutation$' -V --output-on-failure 2>&1 | tee ctest.log
           cp build/Testing/Temporary/LastTest.log build/Testing/Temporary/LastTest-full.log
-          ctest --test-dir build --build-config ${{ matrix.config }} -V -R '^(mcp_note|mcp_note_tool|mcp_sdk|mcp_stdio)$' 2>&1 | grep -E ': (PASS|.*:PASS$|[0-9]+ Tests 0 Failures)|tests passed'
           if [ ! -f ctest.log ]; then
             echo "::error::ctest 日志不存在"
             exit 1
           fi
-          if grep -E '\(Skipped\)' ctest.log; then
+          # Match a CTest SUMMARY "(Skipped)" row only: "<n> - <name> (Skipped)".
+          # A bare token match also hits a passing test's own stdout, now visible
+          # because the full run is verbose (Issue #178 R1; 0034 R4).
+          if grep -E '^[[:space:]]*[0-9]+ - .*\(Skipped\)' ctest.log; then
             echo "::error::存在被跳过的测试（见上方列表）"
             exit 1
           fi
@@ -122,24 +127,6 @@ jobs:
       # configuration: yanfs_mutation = 19 mutants in 19 s. Registered only
       # under YAN_ENABLE_MUTATION_TESTS, which the Configure step sets for
       # Linux; CONTRIBUTING documents the same flag for local runs.
-      # Issue #75: these three tests print the numbers that make their verdict
-      # checkable -- the arena size for each N, the rejection code, whether the
-      # image SHA stayed the same. `ctest` without -V swallows a passing test's
-      # stdout, so those numbers never reached CI. Verified locally: without -V
-      # the log contains zero occurrences of "0036-R3-AC2 measured",
-      # "load_bytes=", "sha=unchanged" or "N=127 boot=ok"; with -V all appear.
-      #
-      # No grep here on purpose: filtering the stream is what would drop the
-      # numbers again. The full verbose output goes to the log and the
-      # artifact, and tee preserves ctest's exit status through pipefail.
-      - name: Measured numbers (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -o pipefail
-          ctest --test-dir build --build-config ${{ matrix.config }} -V \
-            -R '^(arena_budget|arena_reject|capacity_guard)$' \
-            2>&1 | tee measured-numbers.log
       - name: Mutation (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -154,7 +141,6 @@ jobs:
           path: |
             ctest.log
             mutation.log
-            measured-numbers.log
             build/Testing/Temporary/
             build/yanfs-4095-performance/
             build/CMakeCache.txt
