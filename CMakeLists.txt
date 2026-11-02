@@ -196,6 +196,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_library(yan_semantic_posix STATIC host/semantic_posix.c)
     target_link_libraries(yan_semantic_posix PUBLIC yan_semantic_core yan_fs)
     target_compile_options(yan_semantic_posix PRIVATE ${YAN_WARNINGS})
+    # 0045 R1: the one implementation of "open the image, build, encode JSON"
+    # shared by the 0044 command and the MCP graph worker. It is Linux-only for
+    # the same reason as the adapter it borrows; the portable graph core stays
+    # platform independent.
+    add_library(yan_knowledge_graph_query STATIC host/knowledge_graph_query.c)
+    target_include_directories(yan_knowledge_graph_query PUBLIC host)
+    target_link_libraries(yan_knowledge_graph_query PUBLIC yan_knowledge_graph
+                          yan_semantic_posix)
+    target_compile_options(yan_knowledge_graph_query PRIVATE ${YAN_WARNINGS})
     # 0033 Task B Host query/paging; Linux-only because Task A's image adapter
     # is POSIX-only. This is the library seam for the later MCP worker, not a
     # block-only production executable.
@@ -221,12 +230,12 @@ if(YAN_BUILD_TOOLS)
         add_executable(yan_migrate tools/yan_migrate.c)
         target_link_libraries(yan_migrate PRIVATE yan_image_migrate)
         target_compile_options(yan_migrate PRIVATE ${YAN_WARNINGS})
-        # 0044 R2: the read-only knowledge-graph command. It borrows the
-        # existing image-only adapter and source digest, so it needs no semantic
-        # model, runner, yyjson or CURL dependency.
+        # 0044 R2: the read-only knowledge-graph command. Since 0045 R1 the
+        # lifecycle and JSON live in yan_knowledge_graph_query, so the command
+        # only parses arguments and writes; it still needs no semantic model,
+        # runner, yyjson or CURL dependency.
         add_executable(yan_graph tools/yan_graph.c)
-        target_link_libraries(yan_graph PRIVATE yan_knowledge_graph
-                              yan_semantic_posix)
+        target_link_libraries(yan_graph PRIVATE yan_knowledge_graph_query)
         target_compile_options(yan_graph PRIVATE ${YAN_WARNINGS})
     endif()
     add_executable(yan_run tools/yan_run.c tools/host_file.c tools/host_terminal.c
@@ -356,10 +365,18 @@ if(YAN_BUILD_SEMANTIC)
     target_link_libraries(yan_mcp_meta PUBLIC yan_note yan_semantic_posix
                           PRIVATE yyjson::yyjson)
     target_compile_options(yan_mcp_meta PRIVATE ${YAN_WARNINGS})
+    # 0045 R2: the two gated graph tools. The module holds only the graph
+    # schemas and the adapter to the shared 0045 R1 service, so the MCP layers
+    # route to it rather than duplicating any JSON or graph lifecycle.
+    add_library(yan_mcp_graph STATIC tools/mcp_graph.c)
+    target_include_directories(yan_mcp_graph PUBLIC tools)
+    target_link_libraries(yan_mcp_graph PUBLIC yan_knowledge_graph_query)
+    target_compile_options(yan_mcp_graph PRIVATE ${YAN_WARNINGS})
     add_library(yan_mcp_protocol STATIC tools/mcp_protocol.c)
     target_include_directories(yan_mcp_protocol PUBLIC tools)
     target_link_libraries(yan_mcp_protocol PUBLIC yan_semantic_text yan_blocks_format
-                          yan_note_format yan_mcp_note yan_mcp_meta yyjson::yyjson)
+                          yan_note_format yan_mcp_note yan_mcp_meta yan_mcp_graph
+                          yyjson::yyjson)
     target_compile_options(yan_mcp_protocol PRIVATE ${YAN_WARNINGS})
     add_executable(yan_mcp tools/yan_mcp.c tools/mcp_worker.c)
     target_link_libraries(yan_mcp PRIVATE yan_mcp_protocol yan_semantic_posix yan_block_query
@@ -437,13 +454,13 @@ if(BUILD_TESTING)
         if(YAN_BUILD_SEMANTIC)
             add_executable(test_mcp_protocol tests/test_mcp_protocol.c tools/mcp_worker.c)
             target_link_libraries(test_mcp_protocol PRIVATE yan_mcp_protocol yan_block_query
-                                  yan_semantic_llama yan_semantic_json yyjson::yyjson
-                                  unity::framework)
+                                  yan_mcp_graph yan_semantic_llama yan_semantic_json
+                                  yyjson::yyjson unity::framework)
             target_compile_options(test_mcp_protocol PRIVATE ${YAN_WARNINGS})
             add_executable(test_mcp_block_worker tests/test_mcp_block_worker.c tools/mcp_worker.c)
             target_link_libraries(test_mcp_block_worker PRIVATE yan_mcp_protocol yan_block_query
-                                  yan_semantic_llama yan_semantic_json yyjson::yyjson
-                                  unity::framework)
+                                  yan_mcp_graph yan_semantic_llama yan_semantic_json
+                                  yyjson::yyjson unity::framework)
             target_compile_options(test_mcp_block_worker PRIVATE ${YAN_WARNINGS})
             add_test(NAME mcp_block_worker COMMAND test_mcp_block_worker)
             set_tests_properties(mcp_block_worker PROPERTIES TIMEOUT 30)
@@ -467,6 +484,17 @@ if(BUILD_TESTING)
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_fake_runner.py")
             set_tests_properties(mcp_sdk PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77
                 LABELS "0035-R2-AC1;0035-R12-AC1")
+            # 0045 R2: the official-SDK chain, registered only where a pinned
+            # mcp==2.3.0 interpreter is configured. It is the AC that the two
+            # tools can be discovered and called by a real client and that the
+            # provenance they publish reads back the same bytes and lines.
+            if(YAN_MCP_SDK_PYTHON)
+                add_test(NAME mcp_graph_sdk COMMAND "${_mcp_sdk_python}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_graph_sdk_check.py"
+                    $<TARGET_FILE:yan_mcp>)
+                set_tests_properties(mcp_graph_sdk PROPERTIES TIMEOUT 300
+                    LABELS "0045-R2-AC4")
+            endif()
             add_test(NAME mcp_stdio COMMAND "${Python3_EXECUTABLE}" -B
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_checks.py"
                 $<TARGET_FILE:yan_mcp> $<TARGET_FILE:yan_semantic>
@@ -479,9 +507,10 @@ if(BUILD_TESTING)
             target_compile_definitions(mcp_fault_probe PRIVATE _exit=yan_mcp_test_exit
                 clock_gettime=yan_mcp_test_clock_gettime)
             target_link_libraries(mcp_fault_probe PRIVATE yan_mcp_protocol yan_semantic_posix
-                                  yan_block_query yan_semantic_llama yan_semantic_json
-                                  yyjson::yyjson)
+                                  yan_block_query yan_mcp_graph yan_semantic_llama
+                                  yan_semantic_json yyjson::yyjson)
             target_link_options(mcp_fault_probe PRIVATE -Wl,--wrap=yan_semantic_posix_cleanup
+                                -Wl,--wrap=yan_kg_query_json
                                 -Wl,--wrap=yan_semantic_llama_stop -Wl,--wrap=calloc
                                 -Wl,--wrap=write -Wl,--wrap=read -Wl,--wrap=close -Wl,--wrap=fopen -Wl,--wrap=poll)
             target_compile_options(mcp_fault_probe PRIVATE ${YAN_WARNINGS})
@@ -489,6 +518,18 @@ if(BUILD_TESTING)
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_fault_checks.py"
                 $<TARGET_FILE:yan_mcp> $<TARGET_FILE:mcp_fault_probe> $<TARGET_FILE:yan_semantic>
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_fake_runner.py")
+            # 0045 R2: the real stdio graph suite. It drives yan_mcp and the
+            # fault probe (for the deterministic graph hold) and checks the
+            # default list byte-for-byte, the append order, argument rejection
+            # before I/O, every 0044 error token, payload LIMIT from real large
+            # graphs, and BUSY/cancel/EOF/reaping on the graph worker path.
+            add_test(NAME mcp_graph COMMAND "${Python3_EXECUTABLE}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_graph_checks.py"
+                --server $<TARGET_FILE:yan_mcp>
+                --fault $<TARGET_FILE:mcp_fault_probe>
+                --cli $<TARGET_FILE:yan_graph>)
+            set_tests_properties(mcp_graph PROPERTIES TIMEOUT 300
+                LABELS "0045-R2-AC1;0045-R2-AC2;0045-R2-AC3")
             set_tests_properties(mcp_faults PROPERTIES TIMEOUT 120)
             add_test(NAME mcp_mutation_gate COMMAND "${Python3_EXECUTABLE}" -B
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mcp_mutation_gate.py")
@@ -666,6 +707,30 @@ if(BUILD_TESTING)
                                  TIMEOUT 120 LABELS "0044-R1-AC1")
         endif()
 
+        # 0045 R1: the shared query seam that the 0044 command does not
+        # exercise. It builds a real image, then proves expected_source, the
+        # encoded-size cap and cancellation between source callbacks. The
+        # cancellation ordinal is raised through --wrap so the production
+        # library keeps no fault switch; the same target also links the 0029
+        # SHA-256 so the expected digest is recomputed here, not read back.
+        if(TARGET yan_knowledge_graph_query)
+            add_executable(test_knowledge_graph_query
+                           tests/test_knowledge_graph_query.c)
+            target_link_libraries(test_knowledge_graph_query
+                                  PRIVATE yan_knowledge_graph_query yan_fs
+                                          unity::framework)
+            target_link_options(test_knowledge_graph_query PRIVATE
+                                -Wl,--wrap=yan_semantic_posix_bind_source
+                                -Wl,--wrap=yan_semantic_posix_open_image_ex
+                                -Wl,--wrap=realloc)
+            target_compile_options(test_knowledge_graph_query
+                                   PRIVATE ${YAN_WARNINGS})
+            add_test(NAME knowledge_graph_query
+                     COMMAND test_knowledge_graph_query)
+            set_tests_properties(knowledge_graph_query PROPERTIES
+                                 TIMEOUT 120 LABELS "0045-R1")
+        endif()
+
         # 0033 Task B: focused native query/paging suite and independent oracle.
         add_executable(test_block_query tests/test_block_query.c)
         target_link_libraries(test_block_query PRIVATE yan_block_query unity::framework)
@@ -681,7 +746,7 @@ if(BUILD_TESTING)
             add_executable(yan_graph_fault_probe tools/yan_graph.c
                            tests/yan_graph_fault.c)
             target_link_libraries(yan_graph_fault_probe PRIVATE
-                                  yan_knowledge_graph yan_semantic_posix)
+                                  yan_knowledge_graph_query)
             target_link_options(yan_graph_fault_probe PRIVATE
                                 -Wl,--wrap=yan_semantic_source_digest
                                 -Wl,--wrap=yan_semantic_posix_cleanup)

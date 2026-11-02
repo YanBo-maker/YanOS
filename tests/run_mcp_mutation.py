@@ -24,6 +24,13 @@ REQUIRED = (
     'os/note_metadata_format.h', 'os/search_text.c', 'os/search_text.h',
     'os/note_metadata_format_internal.h',
     'host/block_query.c', 'host/block_query.h', 'tools/semantic_json.h',
+    # 0045 R2: mcp_protocol.c/mcp_worker.c now reference the graph tools, so the
+    # graph module and the shared R1 query service are inputs of every variant
+    # that compiles them. A missing one is a hard harness failure, never a
+    # silently different baseline.
+    'tools/mcp_graph.c', 'tools/mcp_graph.h',
+    'host/knowledge_graph_query.c', 'host/knowledge_graph_query.h',
+    'host/knowledge_graph.c', 'host/knowledge_graph.h',
     'tests/test_mcp_protocol.c', 'tests/test_block_query.c',
     'tests/test_mcp_block_worker.c', 'tests/block_query_probe.c',
     'tests/block_page_oracle.py', 'tests/mcp_fault_checks.py', 'tests/mcp_checks.py',
@@ -45,7 +52,12 @@ BUILD_REQUIRED = (
     'libyan_search_text.a', 'libyan_fs.a', 'libyan_semantic_core.a',
     'libyan_semantic_corpus.a', 'libyan_note_format.a',
     'libyan_mcp_note.a', 'libyan_note_write.a',
-    'libyan_mcp_meta.a', 'libyan_note.a')
+    'libyan_mcp_meta.a', 'libyan_note.a',
+    # 0045 R2: the three archives the graph branch links. Without them the
+    # native protocol/worker relink fails on yan_mcp_graph_*, so they are
+    # required inputs rather than optional extras.
+    'libyan_mcp_graph.a', 'libyan_knowledge_graph_query.a',
+    'libyan_knowledge_graph.a')
 SUITE_INPUTS = {
     'mcp_protocol': ('tools/mcp_protocol.c', 'host/semantic_text.c',
                      'host/semantic_sha256.c', 'tools/mcp_worker.c'),
@@ -204,8 +216,16 @@ def main():
         results = {}
         native_libs = []
         if {'mcp_protocol', 'mcp_block_worker'} & wanted:
+            # Static link order matters: the graph tool archive is the one the
+            # protocol/worker objects reference directly, it needs the shared
+            # query service, and that service needs the graph core. All three go
+            # ahead of the posix/semantic dependency chain that follows, so a
+            # single left-to-right pass resolves every symbol.
             native_libs = [args.build/n for n in (
-                'libyan_block_query.a', 'libyan_semantic_llama.a', 'libyan_semantic_json.a')]
+                'libyan_mcp_graph.a', 'libyan_knowledge_graph_query.a',
+                'libyan_knowledge_graph.a',
+                'libyan_block_query.a', 'libyan_semantic_llama.a',
+                'libyan_semantic_json.a')]
             native_libs += [args.yyjson_lib, unity,
                 args.build/'libyan_mcp_note.a', args.build/'libyan_note_write.a',
                 args.build/'libyan_mcp_meta.a', args.build/'libyan_note.a',

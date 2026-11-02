@@ -1,4 +1,6 @@
 #include "mcp_protocol.h"
+#include "knowledge_graph.h"
+#include "mcp_graph.h"
 #include "mcp_meta.h"
 #include "mcp_note.h"
 #include "note_blocks_format.h"
@@ -272,6 +274,33 @@ static bool list_arguments(YanMcpRequest *r,yyjson_val *args)
     }
     return true;
 }
+/* 0045 R2 graph arguments. Both tools accept an optional expected_source and
+ * nothing else; yanos_graph_query additionally requires the query text, which
+ * must satisfy the same 1..256-byte single-line qualification the 0044 command
+ * applies, so the two callers accept exactly the same texts. Unknown fields are
+ * INVALID here, before any source I/O. An absent or empty arguments object is
+ * valid for the list tool: nothing needs to be supplied to list everything. */
+static bool graph_arguments(YanMcpRequest *r,yyjson_val *args,bool need_query)
+{
+    if (!fields(args,need_query?"query":NULL,"expected_source",NULL))
+        return false;
+    if (need_query) {
+        yyjson_val *query=yyjson_obj_get(args,"query");
+        if (!yyjson_is_str(query)) return false;
+        size_t length=yyjson_get_len(query);
+        const char *text=yyjson_get_str(query);
+        if (length==0 || length>YAN_KG_QUERY_MAX || memchr(text,0,length))
+            return false;
+        if (!yan_semantic_query_valid((const uint8_t *)text,length)) return false;
+        memcpy(r->query,text,length); r->query[length]=0;
+    }
+    yyjson_val *expected=yyjson_obj_get(args,"expected_source");
+    if (expected) {
+        if (!expected_value(expected,r->expected_source)) return false;
+        r->has_expected_source=true;
+    }
+    return true;
+}
 static bool note_arguments(YanMcpRequest *r,yyjson_val *args)
 {
     if (!yyjson_is_obj(args) ||
@@ -300,6 +329,7 @@ void yan_mcp_parse(const char *text,size_t length,YanMcpSession *session,
     memset(r,0,sizeof *r); protocol_error(r,-32700);
     r->allow_write=session->allow_write;
     r->allow_meta=session->allow_meta;
+    r->allow_graph=session->allow_graph;
     if (!text || !bounded(text,length)) return;
     yyjson_doc *doc=yyjson_read_opts((char *)text,length,0,allocator,NULL);
     if (!doc) return;
@@ -370,8 +400,15 @@ void yan_mcp_parse(const char *text,size_t length,YanMcpSession *session,
          * (0035-R1-AC1, 0035-R12-AC1). Both metadata tools share the flag. */
         bool meta=r->allow_meta && string_is(name,"yanos_note_meta");
         bool meta_list=r->allow_meta && string_is(name,"yanos_note_list");
+        /* 0045 R2: gated exactly like --allow-meta. A disabled graph tool name
+         * stays an unknown tool, which is the existing -32601 protocol error,
+         * so the disabled surface is indistinguishable from a tool that does
+         * not exist. */
+        bool graph_list=r->allow_graph && string_is(name,"yanos_graph_list");
+        bool graph_query=r->allow_graph && string_is(name,"yanos_graph_query");
         if (!search && !status && !list && !read && !refs && !backlinks &&
-            note==YAN_NOTE_TOOL_NONE && !meta && !meta_list) goto done;
+            note==YAN_NOTE_TOOL_NONE && !meta && !meta_list && !graph_list &&
+            !graph_query) goto done;
         r->kind=YAN_MCP_TOOL_ERROR; r->error=0;
         if (status) { if (!args || yyjson_obj_size(args)==0) r->kind=YAN_MCP_STATUS; }
         else if (search) {
@@ -386,6 +423,19 @@ void yan_mcp_parse(const char *text,size_t length,YanMcpSession *session,
         } else if (meta_list) {
             if (!args || !list_arguments(r,args)) goto done;
             r->kind=YAN_MCP_NOTE_LIST;
+        } else if (graph_list || graph_query) {
+            /* Arguments are validated here, before any source I/O: a bad
+             * query byte, an unknown field, a malformed identity or a missing
+             * required field is INVALID with no image work. An omitted
+             * arguments object is treated as the empty object, which the list
+             * tool accepts. */
+            if (graph_query) {
+                if (!args || !graph_arguments(r,args,true)) goto done;
+                r->kind=YAN_MCP_GRAPH_QUERY;
+            } else {
+                if (args && !graph_arguments(r,args,false)) goto done;
+                r->kind=YAN_MCP_GRAPH_LIST;
+            }
         } else if (list || refs) {
             if (!args || !block_arguments(r,args,false,false)) goto done;
             r->kind=list ? YAN_MCP_BLOCK_LIST : YAN_MCP_BLOCK_REFS;
@@ -417,7 +467,8 @@ static const char *const tools_json_parts[] = {
     "\"name\":\"yanos_block_refs\",\"description\":\"Read-only references in source byte order, first 20 plus the full occurrence count, with target names/IDs and existence state.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\"],\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"expected_source\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"}}},\"outputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schema_version\",\"operation\",\"source_sha256\",\"name\",\"total\",\"shown\",\"refs\"],\"properties\":{\"schema_version\":{\"const\":1},\"operation\":{\"const\":\"block_refs\"},\"source_sha256\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"},\"name\":{\"type\":\"string\"},\"total\":{\"type\":\"integer\",\"minimum\":0},\"shown\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":20},\"refs\":{\"type\":\"array\",\"maxItems\":20,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"source\",\"block_id\",\"line\",\"start\",\"end\",\"target\",\"state\"],\"properties\":{\"source\":{\"type\":\"string\"},\"block_id\":{\"type\":[\"string\",\"null\"]},\"line\":{\"type\":\"integer\",\"minimum\":0},\"start\":{\"type\":\"integer\",\"minimum\":0},\"end\":{\"type\":\"integer\",\"minimum\":0},\"target\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\",\"id\"],\"properties\":{\"name\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}}},\"state\":{\"enum\":[\"OK\",\"DANGLING_FILE\",\"DANGLING_BLOCK\"]}}}}}},\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,\"idempotentHint\":true,\"openWorldHint\":false}},{",
     "\"name\":\"yanos_block_backlinks\",\"description\":\"Read-only occurrences of one target address across ASCII-ordered files, first 20 plus total, skipped non-text files and target state.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\",\"block_id\"],\"properties\":{\"name\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"block_id\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":31},\"expected_source\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"}}},\"outputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schema_version\",\"operation\",\"source_sha256\",\"name\",\"block_id\",\"total\",\"shown\",\"skipped\",\"target_state\",\"backlinks\"],\"properties\":{\"schema_version\":{\"const\":1},\"operation\":{\"const\":\"block_backlinks\"},\"source_sha256\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"},\"name\":{\"type\":\"string\"},\"block_id\":{\"type\":\"string\"},\"total\":{\"type\":\"integer\",\"minimum\":0},\"shown\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":20},\"skipped\":{\"type\":\"integer\",\"minimum\":0},\"target_state\":{\"enum\":[\"OK\",\"DANGLING_FILE\",\"DANGLING_BLOCK\"]},\"backlinks\":{\"type\":\"array\",\"maxItems\":20,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"source\",\"block_id\",\"line\",\"start\",\"end\"],\"properties\":{\"source\":{\"type\":\"string\"},\"block_id\":{\"type\":[\"string\",\"null\"]},\"line\":{\"type\":\"integer\",\"minimum\":0},\"start\":{\"type\":\"integer\",\"minimum\":0},\"end\":{\"type\":\"integer\",\"minimum\":0}}}}}},\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,\"idempotentHint\":true,\"openWorldHint\":false}}",
 };
-static char *tools_json_join(bool allow_write,bool allow_meta,size_t *length)
+static char *tools_json_join(bool allow_write,bool allow_meta,bool allow_graph,
+                            size_t *length)
 {
     unsigned notes=allow_write ? yan_mcp_note_tool_count() : 0;
     /* tools_json_parts is the always-on 0033 six-tool array and must not gain
@@ -430,6 +481,13 @@ static char *tools_json_join(bool allow_write,bool allow_meta,size_t *length)
      * add its own byte count to `total` -- forgetting one under-allocates and
      * overruns the buffer. */
     bool meta=allow_meta;
+    /* 0045 R2: the two graph tools are appended after every previously enabled
+     * tool, in the fixed order graph_list then graph_query, so no existing
+     * tool's position or content changes. Each enabled branch adds its own
+     * exact byte count here; forgetting one under-allocates. */
+    const char *graph_list=allow_graph ? yan_mcp_graph_list_tool_json() : NULL;
+    const char *graph_query=allow_graph ? yan_mcp_graph_query_tool_json() : NULL;
+    if (allow_graph && (!graph_list || !graph_query)) { *length=0; return NULL; }
     size_t total=2;
     for (unsigned i=0;i<sizeof tools_json_parts/sizeof *tools_json_parts;++i)
         total+=strlen(tools_json_parts[i]);
@@ -437,6 +495,8 @@ static char *tools_json_join(bool allow_write,bool allow_meta,size_t *length)
     if (meta) total+=1+strlen(yan_mcp_note_list_tool_json());
     for (unsigned i=0;i<notes;++i)
         total+=1+strlen(yan_mcp_note_tool_json(i));
+    if (graph_list) total+=1+strlen(graph_list);
+    if (graph_query) total+=1+strlen(graph_query);
     char *text=malloc(total+1);
     if (!text) { *length=0; return NULL; }
     size_t at=0;
@@ -458,6 +518,14 @@ static char *tools_json_join(bool allow_write,bool allow_meta,size_t *length)
         const char *tool=yan_mcp_note_tool_json(i);
         size_t n=strlen(tool);
         text[at++]=','; memcpy(text+at,tool,n); at+=n;
+    }
+    if (graph_list) {
+        size_t n=strlen(graph_list);
+        text[at++]=','; memcpy(text+at,graph_list,n); at+=n;
+    }
+    if (graph_query) {
+        size_t n=strlen(graph_query);
+        text[at++]=','; memcpy(text+at,graph_query,n); at+=n;
     }
     text[at++]=']'; text[at++]='}';
     text[at]=0; *length=at; return text;
@@ -504,7 +572,8 @@ YanMcpReplyStatus yan_mcp_reply_ex(const YanMcpRequest *r,const char *payload,si
             body=copy_json(doc,discover,sizeof discover-1,a);
         } else if (r->kind==YAN_MCP_LIST) {
             size_t tools_length=0;
-            char *tools=tools_json_join(r->allow_write,r->allow_meta,&tools_length);
+            char *tools=tools_json_join(r->allow_write,r->allow_meta,
+                                        r->allow_graph,&tools_length);
             if (tools) body=copy_json(doc,tools,tools_length,a);
             free(tools);
         } else if (r->kind==YAN_MCP_PING) body=yyjson_mut_obj(doc);

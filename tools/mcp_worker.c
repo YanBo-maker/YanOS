@@ -1,8 +1,10 @@
 #include "mcp_worker.h"
+#include "mcp_graph.h"
 #include "mcp_meta.h"
 #include "semantic_json.h"
 #include "semantic_posix.h"
 #include "semantic_llama.h"
+#include "knowledge_graph.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -270,7 +272,8 @@ bool yan_mcp_worker_frame_valid(const YanMcpWorkerHeader *header,size_t received
     if (!header || header->length>YAN_MCP_OUTPUT_MAX) return false;
     if (received_bytes!=sizeof *header+header->length) return false;
     if (header->domain!=YAN_MCP_DOMAIN_SEMANTIC && header->domain!=YAN_MCP_DOMAIN_BLOCK
-        && header->domain!=YAN_MCP_DOMAIN_META)
+        && header->domain!=YAN_MCP_DOMAIN_META
+        && header->domain!=YAN_MCP_DOMAIN_GRAPH)
         return false;
     if (header->result==0) return header->length>0;
     if (header->length!=0) return false;
@@ -278,6 +281,8 @@ bool yan_mcp_worker_frame_valid(const YanMcpWorkerHeader *header,size_t received
         return header->result<=YAN_SEMANTIC_NOT_FOUND;
     if (header->domain==YAN_MCP_DOMAIN_META)
         return header->result<=YAN_MCP_META_IO;
+    if (header->domain==YAN_MCP_DOMAIN_GRAPH)
+        return header->result<=YAN_KG_PROTOCOL;
     return header->result<=YAN_BLOCK_QUERY_UNSUPPORTED;
 }
 const char *yan_mcp_worker_token(const YanMcpWorkerHeader *header)
@@ -294,6 +299,12 @@ const char *yan_mcp_worker_token(const YanMcpWorkerHeader *header)
         if (header->result==0) return NULL;
         if (header->result<=YAN_MCP_META_IO)
             return yan_mcp_meta_result_name((YanMcpMetaResult)header->result);
+        return "IO";
+    }
+    if (header->domain==YAN_MCP_DOMAIN_GRAPH) {
+        if (header->result==0) return NULL;
+        if (header->result<=YAN_KG_PROTOCOL)
+            return yan_mcp_graph_result_name((YanKgResult)header->result);
         return "IO";
     }
     if (header->result==0) return NULL;
@@ -319,6 +330,20 @@ YanMcpWorkerResult yan_mcp_execute(const YanMcpOptions *options,
         result.result=(uint32_t)yan_mcp_note_list_execute(options->image,
             request->tag,request->tag_length,request->tag_count,
             expected,payload,length);
+    } else if (request->kind==YAN_MCP_GRAPH_LIST ||
+               request->kind==YAN_MCP_GRAPH_QUERY) {
+        /* 0045 R2: an explicit graph branch before the semantic default, so a
+         * graph request can never be served by the model/index path. The
+         * payload limit is applied inside the shared service, which reports
+         * LIMIT instead of a truncated success. */
+        result.domain=YAN_MCP_DOMAIN_GRAPH;
+        const uint8_t *expected=request->has_expected_source ?
+            request->expected_source : NULL;
+        result.result=(uint32_t)yan_mcp_graph_execute(options->image,
+            request->kind==YAN_MCP_GRAPH_QUERY ? YAN_KG_QUERY_LOOKUP
+                                               : YAN_KG_QUERY_LIST,
+            request->query,(uint32_t)strlen(request->query),expected,cancel,
+            payload,length);
     } else if (request->kind==YAN_MCP_BLOCK_LIST || request->kind==YAN_MCP_BLOCK_READ ||
         request->kind==YAN_MCP_BLOCK_REFS || request->kind==YAN_MCP_BLOCK_BACKLINKS) {
         result.domain=YAN_MCP_DOMAIN_BLOCK;
