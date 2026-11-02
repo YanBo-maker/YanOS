@@ -944,3 +944,10 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 上一阶段「用法入口与平台覆盖说明收尾」已随[PR #100](https://github.com/YanBo-maker/YanOS/pull/100)以`2233ea8`合入main；其合入前验证已核对，合入后的[主线CI](https://github.com/YanBo-maker/YanOS/actions/runs/40892892526)已由Actions API确认通过。0035、0036、0041整体仍为Approved，0040为Implemented；学习理解程度由项目所有者判断。
 
 <!-- 0042阶段切换：以上为上一当前阶段的原文快照。 -->
+
+
+## 2026-11-02：0042规格锁定时的当前阶段快照
+
+0042 持续文档结构检查：按[0006决策](decisions/0006-continuous-doc-invariants.md)把 STATUS 字节上限及规格索引行数接入默认测试，规则见[0042](specs/0042-continuous-doc-invariants.md)。已有候选实现与定向验证，当前规格为 Approved；独立审核与本阶段交付仍在进行。只做两项结构测量，链接、状态和逐文件对应仍由文档审核判断，前端保持预留。
+
+<!-- 0042本地实现：以上保留规格锁定时的当前段落。 -->

@@ -42,4 +42,4 @@
 | [0036](0036-yanfs-multi-block-directory.md) | YanFS 多块目录 | Approved | 无整份替代；局部扩展见规格头 | 无 |
 | [0040](0040-4095-file-performance.md) | 4095 文件性能验收与局部优化 | Implemented | 承接0036的4095性能验收；澄清0032的有效块结果范围 | 无 |
 | [0041](0041-note-meta-mcp-tool.md) | 笔记元数据的 MCP 只读工具 | Approved | 无整份替代；扩展 0033/0035 的工具集合与启动开关面 | 无 |
-| [0042](0042-continuous-doc-invariants.md) | 持续文档结构检查 | Approved | 承接0034的两项文档不变量；历史阶段边界保留 | 无 |
+| [0042](0042-continuous-doc-invariants.md) | 持续文档结构检查 | Implemented | 承接0034的两项文档不变量；历史阶段边界保留 | 无 |

@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-0042 持续文档结构检查：按[0006决策](decisions/0006-continuous-doc-invariants.md)把 STATUS 字节上限及规格索引行数接入默认测试，规则见[0042](specs/0042-continuous-doc-invariants.md)。已有候选实现与定向验证，当前规格为 Approved；独立审核与本阶段交付仍在进行。只做两项结构测量，链接、状态和逐文件对应仍由文档审核判断，前端保持预留。
+0042 持续文档结构检查已本地实现：Python可用时，默认测试检查 STATUS 字节预算和规格索引行数，保持合法0002占位与多字节边界行为。[0042](specs/0042-continuous-doc-invariants.md)定义范围、错误与验收；本机定向验证及独立对齐的原始记录随阶段PR提供，完整远端CI与合入记录由该PR绑定的精确提交承载。本检查不解析链接、状态或逐文件对应，不代替语义审核，前端保持预留。
 
 ## 已交付能力
 
@@ -63,6 +63,8 @@
 - 0036 R1已归并格式化参数校验，并补充边界、前导零和错误路径的CLI验收；已随[PR #98](https://github.com/YanBo-maker/YanOS/pull/98)合入main（`55069e9`），原有使用方式保持。[验证记录](specs/0036-yanfs-multi-block-directory.md#r1-issue-63格式化参数校验归并2026-10-29)
 
 - 0041 元数据的 MCP 只读面：`yanos_note_meta` 返回一篇笔记的 title/created/modified/tag/link 与 `has_header`，`yanos_note_list` 返回全库名单并支持 tag AND 筛选（沿 0027:83 全库预检），两者都由 `--allow-meta` 单独开启、与 `--allow-write` 正交；默认态与 0033 六工具逐字节相同。已随[PR #109](https://github.com/YanBo-maker/YanOS/pull/109)（`b994150`）与[PR #113](https://github.com/YanBo-maker/YanOS/pull/113)合入main。[0041](specs/0041-note-meta-mcp-tool.md)，[决策 0005](decisions/0005-note-meta-mcp-tool.md)
+
+- 0042 持续文档结构检查。[0042](specs/0042-continuous-doc-invariants.md)，实现提交[`a5e6f4d`](https://github.com/YanBo-maker/YanOS/commit/a5e6f4d618ba7891834445e6dacdbc34ee8bd898)。
 
 ## 覆盖边界
 
