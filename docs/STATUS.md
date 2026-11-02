@@ -2,11 +2,11 @@
 
 ## 当前阶段
 
-0043 性能验收归并已完成本机实现与定向验证：统一首轮矩阵和4095独立复轮，保留生产建盘、原预算与完整证据。总审核已补齐独立审核指出的文档遗漏；复核结论与远端交付以本阶段PR为准。[规格与验收](specs/0043-performance-validation-dedup.md)。前阶段[PR #188](https://github.com/YanBo-maker/YanOS/pull/188)已合入，前端保持预留。
+0043 性能验收归并已随[PR #189](https://github.com/YanBo-maker/YanOS/pull/189)合入main（`148c71f`）：默认统一首轮矩阵与4095独立复轮，生产建盘、原预算和完整证据保持。独立dsh、总审核及精确提交远端验收已完成；明细见[0043 VERIFY](specs/0043-performance-validation-dedup.md#verify-执行记录)与阶段PR。前端保持预留。
 
 ## 已交付能力
 
-- 0043 性能验收归并：默认单一实际入口，保留生产建盘、独立复轮及完整预算判据；本机候选已完成，远端发布待验。[0043](specs/0043-performance-validation-dedup.md)
+- 0043 性能验收归并：默认单一实际入口，保留生产建盘、独立复轮及完整预算判据；已随[PR #189](https://github.com/YanBo-maker/YanOS/pull/189)合入main。[0043](specs/0043-performance-validation-dedup.md)
 - 0001 项目说明与开发流程。[0001](specs/0001-project-foundation.md)，[PR #1](https://github.com/YanBo-maker/YanOS/pull/1)（5918c0d）
 - 0003 Machine、Bus 与 RAM。[0003](specs/0003-machine-bus-ram.md)，[PR #3](https://github.com/YanBo-maker/YanOS/pull/3)（d3649a6）
 - 0004 CPU 状态与取指。[0004](specs/0004-cpu-state-fetch.md)，[PR #4](https://github.com/YanBo-maker/YanOS/pull/4)（1496681）
