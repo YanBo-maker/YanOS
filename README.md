@@ -365,6 +365,8 @@ Guest 程序使用 C 和少量 RISC-V 汇编。CPU 经 Bus 访问 RAM 与虚拟�
 
 代码按职责分区：Host侧`src/`与`include/`负责CPU、Bus与设备，`host/`负责检索核心、索引与只读来源适配，`tools/`负责Host CLI和MCP服务；Guest侧`os/`负责驱动、运行时与YanFS，`apps/`为Guest生产应用，`tests/`负责验证。依赖方向为`apps/` → `os/`，生产应用与`os/`不引用`tests/`；测试可以引用生产层。旧控制台分层约束见[0017](docs/specs/0017-console-and-os-layout.md)，独立应用入口见[0022](docs/specs/0022-terminal-file-operations.md)。
 
+默认的[分层检查器](tests/layering_gate.py)只扫描 `os/` 中的单行字面 include，并按区分大小写的 `tests/` 路径段匹配；`Tests/` 等写法、反斜杠续行、宏及间接依赖不在检测范围内；同一行内以反斜杠书写的路径仍会归一后匹配。检查通过不证明这些依赖不存在，单向依赖约束仍须遵守。
+
 各组件的完整能力将分阶段实现。浏览器支持计划通过 WebAssembly 和界面适配接入；新增能力的时机由实际使用决定。
 
 ## 开发
