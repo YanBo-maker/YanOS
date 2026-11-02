@@ -2,9 +2,7 @@
 
 ## 当前阶段
 
-0041 笔记元数据的 MCP 只读面：新增两个只读工具，同由独立开关 `--allow-meta` 门控、与 `--allow-write` 正交，补齐 [0027](specs/0027-note-metadata.md) 缺失的 MCP 用户面。`yanos_note_meta` 返回单文件 title/created/modified/tag/link（含 OK/MISSING）与 `has_header`，只校验目标头、不预检正文，无头旧文件与二进制正文照常观察；`yanos_note_list` 提供全库名单与 tag AND 筛选，沿 0027:83 全库预检，任一坏头即 METADATA 且不出半份名单。默认态仍与 0033 六工具逐字节相同，`serverInfo.version` 保持 `0035`。已分别随[PR #109](https://github.com/YanBo-maker/YanOS/pull/109)（`b994150`）与[PR #113](https://github.com/YanBo-maker/YanOS/pull/113)合入 main。
-
-上一阶段「用法入口与平台覆盖说明收尾」已随[PR #100](https://github.com/YanBo-maker/YanOS/pull/100)以`2233ea8`合入main；其合入前验证已核对，合入后的[主线CI](https://github.com/YanBo-maker/YanOS/actions/runs/40892892526)已由Actions API确认通过。0035、0036、0041整体仍为Approved，0040为Implemented；学习理解程度由项目所有者判断。
+0042 持续文档结构检查已本地实现：Python可用时，默认测试检查 STATUS 字节预算和规格索引行数，保持合法0002占位与多字节边界行为。[0042](specs/0042-continuous-doc-invariants.md)定义范围、错误与验收；本机定向验证及独立对齐的原始记录随阶段PR提供，完整远端CI与合入记录由该PR绑定的精确提交承载。本检查不解析链接、状态或逐文件对应，不代替语义审核，前端保持预留。
 
 ## 已交付能力
 
@@ -66,6 +64,8 @@
 
 - 0041 元数据的 MCP 只读面：`yanos_note_meta` 返回一篇笔记的 title/created/modified/tag/link 与 `has_header`，`yanos_note_list` 返回全库名单并支持 tag AND 筛选（沿 0027:83 全库预检），两者都由 `--allow-meta` 单独开启、与 `--allow-write` 正交；默认态与 0033 六工具逐字节相同。已随[PR #109](https://github.com/YanBo-maker/YanOS/pull/109)（`b994150`）与[PR #113](https://github.com/YanBo-maker/YanOS/pull/113)合入main。[0041](specs/0041-note-meta-mcp-tool.md)，[决策 0005](decisions/0005-note-meta-mcp-tool.md)
 
+- 0042 持续文档结构检查。[0042](specs/0042-continuous-doc-invariants.md)，实现提交[`a5e6f4d`](https://github.com/YanBo-maker/YanOS/commit/a5e6f4d618ba7891834445e6dacdbc34ee8bd898)。
+
 ## 覆盖边界
 
 - 迁移故障符号检查只核对当前链接声明、包装定义与正常CLI动态导入的对应关系，不能证明每个调用点均被拦截；实际注入标记和数据oracle仍负责行为验收。自定义编译选项改变调用符号时需重新核对覆盖，映射不匹配不表示产品不能运行。
@@ -80,6 +80,7 @@
 
 - MCP服务及语义工具的运行平台为Linux/WSL。Windows原生构建不提供 `yan_mcp`，不运行 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk`；它运行的 `mcp_write_docs` 是纯Python检查器自测，不构成MCP服务运行验收。此边界沿用[0035](specs/0035-agent-writable-knowledge.md)，对应[Issue #57](https://github.com/YanBo-maker/YanOS/issues/57)的“明确Linux覆盖”选项；Windows原生支持仍需独立规格与实现。
 
+- Python可用时，默认 CTest 的 `docs_structure` 与控制用例检查[0042](specs/0042-continuous-doc-invariants.md)两项文档结构不变量；只测字节和数据行数，不代替链接、状态或语义审核。
 - CI 矩阵与失败条件见 `.github/workflows/build.yml`：ubuntu-22.04 Debug+ASan、ubuntu-22.04 Release 安装 `gcc-riscv64-linux-gnu` 并打开 `YAN_BUILD_TOOLS`；工具链缺失、Guest 测试未注册、或 CTest 汇总列出 `(Skipped)` 测试时 Linux 任务失败。windows-2022 Debug 不装该工具链，也不跑 Guest 测试。
 - 外部验证层仍不在 CI：NEMU 差分（`difftest_*`）、官方 riscv-tests、Sail 签名、ACT4。依赖缺失时这些测试不注册，或按原脚本返回 SKIP，不记为通过。历史测量在归档的「外部验证层」。
 - 差分比较 PC、32 个通用寄存器和结束时的整段 RAM。归档记录的 NEMU riscv32 参考状态没有 CSR，因此 trap、MRET 与中断语义不在差分范围内；`yan_difftest` 不连接 CLINT / PLIC。`yan_run` 映射四个设备窗口并每条指令推进一次 `mtime`。
