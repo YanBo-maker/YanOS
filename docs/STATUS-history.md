@@ -999,3 +999,11 @@ Issue #179 的分层检查范围说明已本地完成：[检查器](../tests/lay
 0044概念与命题图已完成本地实现与回归：显式概念、类型化关系和具名块原文可经独立Host C接口与JSON命令读取。审核修补及验收结论见[0044 VERIFY](specs/0044-evidence-knowledge-graph.md#verify-执行记录)；未发布、未运行本阶段远端CI、未合入main。前端和新增MCP工具不在本阶段范围。
 
 **测量caveat**：0044本机早期完整Linux、Windows与既有17组变异分别对应不同源码冻结；修后图定向证据不作全量重跑。精确发布head的远端完整结果后来补齐，明细只记0044 VERIFY，不把本地或旧阶段的测量并成一次执行。
+
+## 0044 当前阶段归档（2026-11-03，开始0045）
+
+0044显式知识图已随[PR #193](https://github.com/YanBo-maker/YanOS/pull/193)合入main（`ed36131`）：提供可重建的概念、别名、命题及原文出处，供Agent通过Host C接口和Linux/WSL JSON命令读取。[规格与验收](specs/0044-evidence-knowledge-graph.md#verify-执行记录)。前端与新增MCP图工具留待后续阶段。
+
+## 2026-11-03：0045本地验收收口前
+
+0045 MCP图工具进入验收：共享图查询服务接入可选只读工具，可按来源身份读取命题原文。[规格与验收](specs/0045-graph-mcp-tools.md#verify-执行记录)。独立审核和本阶段远端CI尚待完成，未交付主线；前端保持预留。

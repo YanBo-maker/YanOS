@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-0044显式知识图已随[PR #193](https://github.com/YanBo-maker/YanOS/pull/193)合入main（`ed36131`）：提供可重建的概念、别名、命题及原文出处，供Agent通过Host C接口和Linux/WSL JSON命令读取。[规格与验收](specs/0044-evidence-knowledge-graph.md#verify-执行记录)。前端与新增MCP图工具留待后续阶段。
+0045 MCP图工具已完成本地验收、独立dsh审核与总审：可按来源身份查询显式概念和命题并读取原文。[规格与验收](specs/0045-graph-mcp-tools.md#verify-执行记录)。本阶段发布与远端CI待执行，尚未交付主线；前端保持预留。
 
 ## 已交付能力
 

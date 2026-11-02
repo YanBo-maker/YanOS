@@ -45,3 +45,4 @@
 | [0042](0042-continuous-doc-invariants.md) | 持续文档结构检查 | Implemented | 承接0034的两项文档不变量；历史阶段边界保留 | 无 |
 | [0043](0043-performance-validation-dedup.md) | 归并性能验收执行 | Implemented | 承接0036-R8和0040-R4/R5的默认执行方式 | 无 |
 | [0044](0044-evidence-knowledge-graph.md) | 有原文依据的概念与命题图 | Implemented | 无；扩展0032正文解释 | 无 |
+| [0045](0045-graph-mcp-tools.md) | Agent的只读知识图工具 | Approved | 无；扩展0031/0035可选工具 | 无 |

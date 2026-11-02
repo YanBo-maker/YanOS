@@ -2,7 +2,7 @@
 
 图把笔记中显式记录的概念、关系和原文出处组织起来，供Agent从已有知识解释新内容。笔记内容按项目所有者声明视为已理解知识；图不评估掌握程度。普通正文仍然是知识来源，没有图声明不表示用户不懂。
 
-Host命令和C接口由[0044](specs/0044-evidence-knowledge-graph.md)定义，实施与验收状态见[STATUS](STATUS.md)。图形前端、新增MCP图工具及自动关系抽取不在本阶段范围。
+Host命令和C接口由[0044](specs/0044-evidence-knowledge-graph.md)定义，实施与验收状态见[STATUS](STATUS.md)。图形前端和自动关系抽取保持预留；可选MCP接入由[0045](specs/0045-graph-mcp-tools.md)扩展，交付状态以STATUS为准。
 
 ## 在笔记中记录关系
 
@@ -61,6 +61,24 @@ graph = json.loads(result.stdout)
 取得关系的where后，可用现有`yanos_block_read`读取完整原文：name取where.file，block_id取where.block_id，expected_source取本次graph.source_sha256。长块按[0033分页规则](specs/0033-block-mcp-navigation.md)继续读取；来源变化后重新查询，不把旧出处和新正文拼在一起。现有MCP服务的启动与工具列表保持，参见[接入说明](dsh-mcp-quickstart.md)。
 
 Agent应根据具体命题和原文条件解释，不能因为两个概念都出现，或图里存在一条间接路径，就声称相应关系已经记录。NOT_FOUND只表示没有匹配的显式概念，可继续使用已有全文/语义检索寻找普通正文依据，不能将其翻译成“用户不懂”。
+
+## 通过MCP查询
+
+[0045](specs/0045-graph-mcp-tools.md)在现有`yan_mcp`启动参数中增加`--allow-graph`。默认工具列表保持；启用后追加`yanos_graph_list`和`yanos_graph_query`，与元数据、写工具开关各自独立。沿[接入说明](dsh-mcp-quickstart.md)配置服务，在其args末尾加此开关即可，重启后让客户端重新发现工具。
+
+```json
+{"name":"yanos_graph_list","arguments":{}}
+```
+
+```json
+{"name":"yanos_graph_query","arguments":{"query":"正方形"}}
+```
+
+这两行是tools/call的params对象。list可省arguments，query须提供query；两者都可带64位小写十六进制expected_source。未知字段和非法工具参数返回INVALID；通用请求结构错误沿现有MCP协议处理。成功结果的text JSON与structuredContent相同，沿0044的`version:1`和`operation:list/query`解释；其它工具的schema_version按各自规格解释。
+
+图查询返回where后，仍按前述流程把file、block_id与source_sha256交给`yanos_block_read`。调用过程中来源变化报STALE，须重新查询；没有显式概念为NOT_FOUND，不表示用户不懂。图工具只读镜像，不需要embedding、runner或语义索引，也不启动推理进程。启动时原四个绑定路径仍必填；只用图或块工具时，后三项可以不存在，语义搜索仍需它们的真实依赖。
+
+list和query仍按前述上限显示并给出总数，当前没有MCP图分页参数。别名完整返回；图对象或携带双份JSON的MCP响应超过现有1MiB时返回LIMIT，不截断成成功。每次调用重建内存图，不设跨请求缓存；输入镜像应保持离线稳定。
 
 ## 结果与限制
 
