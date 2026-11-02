@@ -817,6 +817,24 @@ if(BUILD_TESTING)
                              TIMEOUT 120 LABELS "0035-R9-AC1")
     endif()
 
+    # 0034 R6-AC6.1 (docs/STATUS.md <= 16384 bytes) and R9-AC9.6 (index row
+    # count == spec files + 1). Counting only; rows are never resolved.
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME docs_structure
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/docs_structure.py"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(docs_structure PROPERTIES
+                             TIMEOUT 120 LABELS "0034-R6-AC6.1;0034-R9-AC9.6")
+        # Same CLI against throw-away trees: a checker that stopped reporting,
+        # or that passed unusable input, fails here, not as a green gate.
+        add_test(NAME docs_structure_controls
+            COMMAND "${Python3_EXECUTABLE}" -B
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_docs_structure.py")
+        set_tests_properties(docs_structure_controls PROPERTIES
+                             TIMEOUT 120 LABELS "0034-R6-AC6.1;0034-R9-AC9.6")
+    endif()
+
     add_executable(test_ring_copy tests/test_ring_copy.c)
     target_include_directories(test_ring_copy PRIVATE os)
     target_compile_options(test_ring_copy PRIVATE ${YAN_WARNINGS})
