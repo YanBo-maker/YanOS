@@ -1,7 +1,7 @@
 # 0045：Agent的只读知识图工具
 
 - 意图：落实[决策0009](../decisions/0009-graph-agent-access.md)，让现有Agent经MCP查询显式概念和命题，再以同次来源身份读取原文；不评估用户掌握程度。
-- 状态：Approved
+- 状态：Implemented
 - supersedes：无；扩展0031/0035可选工具集合，复用0044图与JSON语义。
 - 成功标准：真实stdio MCP及官方SDK发现、执行两工具，返回与0044同一图/原文；默认列表兼容，来源变化明确失败，无模型读图、取消和资源回收符合现有服务规则。
 
@@ -92,3 +92,13 @@ chief-review.md九项本地总审通过：意图与R/AC追溯、模块边界、�
 本地实施与验证、独立审核已完成；远端CI、PR及主线合入仍未发生，Approved状态保持。当前源码清单需在B1测试追加后另记，先前405项同一身份的三平台验证仅对应其原冻结输入，不把旧清单称为B1后的全部输入身份。
 
 本地实现/测试提交：`471a4163fc3342d442f983dfbcec5010380714b3`；文档独立提交。精确提交的新远端CI待发布后核验。
+
+### 主线交付（取代此前仅本地就绪的当前状态）
+
+PR #196已按本次继续开发与既有自主收口授权以merge commit合入main：`69c170626e4a598e98a62cef47ac3b83c58b0b07`，时间2026-11-02T23:32:59Z。保留阶段提交；此前本地验证与未发布结论按当时事实保留，本段更新当前状态，不回写历史。
+
+精确head `c378417df81bf21aa840b95436981157231b2ea8` 的远端CI运行[41499941334](https://github.com/YanBo-maker/YanOS/actions/runs/41499941334)三项通过：Linux Release默认184/184、完整ASan默认184/184、Windows91/91；默认测试逐名与本地注册集合核对，无汇总跳过。远端仅已有yanfs实际变异组，不冒称全部17组。三份工件的API SHA-256、长度、ZIP CRC及测试原日志已独立校验，临时merge checkout完整树与精确head相同；两Linux合计72项原始性能记录重新执行判据，4095九项仍各≤5000万Guest步。证据remote-ci/verified.json、source-proof.json及工件：[test-evidence-ubuntu-22.04-Debug-sanitizers-ON](https://github.com/YanBo-maker/YanOS/actions/runs/41499941334/artifacts/13170496170)、[test-evidence-ubuntu-22.04-Release-sanitizers-OFF](https://github.com/YanBo-maker/YanOS/actions/runs/41499941334/artifacts/13169445620)、[test-evidence-windows-2022-Debug-sanitizers-OFF](https://github.com/YanBo-maker/YanOS/actions/runs/41499941334/artifacts/13167769160)。
+
+R1非阻塞意见分别关联[Issue #197](https://github.com/YanBo-maker/YanOS/issues/197)、[Issue #198](https://github.com/YanBo-maker/YanOS/issues/198)，不是本阶段未关闭阻塞。合入后的main CI是另一次运行，不借用本段PR CI结论。文档交付分支的新CI另记，不把功能PR验证冒称本分支验证。
+
+交付状态五文档已由原只读dsh完成一次限定事实审核R1，PASS（delivery-doc-review-report.md），并经九项总审核核对。该审核属于源码两轮结束后的独立发布文档PR，不是源码第3轮；只核对真实diff、精确CI工件、merge、原文历史与MONITOR归档。此前VERIFY中的未发布/Approved/待CI句子均是阶段历史，当前以本节已交付事实为准。文档分支自身的新CI仍待执行，不与功能PR混称。
