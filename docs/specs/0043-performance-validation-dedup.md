@@ -46,4 +46,12 @@ runner增加`--repeat-4095`：所选sizes含4095、且既有`--repeat`值为1时
 - 自查发现复轮工具故障被计划校验覆盖成FAIL，原控制确实断言失败（预期HARNESS_ERROR/2，实际FAIL/1）；修复后原控制通过，并增加首轮、复轮、旧模式故障与坏旧复轮输出控制。新参数配合零repeat/非法sizes的退出码也有先红后绿证据。最初`red.log`含mock旧文件名造成的前置失败，保留原文，不把它当作漏轮检出。
 - 原始材料在阶段工作树`build/issue187/`：`red.log`、`controls.log`、`fixes-controls.log`、`final-controls.log`、`windows-controls.log`、`root-harness-priority-{red,green}.log`、`root-cli-preflight-{red,green}.json`、`linux-configure.log`、`linux-build.log`、`linux-registration.json`、`real36.log`、`real36-execution.json`、`local-evidence-verified.json`及真实run子目录。
 - 独立只读dsh R1完整读取19份有界材料，工具结果无截断；再次只读复核原始36次证据，没有新增Guest执行。实现无阻塞；发现STATUS缺本阶段能力条目，已由总审核补齐并同步覆盖边界。测试标签误称OSError只修文字，不改变执行或断言；旧模式单行状态可读性建议另跟踪，完整计划/顶层失败仍准确，镜像逐次完整oracle验证保持。正式审核限两轮：R1完整审核，R2仅核对修订与最终文档，最终结论由阶段PR及`dsh-r{1,2}-review.md`承载；本机27项控制与36次真实执行对应原冻结，后续仅改测试注释和失败标签，三项运行源码哈希未变，不冒称重新执行。
-- 当前远端CI尚未运行；最终精确提交的完整回归、artifact与合入事实由本阶段PR承载，不能以前阶段PR188或本机结果替代。合入后归档MONITOR_REPORT的SHA留在仓库外阶段交付材料。
+- **本地交付时快照，已由下列远端记录更新**：当时远端CI尚未运行；最终精确提交的完整回归、artifact与合入事实由本阶段PR承载，不能以前阶段PR188或本机结果替代。合入后归档MONITOR_REPORT的SHA留在仓库外阶段交付材料。
+
+### 精确提交远端验收与合入
+
+2026-11-02，[PR #189](https://github.com/YanBo-maker/YanOS/pull/189)最终head `c234dbe2bf4c4199717bfd3e35400f3fd870f44c`完成[Actions 41400800673](https://github.com/YanBo-maker/YanOS/actions/runs/41400800673)：Release178/178、ASan178/178、Windows90/90，无失败或跳过；三份ZIP大小/API SHA-256/CRC、逐名默认测试和CI检出tree身份已核对。两Linux原七项重复检查均只启动一次，性能纯harness的最终27项控制通过；默认已无旧R8/step_determinism两个实际注册。
+
+同次两个Linux工件共72份原始执行（54首轮、18复轮）按该head的oracle逐项重读：每配置36个不同目录，输入、原文、镜像、原始状态与退出码相符；生产63/1023/2047镜像逐字节等于独立夹具，4095九项均≤5000万步。此为只读复核，没有新增Guest；未上传的生产二进制不宣称下载后独立重哈希。远端实际变异仍只执行工作流既有yanfs组，不冒称全部17组、真实模型或历史重建。
+
+正式独立dsh两轮已收口；R2中按旧helper推断的证据项，经同会话直接读当前脚本并实际只读重放后撤回，原报告和更正均保留。总审核九项通过。PR189按所有者当前授权以merge commit合入`148c71fdee876343c92dcea7a4661926be517435`，保留阶段历史，E:/YanOS已快进且干净；合入后的main CI是另一次运行，不与上述PR结果混称。MONITOR原样归档并核验SHA，路径/摘要和全部原始复核材料见仓库外阶段工件`E:/YanOS/build/20261102-performance-dedup/pr189/`。
