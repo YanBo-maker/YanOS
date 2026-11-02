@@ -2,10 +2,11 @@
 
 ## 当前阶段
 
-0045 MCP图工具已完成本地验收、独立dsh审核与总审：可按来源身份查询显式概念和命题并读取原文。[规格与验收](specs/0045-graph-mcp-tools.md#verify-执行记录)。本阶段发布与远端CI待执行，尚未交付主线；前端保持预留。
+0045只读MCP图工具已随[PR #196](https://github.com/YanBo-maker/YanOS/pull/196)合入main（`69c1706`）：Agent可查询显式概念和命题，并按同次来源身份读取原文。[规格与验收](specs/0045-graph-mcp-tools.md#verify-执行记录)。前端保持预留。
 
 ## 已交付能力
 
+- 0045 MCP图工具：可选开启图列表/概念查询，来源绑定原文读取；[PR #196](https://github.com/YanBo-maker/YanOS/pull/196)、[规格](specs/0045-graph-mcp-tools.md)。
 - 0044 显式知识图：跨文件概念聚合、类型化命题及完整块出处，独立只读Host接口；[PR #193](https://github.com/YanBo-maker/YanOS/pull/193)、[规格](specs/0044-evidence-knowledge-graph.md)。
 - 0043 性能验收归并：默认单一实际入口，保留生产建盘、独立复轮及完整预算判据；已随[PR #189](https://github.com/YanBo-maker/YanOS/pull/189)合入main。[0043](specs/0043-performance-validation-dedup.md)
 - 0001 项目说明与开发流程。[0001](specs/0001-project-foundation.md)，[PR #1](https://github.com/YanBo-maker/YanOS/pull/1)（5918c0d）
