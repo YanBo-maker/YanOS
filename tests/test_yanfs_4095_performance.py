@@ -1,5 +1,8 @@
 """0040-R4 negative controls; no compiler, Guest or model dependency."""
+import contextlib
 import copy
+import hashlib
+import io
 import importlib.util
 import json
 from pathlib import Path
@@ -229,7 +232,7 @@ class PerformanceControls(unittest.TestCase):
             def controlled(work,name,argv,timeout=600):
                 if name=='build-driver': (work/'terminal_runtime_driver').write_bytes(b'driver')
                 if name=='build-filler': (work/'fill').write_bytes(b'filler')
-                if name=='fill63': (work/'reference63.img').write_bytes(oracle.fixture(63))
+                if name[:4] in ('mkfs','fill'): (work/('production-%s.img'%name[4:])).write_bytes(oracle.fixture(int(name[4:])))
                 return subprocess.CompletedProcess(argv,4 if name=='driver' else 0,b'controlled',b'')
             with patch.object(entry.runtime,'tool_available',return_value=True),patch.object(entry,'execute',side_effect=controlled),\
                  patch.object(oracle,'SIZES',(1023,)),patch.object(oracle,'CASES',('mount',)):
@@ -242,6 +245,290 @@ class PerformanceControls(unittest.TestCase):
                 self.assertEqual(1,self.invoke(base,source))
             errors=[json.loads(p.read_text()) for p in (base/'work').glob('run-*/manifest.json')]
             self.assertTrue(any(e['status']=='FAIL' and 'FIXTURE_STRUCTURE' in e.get('error','') for e in errors))
+
+
+
+def verified_record(n,case):
+    """A complete first-round evidence record, built from a good observation."""
+    data=observation(n,case);summary=oracle.verify(**data)
+    summary.update(status='PASS',work='controlled/%d-%s'%(n,case),raw_status=data['values'],returncode=0,
+                   input_sha256=hashlib.sha256(data['image']).hexdigest(),
+                   disk_sha256=hashlib.sha256(data['disk']).hexdigest())
+    return summary
+
+
+def complete_plan():
+    first=[verified_record(n,case) for n in oracle.SIZES for case in oracle.CASES]
+    by_key={(row['files'],row['case']):row for row in first}
+    repeats=[dict(by_key[(4095,case)],work='controlled/4095-%s.repeat'%case) for case in oracle.CASES]
+    return first,repeats
+
+
+class Repeat4095Controls(unittest.TestCase):
+    """0043-R2/R4: the new option, the repeat plan and the 36-launch contract."""
+
+    source_fixture=PerformanceControls.source_fixture
+    invoke=PerformanceControls.invoke
+
+    def argv(self,base,source,*extra):
+        return ['entry','--source',str(source),'--work',str(base/'work'),
+                '--guest',str(base/'guest'),'--mkfs',str(base/'mkfs'),'--cc','missing-controlled-cc',*extra]
+
+    def cli_call(self,base,source,*extra):
+        """Run the real entry to its CLI boundary; returns (exit code, text).
+
+        argparse reports usage errors on stderr, while the legacy paths raise
+        SystemExit with the message on the exception, so both are collected.
+        """
+        buffer=io.StringIO()
+        with patch.object(sys,'argv',self.argv(base,source,*extra)),\
+             contextlib.redirect_stderr(buffer):
+            with self.assertRaises(SystemExit) as caught: entry.main()
+        code=caught.exception.code
+        # SystemExit("message") leaves .code as the string; the interpreter then
+        # exits 1, which is the behaviour the legacy CLI promises.
+        if not isinstance(code,int): code=1 if code else 0
+        return code,buffer.getvalue()+' '+str(caught.exception)
+
+    def test_cli_usage_errors_create_no_evidence(self):
+        with tempfile.TemporaryDirectory(prefix='yanfs-repeat-control-') as temp:
+            base=Path(temp);source=self.source_fixture(base)
+            # 0043-R2: every invalid combination of the new flag is a usage error
+            # (exit 2) reported before an evidence directory exists. That includes
+            # values the legacy paths reject: repeat 0/negative, malformed, unknown
+            # and empty size tuples.
+            invalid=(['--repeat-4095','--sizes','1023'],
+                     ['--repeat-4095','--sizes','1023,2047'],
+                     ['--repeat-4095','--repeat','2'],
+                     ['--repeat-4095','--sizes','1023','--repeat','3'],
+                     ['--repeat-4095','--repeat','0'],
+                     ['--repeat-4095','--repeat','-1'],
+                     ['--repeat-4095','--sizes','bad'],
+                     ['--repeat-4095','--sizes','1023,bad'],
+                     ['--repeat-4095','--sizes','999'],
+                     ['--repeat-4095','--sizes',','],
+                     ['--repeat-4095','--sizes','4095,999'],
+                     ['--repeat-4095','--sizes','4095','--repeat','0'])
+            for extra in invalid:
+                self.assertEqual(2,self.cli_call(base,source,*extra)[0],extra)
+            self.assertFalse((base/'work').exists(),'usage error created an evidence directory')
+            # Legacy calls without the new flag keep their original diagnostics and
+            # exit behaviour (message on the exception, exit 1, still no evidence).
+            for extra,message in ((['--repeat','0'],'--repeat must be >= 1'),
+                                  (['--repeat','-2'],'--repeat must be >= 1'),
+                                  (['--sizes','bad'],'--sizes must be comma-separated integers'),
+                                  (['--sizes','999'],'--sizes must be a non-empty subset'),
+                                  (['--sizes',','],'--sizes must be a non-empty subset'),
+                                  (['--sizes','4095','--repeat','0'],'--repeat must be >= 1')):
+                code,text=self.cli_call(base,source,*extra)
+                self.assertEqual(1,code,extra)
+                self.assertIn(message,text,extra)
+                self.assertNotIn('usage:',text,extra)
+            self.assertFalse((base/'work').exists(),'legacy usage error created an evidence directory')
+            # A subset that includes 4095 is a valid --repeat-4095 plan.
+            with patch.object(sys,'argv',self.argv(base,source,'--sizes','4095','--repeat-4095')),\
+                 patch.object(entry.runtime,'tool_available',return_value=False):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(77,entry.main())
+            self.assertTrue(list((base/'work').glob('run-*/manifest.json')))
+
+    def test_production_image_mismatch_blocks_matrix(self):
+        def bad_fill(work,name,argv,timeout=600):
+            if name=='build-driver': (work/'terminal_runtime_driver').write_bytes(b'driver')
+            if name=='build-filler': (work/'fill').write_bytes(b'filler')
+            if name[:4] in ('mkfs','fill'):
+                n=int(name[4:]);image=bytearray(oracle.fixture(n))
+                if name.startswith('fill') and n==1023: image[-1]=1
+                (work/('production-%d.img'%n)).write_bytes(bytes(image))
+            return subprocess.CompletedProcess(argv,0,b'controlled',b'')
+        with tempfile.TemporaryDirectory(prefix='yanfs-repeat-control-') as temp:
+            base=Path(temp);source=self.source_fixture(base)
+            with patch.object(entry.runtime,'tool_available',return_value=True),\
+                 patch.object(entry,'execute',side_effect=bad_fill):
+                self.assertEqual(1,self.invoke(base,source))
+            manifest=json.loads(next((base/'work').glob('run-*/manifest.json')).read_text())
+            self.assertEqual('FAIL',manifest['status'])
+            self.assertEqual('HOST_FIXTURE_CROSSCHECK',manifest.get('error'))
+            self.assertEqual([],manifest['cases'],'a mismatched production image reached the matrix')
+
+    def test_missing_and_duplicate_repeats_rejected(self):
+        first,repeats=complete_plan()
+        self.assertEqual(27,len(first));self.assertEqual(9,len(repeats))
+        self.assertTrue(oracle.verify_plan(first,repeats)['repeats']==9)
+        for bad in (repeats[:-1],repeats[1:],repeats+[repeats[0]],repeats[:-1]+[repeats[0]],
+                    first[:]):
+            with self.assertRaises(oracle.Failure) as caught: oracle.verify_plan(first,bad)
+            self.assertEqual('REPEAT_MATRIX',caught.exception.code)
+
+    def test_raw_status_and_exit_drift_rejected(self):
+        first,repeats=complete_plan()
+        for index,mutate,code in ((0,lambda r:r['raw_status'].__setitem__('task0_observed_stack_bytes','2097'),'REPEAT_STATUS_DRIFT'),
+                                  (1,lambda r:r['raw_status'].__setitem__('perf_total','1'),'REPEAT_STATUS_DRIFT'),
+                                  (2,lambda r:r.__setitem__('returncode',6),'REPEAT_EXIT_DRIFT'),
+                                  (3,lambda r:r['raw_status'].pop('verdict'),'REPEAT_STATUS_DRIFT'),
+                                  (4,lambda r:r.__setitem__('capture_sha256','0'*64),'REPEAT_CAPTURE'),
+                                  (5,lambda r:r.__setitem__('status','FAIL'),'REPEAT_STATUS'),
+                                  (6,lambda r:r.__setitem__('input_sha256','1'*64),'REPEAT_INPUT')):
+            broken=copy.deepcopy(repeats);mutate(broken[index])
+            with self.assertRaises(oracle.Failure) as caught: oracle.verify_plan(first,broken)
+            self.assertEqual(code,caught.exception.code)
+
+    def controlled_matrix(self,corrupt=None):
+        images={n:oracle.fixture(n) for n in (63,1023,2047,4095)}
+        launched=[]
+        def run(work,name,argv,timeout=600):
+            launched.append(name)
+            if name=='build-driver': (work/'terminal_runtime_driver').write_bytes(b'driver')
+            elif name=='build-filler': (work/'fill').write_bytes(b'filler')
+            elif name[:4] in ('mkfs','fill'):
+                n=int(name[4:]);(work/('production-%d.img'%n)).write_bytes(images[n])
+            elif name=='driver':
+                label=work.name.split('.')[0];n=int(label.split('-')[0]);case=label.split('-',1)[1]
+                capture=oracle.expected(n,case)[1]
+                if corrupt is not None and corrupt(work.name,case): capture=capture+b'controlled damaged output'
+                (work/'status').write_text(''.join('%s=%s\n'%(key,value) for key,value in observation(n,case)['values'].items()))
+                (work/'capture').write_bytes(capture)
+            return subprocess.CompletedProcess(argv,0,b'controlled',b'')
+        return run,launched
+
+    def run_matrix(self,base,source,corrupt=None,extra=('--repeat-4095',)):
+        run,launched=self.controlled_matrix(corrupt)
+        with patch.object(sys,'argv',self.argv(base,source,*extra)),\
+             patch.object(entry.runtime,'tool_available',return_value=True),\
+             patch.object(entry,'execute',side_effect=run):
+            # The synthetic matrix would otherwise print its whole PASS JSON; the
+            # assertions below are the signal. The real runner is untouched.
+            with contextlib.redirect_stdout(io.StringIO()): code=entry.main()
+        manifest=json.loads(next((base/'work').glob('run-*/manifest.json')).read_text())
+        return code,manifest,[name for name in launched if name=='driver']
+
+    def test_legacy_sizes_without_flag_still_runs_its_own_matrix(self):
+        with tempfile.TemporaryDirectory(prefix='yanfs-repeat-control-') as temp:
+            base=Path(temp);source=self.source_fixture(base)
+            code,manifest,drivers=self.run_matrix(base,source,extra=('--sizes','1023'))
+            self.assertEqual(0,code);self.assertEqual('PASS',manifest['status'])
+            self.assertEqual(9,len(drivers),'--sizes 1023 --repeat 1 must launch 9 Guest runs')
+            self.assertEqual([],manifest['repeats'])
+            self.assertEqual({1023},{row['files'] for row in manifest['cases']})
+            self.assertTrue(all(row['status']=='PASS' for row in manifest['cases']))
+
+    def test_legacy_repeat_two_launches_eighteen_with_full_validation(self):
+        with tempfile.TemporaryDirectory(prefix='yanfs-repeat-control-') as temp:
+            base=Path(temp);source=self.source_fixture(base)
+            code,manifest,drivers=self.run_matrix(base,source,extra=('--sizes','4095','--repeat','2'))
+            self.assertEqual(0,code);self.assertEqual('PASS',manifest['status'])
+            self.assertEqual(18,len(drivers),'--sizes 4095 --repeat 2 must launch 18 Guest runs')
+            self.assertEqual([],manifest['repeats'])
+            fixture=oracle.fixture(4095)
+            for row in manifest['cases']:
+                self.assertEqual('PASS',row['status'])
+                attempts=row['attempts'];self.assertEqual(2,len(attempts))
+                self.assertNotEqual(attempts[0]['work'],attempts[1]['work'])
+                for attempt in attempts:
+                    # A fresh copy of the original fixture in every attempt, and a
+                    # complete oracle verdict (capture, image, budgets, counters),
+                    # not only a step-count comparison.
+                    self.assertEqual('PASS',attempt['status'])
+                    self.assertEqual((Path(attempt['work'])/'disk.img').read_bytes(),fixture)
+                    for key in ('capture_sha256','disk_sha256','input_sha256','raw_status',
+                                'returncode','mount','steps','stack','arena','capture_bytes'):
+                        self.assertIn(key,attempt)
+                self.assertEqual(attempts[0]['raw_status'],attempts[1]['raw_status'])
+
+    def test_bad_legacy_repeat_capture_is_caught_by_the_oracle(self):
+        corrupt=lambda work,case: work.endswith('.repeat1') and case=='ls'
+        with tempfile.TemporaryDirectory(prefix='yanfs-repeat-control-') as temp:
+            base=Path(temp);source=self.source_fixture(base)
+            code,manifest,drivers=self.run_matrix(base,source,corrupt,
+                                                  extra=('--sizes','4095','--repeat','2'))
+            self.assertEqual(18,len(drivers))
+            self.assertEqual(1,code);self.assertEqual('FAIL',manifest['status'])
+            row=[row for row in manifest['cases'] if row['case']=='ls'][0]
+            self.assertEqual('CAPTURE_EXACT',row['attempts'][1]['assertion'],
+                             'a repeat must run the full oracle, not just compare counters')
+            self.assertEqual(row['attempts'][0]['raw_status'],row['attempts'][1]['raw_status'])
+
+    def harness_fault(self,mode,corrupt=None,extra=()):
+        with tempfile.TemporaryDirectory(prefix='yanfs-repeat-control-') as temp:
+            base=Path(temp);source=self.source_fixture(base)
+            run,launched=self.controlled_matrix(corrupt)
+            def wrapped(work,name,argv,timeout=600):
+                if name=='driver' and mode(work.name):
+                    if os_fault: raise OSError('controlled local I/O failure')
+                    raise entry.runtime.HarnessError('controlled transport failure')
+                return run(work,name,argv,timeout)
+            os_fault=getattr(mode,'os_fault',False)
+            with patch.object(sys,'argv',self.argv(base,source,*extra)),\
+                 patch.object(entry.runtime,'tool_available',return_value=True),\
+                 patch.object(entry,'execute',side_effect=wrapped):
+                with contextlib.redirect_stdout(io.StringIO()): code=entry.main()
+            manifest=json.loads(next((base/'work').glob('run-*/manifest.json')).read_text())
+            return code,manifest
+
+    def test_repeat_harness_error_keeps_harness_classification(self):
+        # A tool fault in the 4095 repeat (raised as HarnessError and as OSError) and
+        # in a first-round attempt (raised as HarnessError) must all stay
+        # HARNESS_ERROR rather than becoming a behavioural FAIL.
+        for marker,os_fault,label in ((lambda name:'.repeat-4095' in name,False,'repeat-4095 HarnessError'),
+                                      (lambda name:'.repeat-4095' in name,True,'repeat-4095 OSError'),
+                                      (lambda name:name=='4095-search',False,'first round HarnessError')):
+            mode=marker;mode.os_fault=os_fault
+            code,manifest=self.harness_fault(marker,extra=('--repeat-4095',))
+            self.assertEqual(2,code,'%s: harness fault must exit 2, not a behavioural 1' % label)
+            self.assertEqual('HARNESS_ERROR',manifest['status'],label)
+            self.assertEqual(0,manifest['failures'],'%s: no behavioural defect may be filed' % label)
+            failed=[row for row in manifest['cases']+manifest['repeats'] if row['status']=='HARNESS_ERROR']
+            self.assertGreaterEqual(len(failed),1,label)
+            self.assertEqual(len(failed),manifest['harness_errors'],label)
+            for row in failed: self.assertNotIn('assertion',row)
+
+    def test_legacy_repeat_harness_error_keeps_harness_classification(self):
+        mode=lambda name: name=='4095-ls.repeat1';mode.os_fault=False
+        code,manifest=self.harness_fault(mode,extra=('--sizes','4095','--repeat','2'))
+        self.assertEqual(2,code);self.assertEqual('HARNESS_ERROR',manifest['status'])
+        self.assertEqual(1,manifest['harness_errors']);self.assertEqual(0,manifest['failures'])
+        row=[row for row in manifest['cases'] if row['case']=='ls'][0]
+        self.assertEqual('HARNESS_ERROR',row['attempts'][1]['status'])
+        self.assertNotIn('assertion',row['attempts'][1])
+
+    def test_valid_plan_launches_36_and_passes(self):
+        with tempfile.TemporaryDirectory(prefix='yanfs-repeat-control-') as temp:
+            base=Path(temp);source=self.source_fixture(base)
+            code,manifest,drivers=self.run_matrix(base,source)
+            self.assertEqual(0,code)
+            self.assertEqual('PASS',manifest['status'])
+            self.assertEqual(27,len(manifest['cases']));self.assertEqual(9,len(manifest['repeats']))
+            self.assertEqual(36,len(drivers))
+            self.assertEqual({4095}, {row['files'] for row in manifest['repeats']})
+            for row in manifest['repeats']:
+                for key in ('work','raw_status','returncode','input_sha256','capture_sha256','disk_sha256','status'):
+                    self.assertIn(key,row)
+                self.assertEqual('PASS',row['status'])
+            first={(row['files'],row['case']):row for row in manifest['cases']}
+            for row in manifest['repeats']:
+                other=first[(4095,row['case'])]
+                self.assertEqual(other['raw_status'],row['raw_status'])
+                self.assertEqual(other['returncode'],row['returncode'])
+                self.assertNotEqual(other['work'],row['work'])
+
+    def test_bad_repeat_capture_with_unchanged_status_cannot_pass(self):
+        corrupt=lambda work,case: '.repeat-4095' in work and case=='search'
+        with tempfile.TemporaryDirectory(prefix='yanfs-repeat-control-') as temp:
+            base=Path(temp);source=self.source_fixture(base)
+            code,manifest,drivers=self.run_matrix(base,source,corrupt)
+            self.assertEqual(36,len(drivers))
+            self.assertEqual(1,code)
+            self.assertEqual('FAIL',manifest['status'])
+            # The repeat's own oracle recorded the damaged capture; the plan
+            # check then rejects the record rather than trusting its status.
+            self.assertIn(manifest.get('error'),('REPEAT_STATUS','REPEAT_CAPTURE'))
+            failed=[row for row in manifest['cases']+manifest['repeats'] if row['status']=='FAIL']
+            self.assertEqual(1,len(failed))
+            repeat=[row for row in manifest['repeats'] if row['case']=='search'][0]
+            self.assertEqual('FAIL',repeat['status'])
+            self.assertEqual('CAPTURE_EXACT',repeat['assertion'])
+            first=[row for row in manifest['cases'] if row['files']==4095 and row['case']=='search'][0]
+            self.assertEqual(first['raw_status'],repeat['raw_status'])
 
 
 if __name__=='__main__': unittest.main()

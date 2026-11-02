@@ -1443,14 +1443,13 @@ if(BUILD_TESTING)
                 set_tests_properties(guest_terminal_runtime PROPERTIES
                                      SKIP_RETURN_CODE 77 TIMEOUT 600)
                 if(TARGET yan_mkfs AND TARGET yan_run AND YAN_RISCV_READELF)
-                    add_test(NAME yanfs_r8_performance
-                        COMMAND "${Python3_EXECUTABLE}" -B
-                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_yanfs_r8_performance.py"
-                                --source "${CMAKE_CURRENT_SOURCE_DIR}"
-                                --work "${CMAKE_BINARY_DIR}/yanfs-r8-performance"
-                                --mkfs "$<TARGET_FILE:yan_mkfs>"
-                                --guest "${YAN_TERMINAL_ELF}"
-                                --cc "${CMAKE_C_COMPILER}")
+                    # 0043-R3: one default actual entry covers what the former
+                    # yanfs_r8_performance (0036-R8-AC4) and
+                    # yanfs_4095_step_determinism (0040-R5-AC4) entries proved
+                    # separately. tests/guest/run_yanfs_r8_performance.py stays
+                    # on disk, unchanged, for explicit manual reproduction; its
+                    # default registration is gone because the 1023/2047 rows it
+                    # measured are now the production-built rows of this matrix.
                     add_test(NAME yanfs_4095_performance
                         COMMAND "${Python3_EXECUTABLE}" -B
                                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_yanfs_4095_performance.py"
@@ -1458,41 +1457,14 @@ if(BUILD_TESTING)
                                 --work "${CMAKE_BINARY_DIR}/yanfs-4095-performance"
                                 --mkfs "$<TARGET_FILE:yan_mkfs>"
                                 --guest "${YAN_TERMINAL_ELF}"
-                                --cc "${CMAKE_C_COMPILER}")
+                                --cc "${CMAKE_C_COMPILER}"
+                                --repeat-4095)
+                    # The entry runs 36 Guest launches: the 27 first-round cases
+                    # plus nine independent 4095 repeats that re-verify capture,
+                    # image, budgets and the whole raw status map.
                     set_tests_properties(yanfs_4095_performance PROPERTIES
                         SKIP_RETURN_CODE 77 TIMEOUT 1800
-                        LABELS "0036-R5-AC1;0040-R4-AC1;0040-R4-AC3;0040-R5-AC1;0040-R5-AC2")
-                    # Step determinism: the spec states "两次计步完全一致" (two
-                    # runs count identically) in its VERIFY and methodology
-                    # sections (:88, :98, :141), not in an AC. Guest step counts
-                    # come from the simulator's instruction counter, not a clock,
-                    # so they must repeat bit-for-bit; if they ever drift, the
-                    # 0.42% R5 margin loses its meaning. Only the 4095 row is
-                    # repeated, which is the row the gate is about, so this costs
-                    # one extra row rather than a second full matrix.
-                    #
-                    # LABEL: deliberately NOT 0040-R5-AC1. R5-AC1 is exactly
-                    # "each item <= 50,000,000 steps"; determinism is not part of
-                    # it, and labelling it AC1 made `ctest -L '^0040-R5-AC1$'`
-                    # return two tests, overstating AC coverage. An invariant
-                    # label keeps the test visible and traceable without
-                    # claiming an AC. Switch to 0040-R5-AC4 once that AC exists.
-                    add_test(NAME yanfs_4095_step_determinism
-                        COMMAND "${Python3_EXECUTABLE}" -B
-                                "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest/run_yanfs_4095_performance.py"
-                                --source "${CMAKE_CURRENT_SOURCE_DIR}"
-                                --work "${CMAKE_BINARY_DIR}/yanfs-4095-determinism"
-                                --mkfs "$<TARGET_FILE:yan_mkfs>"
-                                --guest "${YAN_TERMINAL_ELF}"
-                                --cc "${CMAKE_C_COMPILER}"
-                                --sizes 4095
-                                --repeat 2)
-                    set_tests_properties(yanfs_4095_step_determinism PROPERTIES
-                        SKIP_RETURN_CODE 77 TIMEOUT 1800
-                        LABELS "0040-R5-AC4")
-                    set_tests_properties(yanfs_r8_performance PROPERTIES
-                                         SKIP_RETURN_CODE 77 TIMEOUT 900
-                                         LABELS "0036-R8-AC4")
+                        LABELS "0036-R5-AC1;0036-R8-AC4;0040-R4-AC1;0040-R4-AC3;0040-R5-AC1;0040-R5-AC2;0040-R5-AC4")
                     if(TARGET yan_mcp)
                         add_executable(large_terms_probe tests/large_terms_probe.c)
                         target_link_libraries(large_terms_probe PRIVATE yan_semantic_posix yan_search_terms)

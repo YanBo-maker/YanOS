@@ -6,6 +6,7 @@ import zlib
 
 BLOCK=4096
 SIZES=(1023,2047,4095)
+REPEAT_FILES=4095
 CASES=('mount','create','ls','backlinks','related','block-backlinks','meta','meta-filter','search')
 STEP_LIMIT=50_000_000
 NOTE=b'@yan-note 1\nlink: f0000.txt\ntag: t\n@end\n@block x\n[[f0000.txt#x]]\n'
@@ -121,10 +122,35 @@ def parse_status(text):
     return values
 
 
-def verify_matrix(records):
+def verify_plan(first,repeats,sizes=None):
+    """0043-R2: the first-round matrix plus exactly nine independent 4095 repeats."""
+    sizes=tuple(SIZES if sizes is None else sizes)
+    verify_matrix(first,sizes)
+    for record in first:
+        require(record.get('status')=='PASS','MATRIX_STATUS')
+    require(REPEAT_FILES in sizes,'REPEAT_MATRIX')
+    keys=[(record.get('files'),record.get('case')) for record in repeats]
+    require(len(keys)==len(CASES) and len(set(keys))==len(keys) and
+            set(keys)=={(REPEAT_FILES,case) for case in CASES},'REPEAT_MATRIX')
+    index={(record['files'],record['case']):record for record in first}
+    identity=hashlib.sha256(fixture(REPEAT_FILES)).hexdigest()
+    for record in repeats:
+        base=index[(record['files'],record['case'])]
+        require(record.get('status')=='PASS','REPEAT_STATUS')
+        require(record.get('input_sha256')==identity,'REPEAT_INPUT')
+        require(record.get('capture_sha256')==base.get('capture_sha256'),'REPEAT_CAPTURE')
+        # AC2.2: the whole raw status map and the exit code must match the first
+        # round exactly; a missing, extra or changed field is drift.
+        require(record.get('raw_status')==base.get('raw_status'),'REPEAT_STATUS_DRIFT')
+        require(record.get('returncode')==base.get('returncode'),'REPEAT_EXIT_DRIFT')
+    return dict(cases=len(first),repeats=len(repeats))
+
+
+def verify_matrix(records,sizes=None):
+    sizes=tuple(SIZES if sizes is None else sizes)
     keys=[(record.get('files'),record.get('case')) for record in records]
-    require(len(keys)==len(SIZES)*len(CASES) and len(set(keys))==len(keys) and
-            set(keys)=={(n,case) for n in SIZES for case in CASES},'MATRIX')
+    require(len(keys)==len(sizes)*len(CASES) and len(set(keys))==len(keys) and
+            set(keys)=={(n,case) for n in sizes for case in CASES},'MATRIX')
 
 
 def integer(values,key,base=10):
