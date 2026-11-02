@@ -2,10 +2,11 @@
 
 ## 当前阶段
 
-0044概念与命题图已完成本地实现与回归：显式概念、类型化关系和具名块原文可经独立Host C接口与JSON命令读取。审核修补及验收结论见[0044 VERIFY](specs/0044-evidence-knowledge-graph.md#verify-执行记录)；未发布、未运行本阶段远端CI、未合入main。前端和新增MCP工具不在本阶段范围。
+0044显式知识图已随[PR #193](https://github.com/YanBo-maker/YanOS/pull/193)合入main（`ed36131`）：提供可重建的概念、别名、命题及原文出处，供Agent通过Host C接口和Linux/WSL JSON命令读取。[规格与验收](specs/0044-evidence-knowledge-graph.md#verify-执行记录)。前端与新增MCP图工具留待后续阶段。
 
 ## 已交付能力
 
+- 0044 显式知识图：跨文件概念聚合、类型化命题及完整块出处，独立只读Host接口；[PR #193](https://github.com/YanBo-maker/YanOS/pull/193)、[规格](specs/0044-evidence-knowledge-graph.md)。
 - 0043 性能验收归并：默认单一实际入口，保留生产建盘、独立复轮及完整预算判据；已随[PR #189](https://github.com/YanBo-maker/YanOS/pull/189)合入main。[0043](specs/0043-performance-validation-dedup.md)
 - 0001 项目说明与开发流程。[0001](specs/0001-project-foundation.md)，[PR #1](https://github.com/YanBo-maker/YanOS/pull/1)（5918c0d）
 - 0003 Machine、Bus 与 RAM。[0003](specs/0003-machine-bus-ram.md)，[PR #3](https://github.com/YanBo-maker/YanOS/pull/3)（d3649a6）

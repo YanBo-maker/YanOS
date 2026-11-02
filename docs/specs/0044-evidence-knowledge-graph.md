@@ -1,7 +1,7 @@
 # 0044：有原文依据的概念与命题图
 
 - 意图：落实[决策0008](../decisions/0008-evidence-knowledge-graph.md)，让Agent读取已记录知识的概念、具体关系及原文范围；笔记内容按用户声明视为已理解，不做掌握评估。
-- 状态：Approved
+- 状态：Implemented
 - supersedes：无；扩展0032正文解释，不改变原块、关系和MCP接口。
 - 成功标准：显式声明能跨文件合并概念、保留有向多重命题和原文出处；精确查询不猜测未知，不写盘；独立dsh及总审核完成，新增行为有真实断言。
 
@@ -96,4 +96,19 @@ list的概念行含id、name、alias_count、declaration_count、relation_count�
 
 修后冻结`final-r1fix-source-freeze.json`包含398项源码/配置输入，三个平台范围对应相同身份；相对前次冻结仅新增分配测试和CMake注册，生产代码逐字节保持。没有重跑先前完整Linux、完整Windows或既有17组变异，以上定向证据补充而不替代历史执行。编码者曾临时改生产文件做控制后恢复，SHA与原冻结一致；总审核不以其摘要作为独立控制证据，正式控制均在隔离副本执行。
 
-2026-11-03，原独立只读dsh完成正式R2，B1/D1/D2均已核对通过；两轮正式审核结束，总审核九项本地检查通过。报告与最终身份见阶段目录reviewer-r1-report.md、reviewer-r2-report.md及review-r2-manifest.json。本地实施与验收完成，项目所有者意图验收及主线交付仍待实际合入。本阶段没有远端CI、PR或main合入；规格/索引仍Approved，发布拆分尚待安排，当前整组规模未视为满足暂定PR约400行预算。已交付能力行及MONITOR阶段归档待实际主线交付。本阶段不新增生成模型、MCP工具或前端，也未开展这些范围的效果验收。
+**本地验收时快照，发布状态已由下节更新**：2026-11-03，原独立只读dsh完成正式R2，B1/D1/D2均已核对通过；两轮正式审核结束，总审核九项本地检查通过。报告与最终身份见阶段目录reviewer-r1-report.md、reviewer-r2-report.md及review-r2-manifest.json。本地实施与验收完成，项目所有者意图验收及主线交付仍待实际合入。本阶段没有远端CI、PR或main合入；规格/索引仍Approved，发布拆分尚待安排，当前整组规模未视为满足暂定PR约400行预算。已交付能力行及MONITOR阶段归档待实际主线交付。本阶段不新增生成模型、MCP工具或前端，也未开展这些范围的效果验收。
+
+
+### 2026-11-03：精确提交远端验收与主线交付
+
+项目所有者在发布、CI通过后合入及后续MCP接入的具体建议后要求继续，本次据此推进。`29fe2b38fb3be9511ee7c1b1849705a1d3c0a8dc`由[PR #193](https://github.com/YanBo-maker/YanOS/pull/193)运行[Actions 41481039212](https://github.com/YanBo-maker/YanOS/actions/runs/41481039212)：Linux Release181/181、ASan181/181、Windows91/91，逐名默认项无失败/跳过。三份ZIP大小/API SHA-256/CRC与完整LastTest已核对，CI临时merge checkout的完整tree等于已审head；当前head的两个Linux各36份原始性能执行（首轮27、独立4095复轮9）按原oracle重读，输入/原文/镜像/状态/退出码相符，4095九项仍≤5000万步。此为下载工件只读复核，没有新跑Guest；未上传生产二进制不宣称下载后独立重哈希。
+
+工件：[test-evidence-ubuntu-22.04-Debug-sanitizers-ON](https://github.com/YanBo-maker/YanOS/actions/runs/41481039212/artifacts/13160916643)、[test-evidence-windows-2022-Debug-sanitizers-OFF](https://github.com/YanBo-maker/YanOS/actions/runs/41481039212/artifacts/13160855267)、[test-evidence-ubuntu-22.04-Release-sanitizers-OFF](https://github.com/YanBo-maker/YanOS/actions/runs/41481039212/artifacts/13160476289)
+
+远端实际变异仅执行工作流既有yanfs组，不冒称全部17组、新图实际变异或Agent回答质量。与本机最终定向验证不同，这三项是精确发布提交的完整CI；两者执行版本与范围分别保留。
+
+本组超过暂定约400生产行预算，发布保留已完成两轮独立审查的完整R1/R2能力组并在PR说明理由，不以任意函数切割或额外抽象凑行数；这是本次范围取舍，不改变后续规则。原独立R1非阻塞建议另记[follow-up #194](https://github.com/YanBo-maker/YanOS/issues/194)。源码审核两轮已结束，不重开第三轮源码审核；新增发布事实的限定文档核对另记本节。
+
+PR #193已按本次继续授权以merge commit `ed361310691d3e81b8e6e28b21b3c32f54cc894d`合入main（2026-11-02 16:39:49 UTC，即本地11月3日），保留两个阶段提交，E:/YanOS已快进。MONITOR原样归档、核对前后SHA后重置通道头；档案路径/摘要及本节原始复核材料保存在仓库外阶段目录`E:/YanOS/build/20261103-0044-publication/`，未把监控内容直接当事实。main合入后CI是另一次运行，不与以上PR结果混称。
+
+本次发布事实与文档经原独立只读dsh限定核对通过，总审核九项本地检查通过；未重开第三轮源码审核，未新增功能或改变R/AC，原文/历史结论保持。
