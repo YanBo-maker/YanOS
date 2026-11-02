@@ -2,10 +2,11 @@
 
 ## 当前阶段
 
-Issue #179 的分层检查范围说明已本地完成：[检查器](../tests/layering_gate.py)保留单行字面 include 与区分大小写的 `tests/` 路径匹配，README同步说明续行、大小写变体、宏与间接依赖的检测限制；不改变单向依赖规范或检查逻辑。验收与发布状态由阶段PR承载，前端保持预留。
+0043 性能验收归并已完成本机实现与定向验证：统一首轮矩阵和4095独立复轮，保留生产建盘、原预算与完整证据。总审核已补齐独立审核指出的文档遗漏；复核结论与远端交付以本阶段PR为准。[规格与验收](specs/0043-performance-validation-dedup.md)。前阶段[PR #188](https://github.com/YanBo-maker/YanOS/pull/188)已合入，前端保持预留。
 
 ## 已交付能力
 
+- 0043 性能验收归并：默认单一实际入口，保留生产建盘、独立复轮及完整预算判据；本机候选已完成，远端发布待验。[0043](specs/0043-performance-validation-dedup.md)
 - 0001 项目说明与开发流程。[0001](specs/0001-project-foundation.md)，[PR #1](https://github.com/YanBo-maker/YanOS/pull/1)（5918c0d）
 - 0003 Machine、Bus 与 RAM。[0003](specs/0003-machine-bus-ram.md)，[PR #3](https://github.com/YanBo-maker/YanOS/pull/3)（d3649a6）
 - 0004 CPU 状态与取指。[0004](specs/0004-cpu-state-fetch.md)，[PR #4](https://github.com/YanBo-maker/YanOS/pull/4)（1496681）
@@ -76,7 +77,7 @@ Issue #179 的分层检查范围说明已本地完成：[检查器](../tests/lay
 
 - 内存观测限定于默认RV32生产终端ELF的非递归、无LTO独立函数调用形状；内联、尾调用或其他编译形态未验证。观测条件缺失或不完整时明确失败，不把缺失统计当零分配；Guest整体32MiB预算保持。
 
-- 4095文件容量已支持，0040固定短文本夹具已完成本机及Linux CI性能验收，并随[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main；任意长正文或其他语料的耗时仍随内容增长，固定夹具的实测范围保持。
+- 4095文件容量已支持，0040固定短文本夹具已完成本机及Linux CI性能验收，并随[PR #93](https://github.com/YanBo-maker/YanOS/pull/93)合入main；任意长正文或其他语料的耗时仍随内容增长，固定夹具的实测范围保持。 后续默认执行方式由[0043](specs/0043-performance-validation-dedup.md)承接；移除重叠入口，原预算、完整原始工件与历史结论保持。
 
 - R8 历史对比固定于 `4c5e0ab` 与 `2b82d17`。完整重跑由操作员显式执行，默认 CTest 的 `yanfs_r8_parity_harness` 检查夹具与判定器反例；历史 v2 MCP 的 CORRUPT 表示当时的错误保持，不作为当前大容量检索成功证据。
 
