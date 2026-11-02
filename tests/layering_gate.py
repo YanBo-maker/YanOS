@@ -18,11 +18,15 @@ directive and is still checked. The operand is judged by the `tests/` path
 segment it names, so "tests/x.h", "../tests/x.h", "./tests/x.h",
 "sub/../../tests/x.h" and backslash spellings all count.
 
-Limitations: single-line directives only -- a backslash-continued operand and a
-directive split across lines are not assembled, so they are not resolved. There
-is no preprocessor and no dependency graph, so macro-built operands, --include,
-extra -I search paths and headers reached indirectly are invisible, and a path
-is judged by its written form rather than by filesystem resolution.
+Limitations: the path segment match is case-sensitive, so `Tests/` and `TESTS/`
+are not captured by it even on a host filesystem that ignores case; those
+spellings fall outside this check, which narrows what the gate detects and does
+not make them permitted. Single-line directives only -- a backslash-continued
+operand and a directive split across lines are not assembled, so they are not
+resolved. There is no preprocessor and no dependency graph, so macro-built
+operands, --include, extra -I search paths and headers reached indirectly are
+invisible, and a path is judged by its written form rather than by filesystem
+resolution.
 
 Diagnostics are pure ASCII: a non-ASCII path or line is backslash-escaped, so a
 cp1252 console cannot fail the gate. Output separates three outcomes: violation
@@ -38,6 +42,9 @@ from pathlib import Path
 SUFFIXES = (".c", ".h", ".S", ".s")
 # The operand may be quoted or angle-bracketed and may start with ./ or ../.
 INCLUDE = re.compile(r'^\s*#\s*include\s*[<"](?P<path>[^>"]+)[>"]', re.IGNORECASE)
+# Case-sensitive on purpose: this pattern matches the lowercase `tests/`
+# segment only, so `Tests/` and `TESTS/` are not captured even when the host
+# filesystem ignores case. That is a limit of this check, not a permission.
 TESTS_SEGMENT = re.compile(r'(?:^|/)tests/')
 FAIL = ":FAIL: 0017_os_must_not_include_tests:"
 INPUT = ":FAIL: 0017_layering_scan_input:"
