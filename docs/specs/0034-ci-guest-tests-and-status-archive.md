@@ -99,6 +99,8 @@ AGENTS.md 中「只有总审核可改文档」「dsh 独立对齐审核」「监
 
 ## Non-goals
 
+> 后续关系（2026-11-02）：[0042](0042-continuous-doc-invariants.md) 单独定义 AC6.1、AC9.6 行数部分的持久化默认检查。下列一次性脚本及不改 tests/CMake 的限制保留为0034原阶段边界，未改写历史结论；其他条款不因0042扩大范围。
+
 - 不改任何功能代码（`src/`、`os/`、`apps/`、`host/`、`tools/`）和测试代码（`tests/`），也不改 `CMakeLists.txt`。
 - 不重构测试框架，不改测试名、超时、SKIP 语义和注册条件。
 - 不把外部验证层搬进 CI：NEMU 差分（`difftest_*`）、官方 riscv-tests、Sail 签名、ACT4 都不进。

@@ -935,3 +935,12 @@ Linux 的两个 ubuntu-22.04 任务在 `.github/workflows/build.yml` 里打开 `
 ## 当前阶段
 
 0041 笔记元数据的 MCP 只读工具：新增只读工具 `yanos_note_meta`，由独立开关 `--allow-meta` 门控，与 `--allow-write` 正交，补齐 [0027](specs/0027-note-metadata.md) 元数据观察缺失的 MCP 用户面。工具返回 title/created/modified/tag/link（含 link 的 OK/MISSING）与 `has_header`，不返回正文、不读目标正文判定链接健康、不预检正文，因此无头旧文件与二进制正文照常观察，头部损坏报 METADATA。默认启动态仍与 0033 六工具逐字节相同，`serverInfo.version` 保持 `0035`。已随[PR #109](https://github.com/YanBo-maker/YanOS/pull/109)以 merge commit `b994150` 合入 main。
+
+
+## 2026-11-02：0042开始前的当前阶段快照
+
+0041 笔记元数据的 MCP 只读面：新增两个只读工具，同由独立开关 `--allow-meta` 门控、与 `--allow-write` 正交，补齐 [0027](specs/0027-note-metadata.md) 缺失的 MCP 用户面。`yanos_note_meta` 返回单文件 title/created/modified/tag/link（含 OK/MISSING）与 `has_header`，只校验目标头、不预检正文，无头旧文件与二进制正文照常观察；`yanos_note_list` 提供全库名单与 tag AND 筛选，沿 0027:83 全库预检，任一坏头即 METADATA 且不出半份名单。默认态仍与 0033 六工具逐字节相同，`serverInfo.version` 保持 `0035`。已分别随[PR #109](https://github.com/YanBo-maker/YanOS/pull/109)（`b994150`）与[PR #113](https://github.com/YanBo-maker/YanOS/pull/113)合入 main。
+
+上一阶段「用法入口与平台覆盖说明收尾」已随[PR #100](https://github.com/YanBo-maker/YanOS/pull/100)以`2233ea8`合入main；其合入前验证已核对，合入后的[主线CI](https://github.com/YanBo-maker/YanOS/actions/runs/40892892526)已由Actions API确认通过。0035、0036、0041整体仍为Approved，0040为Implemented；学习理解程度由项目所有者判断。
+
+<!-- 0042阶段切换：以上为上一当前阶段的原文快照。 -->

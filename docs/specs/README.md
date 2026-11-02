@@ -37,8 +37,9 @@
 | [0031](0031-mcp-retrieval-tools.md) | 面向Agent的只读MCP检索工具 | Implemented | 无 | 无 |
 | [0032](0032-block-references.md) | 具名块与精确正文引用 | Implemented | 无 | [0040-R3](0040-4095-file-performance.md#0040-r3消除同次查询中的无用读取和搬运)（仅有效块结果范围澄清） |
 | [0033](0033-block-mcp-navigation.md) | Agent 的只读块导航 | Implemented | 无 | [0036-R4/R6](0036-yanfs-multi-block-directory.md#0036-r4上层服务在大容量下行为正确)（仅文件容量） |
-| [0034](0034-ci-guest-tests-and-status-archive.md) | CI 运行 Guest 默认测试与 STATUS 归档 | Implemented | 无 | 无 |
+| [0034](0034-ci-guest-tests-and-status-archive.md) | CI 运行 Guest 默认测试与 STATUS 归档 | Implemented | 无 | [0042](0042-continuous-doc-invariants.md)（仅两项文档不变量的持续执行方式） |
 | [0035](0035-agent-writable-knowledge.md) | Agent 可写的知识工具 | Approved | 无 | 无 |
 | [0036](0036-yanfs-multi-block-directory.md) | YanFS 多块目录 | Approved | 无整份替代；局部扩展见规格头 | 无 |
 | [0040](0040-4095-file-performance.md) | 4095 文件性能验收与局部优化 | Implemented | 承接0036的4095性能验收；澄清0032的有效块结果范围 | 无 |
 | [0041](0041-note-meta-mcp-tool.md) | 笔记元数据的 MCP 只读工具 | Approved | 无整份替代；扩展 0033/0035 的工具集合与启动开关面 | 无 |
+| [0042](0042-continuous-doc-invariants.md) | 持续文档结构检查 | Approved | 承接0034的两项文档不变量；历史阶段边界保留 | 无 |
