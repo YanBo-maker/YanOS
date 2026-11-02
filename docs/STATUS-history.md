@@ -985,3 +985,11 @@ Issue #179 的分层检查范围说明已本地完成：[检查器](../tests/lay
 ## 2026-11-02：0043 合入前交付快照
 
 0043 性能验收归并已完成本机实现与定向验证：统一首轮矩阵和4095独立复轮，保留生产建盘、原预算与完整证据。总审核已补齐独立审核指出的文档遗漏；复核结论与远端交付以本阶段PR为准。[规格与验收](specs/0043-performance-validation-dedup.md)。前阶段[PR #188](https://github.com/YanBo-maker/YanOS/pull/188)已合入，前端保持预留。
+
+## 0043 当前阶段归档（2026-11-02，开始0044）
+
+0043 性能验收归并已随[PR #189](https://github.com/YanBo-maker/YanOS/pull/189)合入main（`148c71f`）：默认统一首轮矩阵与4095独立复轮，生产建盘、原预算和完整证据保持。独立dsh、总审核及精确提交远端验收已完成；明细见[0043 VERIFY](specs/0043-performance-validation-dedup.md#verify-执行记录)与阶段PR。前端保持预留。
+
+## 0044 实施状态归档（2026-11-03，审核修补）
+
+0044概念与命题图进入实施：以显式概念、类型化关系和具名块原文描述已记录知识范围，先实现独立Host C服务及Agent可调用的JSON命令入口。规格见[0044](specs/0044-evidence-knowledge-graph.md)，方向见[决策0008](decisions/0008-evidence-knowledge-graph.md)。dsh负责编码，独立源码与文档审核、总审及本地验收尚待完成；未发布、未运行本阶段远端CI。前端和新增MCP工具不在本阶段范围。

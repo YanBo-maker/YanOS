@@ -322,6 +322,10 @@ ctest --test-dir build --output-on-failure
 
 分层、覆盖边界与退出码见 [CPU 验证规格](docs/specs/0011-cpu-validation.md)。
 
+## 概念与命题图（Host）
+
+[0044图接口](docs/knowledge-graph.md)在具名块内显式声明概念、别名和类型化关系，用`yan_graph --disk-image notes.img list`或`query square`取得JSON及原文出处。图可从笔记重建，笔记内容按项目所有者声明视为已理解知识；无图记录不等于用户不懂。当前提供Host C接口和Linux/WSL命令，前端与新增MCP图工具另行设计。实施及验收状态见[STATUS](docs/STATUS.md)。
+
 ## 4095 文件性能验收
 
 Linux/WSL中具备Host C编译器和RISC-V交叉编译器时，可运行[0040性能门禁](docs/specs/0040-4095-file-performance.md)：
