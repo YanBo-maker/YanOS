@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "knowledge_graph.h"
 #include "mcp_note.h"
 #include "mcp_worker.h"
 #include <errno.h>
@@ -37,7 +38,7 @@ static bool seconds(const char *s,unsigned *out)
  * it deliberately takes no value and no bit in the required-argument bitmap,
  * so --disk-image alone still selects the single image served (0035-R11). */
 static bool options(int argc,char **argv,YanMcpOptions *o,bool *allow_write,
-                    bool *allow_meta)
+                    bool *allow_meta,bool *allow_graph)
 {
     memset(o,0,sizeof *o); o->startup=o->request=120; unsigned seen=0;
     for (int i=1;i<argc;) {
@@ -48,6 +49,17 @@ static bool options(int argc,char **argv,YanMcpOptions *o,bool *allow_write,
         if (!strcmp(argv[i],"--allow-meta")) {
             if (*allow_meta) return false;
             *allow_meta=true; ++i; continue;
+        }
+        /* 0045 R2: the graph tools are gated like --allow-meta, and for the
+         * same committed reason: the default tools/list must stay
+         * byte-identical to the 0033 six-tool array. The flag takes no value
+         * and adds no bit to the required-argument bitmap, so --disk-image
+         * alone still selects the one image served and the graph branch opens
+         * only that image -- it never stats, opens or hashes the index, model
+         * or runner. A repeat, or a flag spelled with a value, stays USAGE. */
+        if (!strcmp(argv[i],"--allow-graph")) {
+            if (*allow_graph) return false;
+            *allow_graph=true; ++i; continue;
         }
         if (i+1>=argc) return false;
         unsigned bit; const char **p=NULL;
@@ -91,8 +103,14 @@ static bool enqueue(Server *s,const YanMcpRequest *request,const char *payload,s
     if (status!=YAN_MCP_REPLY_OK) {
         free(data); data=NULL; length=0;
         const char *fallback=status==YAN_MCP_REPLY_LIMIT ? "LIMIT" : "IO";
+        /* 0045 R2: a graph response can exceed the 1 MiB payload ceiling too --
+         * the object is carried twice, once structured and once as text -- so
+         * the graph kinds must have the same honest fallback. Without this a
+         * too-large graph answer would be a transport failure instead of a
+         * reported LIMIT. */
         if (request->kind==YAN_MCP_BLOCK_LIST || request->kind==YAN_MCP_BLOCK_READ ||
-            request->kind==YAN_MCP_BLOCK_REFS || request->kind==YAN_MCP_BLOCK_BACKLINKS)
+            request->kind==YAN_MCP_BLOCK_REFS || request->kind==YAN_MCP_BLOCK_BACKLINKS ||
+            request->kind==YAN_MCP_GRAPH_LIST || request->kind==YAN_MCP_GRAPH_QUERY)
             data=yan_mcp_reply(request,NULL,0,fallback,&length,NULL);
     }
     if (!data || length>YAN_MCP_QUEUE_MAX-s->queued) { free(data); return false; }
@@ -167,8 +185,14 @@ static void child(const YanMcpOptions *o,const YanMcpRequest *request,int result
     YanMcpWorkerResult result=yan_mcp_execute(o,request,&worker_cancelled,&payload,&length);
     if (length>YAN_MCP_OUTPUT_MAX) {
         free(payload); payload=NULL; length=0;
-        result.result=result.domain==YAN_MCP_DOMAIN_BLOCK ?
-            (uint32_t)YAN_BLOCK_QUERY_LIMIT : (uint32_t)YAN_SEMANTIC_IO;
+        /* 0045 R2: a graph object over the payload ceiling is a LIMIT in its
+         * own domain, not a semantic IO failure. The service already applies
+         * the same bound, so this is the backstop for the whole frame. */
+        if (result.domain==YAN_MCP_DOMAIN_BLOCK)
+            result.result=(uint32_t)YAN_BLOCK_QUERY_LIMIT;
+        else if (result.domain==YAN_MCP_DOMAIN_GRAPH)
+            result.result=(uint32_t)YAN_KG_LIMIT;
+        else result.result=(uint32_t)YAN_SEMANTIC_IO;
     }
     YanMcpWorkerHeader header={(uint32_t)result.domain,result.result,(uint32_t)length};
     bool sent=write_all(result_fd,&header,sizeof header) && (!length || write_all(result_fd,payload,length));
@@ -325,7 +349,8 @@ static bool handle(Server *s,const char *line,size_t length)
     if (request.kind==YAN_MCP_SEARCH || request.kind==YAN_MCP_STATUS ||
         request.kind==YAN_MCP_NOTE_META || request.kind==YAN_MCP_NOTE_LIST ||
         request.kind==YAN_MCP_BLOCK_LIST || request.kind==YAN_MCP_BLOCK_READ ||
-        request.kind==YAN_MCP_BLOCK_REFS || request.kind==YAN_MCP_BLOCK_BACKLINKS) {
+        request.kind==YAN_MCP_BLOCK_REFS || request.kind==YAN_MCP_BLOCK_BACKLINKS ||
+        request.kind==YAN_MCP_GRAPH_LIST || request.kind==YAN_MCP_GRAPH_QUERY) {
         if (s->task.active) return enqueue(s,&request,NULL,0,"BUSY",false);
         if (!start_task(s,&request)) return enqueue(s,&request,NULL,0,"IO",false);
         return true;
@@ -374,10 +399,11 @@ int main(int argc,char **argv)
 {
     Server *s=calloc(1,sizeof *s);
     if (!s) { fputs("ERROR IO\n",stderr); return 5; }
-    bool allow_write=false, allow_meta=false;
-    if (!options(argc,argv,&s->options,&allow_write,&allow_meta)) { free(s); fputs("ERROR USAGE\n",stderr); return 2; }
+    bool allow_write=false, allow_meta=false, allow_graph=false;
+    if (!options(argc,argv,&s->options,&allow_write,&allow_meta,&allow_graph)) { free(s); fputs("ERROR USAGE\n",stderr); return 2; }
     s->session.allow_write=allow_write;
     s->session.allow_meta=allow_meta;
+    s->session.allow_graph=allow_graph;
     struct sigaction action={0}; action.sa_handler=interrupt; sigemptyset(&action.sa_mask);
     bool ready=sigaction(SIGINT,&action,NULL)==0 && sigaction(SIGTERM,&action,NULL)==0;
     /* The harness may ignore child exits or block control signals. Own our

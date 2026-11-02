@@ -10,6 +10,12 @@
  *   YAN_MCP_TEST_BLOCK_HOLD=<path>
  *       the block-query worker waits until <path> exists (bounded 15s) while
  *       staying alive, so BUSY/cancel/reap ordering is deterministic.
+ *   YAN_MCP_TEST_GRAPH_HOLD=<path>
+ *       0045 R2: the same hold for the graph worker. It is placed around the
+ *       shared graph service call, records the worker pid when it starts
+ *       waiting, and also stops as soon as the request's own cancellation flag
+ *       is raised, so a cancelled graph request leaves the hold through the
+ *       real path instead of being killed by the parent's signal.
  * The open/pread/fork interposers are linked into this probe only; they count
  * direct source calls made by yan_mcp/mcp_worker/semantic_posix themselves.
  * libc-internal fopen/read calls are not counted. */
@@ -18,6 +24,7 @@
 #undef poll
 #define _GNU_SOURCE 1
 #define _POSIX_C_SOURCE 200809L
+#include "knowledge_graph_query.h"
 #include "mcp_worker.h"
 #include "semantic_posix.h"
 #include "semantic_llama.h"
@@ -33,6 +40,7 @@
 #include <time.h>
 #include <unistd.h>
 YanSemanticResult __real_yan_semantic_posix_cleanup(YanSemanticPosix *);
+YanKgResult __real_yan_kg_query_json(const YanKgQueryOptions *,char **,size_t *);
 YanSemanticResult __real_yan_semantic_llama_stop(void *);
 void *__real_calloc(size_t,size_t);
 ssize_t __real_write(int,const void *,size_t);
@@ -132,6 +140,27 @@ static int requested_frame(void)
     }
     if (getenv("YAN_MCP_TEST_WORKER_BAD_DOMAIN")) return FRAME_BAD_DOMAIN;
     return FRAME_NONE;
+}
+/* 0045 R2 graph hold: test-only, and only inside the probe's worker child.
+ * `options->cancel` is the flag the worker itself was given, so waiting on it
+ * keeps the hold honest -- a cancelled request leaves through the flag the
+ * production code observes, not only through the parent's SIGTERM. */
+YanKgResult __wrap_yan_kg_query_json(const YanKgQueryOptions *options,char **payload,
+                                     size_t *length)
+{
+    if (getpid()!=parent_pid) {
+        const char *hold=getenv("YAN_MCP_TEST_GRAPH_HOLD");
+        if (hold) {
+            observer_append("graph-hold %ld\n",(long)getpid());
+            struct timespec pause={0,5*1000*1000};
+            for (unsigned i=0;i<3000;++i) {
+                if (access(hold,F_OK)==0) break;
+                if (options && options->cancel && *options->cancel) break;
+                (void)nanosleep(&pause,NULL);
+            }
+        }
+    }
+    return __real_yan_kg_query_json(options,payload,length);
 }
 static bool raw_write(int fd,const void *p,size_t n)
 {

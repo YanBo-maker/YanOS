@@ -15,8 +15,12 @@ typedef struct {
  * invalid value (tests/test_mcp_protocol.c "header.domain=2" must be refused
  * and tests/mcp_fault_hooks.c injects domain=2 as FRAME_BAD_DOMAIN), so reusing
  * 2 would silently disable both guards. */
+/* 0045 R2 adds a graph domain as 4, deliberately not 2: domain 2 remains the
+ * committed "invalid value" used by the worker-frame tests and the fault hooks,
+ * so reusing it would silently disable both guards. The graph domain carries
+ * the 0044 YanKgResult vocabulary, mapped explicitly in its own branch. */
 typedef enum { YAN_MCP_DOMAIN_SEMANTIC = 0, YAN_MCP_DOMAIN_BLOCK = 1,
-               YAN_MCP_DOMAIN_META = 3 } YanMcpDomain;
+               YAN_MCP_DOMAIN_META = 3, YAN_MCP_DOMAIN_GRAPH = 4 } YanMcpDomain;
 typedef struct { uint32_t domain,result,length; } YanMcpWorkerHeader;
 typedef struct { YanMcpDomain domain; uint32_t result; } YanMcpWorkerResult;
 YanMcpWorkerResult yan_mcp_execute(const YanMcpOptions *,const YanMcpRequest *,

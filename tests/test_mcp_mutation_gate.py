@@ -122,6 +122,23 @@ class Gate(unittest.TestCase):
             self.assertEqual(1,invoke().returncode)
             dynamic.write_text('placeholder')
             link.write_text(saved_link)
+            # 0045 R2: the graph module and the shared query service are now
+            # compiled into every variant that builds the protocol/worker, and
+            # their three archives are linked. Each one must hard-fail here
+            # before any external-tool 77, otherwise a missing input would look
+            # like a skip instead of a broken harness.
+            for name in ('tools/mcp_graph.c', 'tools/mcp_graph.h',
+                         'host/knowledge_graph_query.c',
+                         'host/knowledge_graph_query.h',
+                         'host/knowledge_graph.c', 'host/knowledge_graph.h'):
+                path=root/name; saved=path.read_text(); path.unlink()
+                self.assertEqual(1,invoke().returncode,name)
+                path.write_text(saved)
+            for name in ('libyan_mcp_graph.a', 'libyan_knowledge_graph_query.a',
+                         'libyan_knowledge_graph.a'):
+                path=build/name; saved=path.read_text(); path.unlink()
+                self.assertEqual(1,invoke().returncode,name)
+                path.write_text(saved)
             # Missing new direct-compile test source is a repository hard fail.
             test=root/'tests/test_mcp_block_worker.c'; saved=test.read_text(); test.unlink()
             self.assertEqual(1,invoke().returncode)
