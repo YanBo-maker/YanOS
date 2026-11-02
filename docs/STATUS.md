@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-0043 性能验收归并已随[PR #189](https://github.com/YanBo-maker/YanOS/pull/189)合入main（`148c71f`）：默认统一首轮矩阵与4095独立复轮，生产建盘、原预算和完整证据保持。独立dsh、总审核及精确提交远端验收已完成；明细见[0043 VERIFY](specs/0043-performance-validation-dedup.md#verify-执行记录)与阶段PR。前端保持预留。
+0044概念与命题图已完成本地实现与回归：显式概念、类型化关系和具名块原文可经独立Host C接口与JSON命令读取。审核修补及验收结论见[0044 VERIFY](specs/0044-evidence-knowledge-graph.md#verify-执行记录)；未发布、未运行本阶段远端CI、未合入main。前端和新增MCP工具不在本阶段范围。
 
 ## 已交付能力
 
@@ -83,7 +83,7 @@
 
 - 写工具文档核对只覆盖 `mcp-write-tools.md` 的两个工具参考段；Linux 的 `mcp_note` 比较实际工具列表，纯 Python 的 `mcp_write_docs` 在配置找到 Python 时注册，Windows 也运行。README、STATUS 与其余用法段落仍需独立文档审核。
 
-- MCP服务及语义工具的运行平台为Linux/WSL。Windows原生构建不提供 `yan_mcp`，不运行 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk`；它运行的 `mcp_write_docs` 是纯Python检查器自测，不构成MCP服务运行验收。此边界沿用[0035](specs/0035-agent-writable-knowledge.md)，对应[Issue #57](https://github.com/YanBo-maker/YanOS/issues/57)的“明确Linux覆盖”选项；Windows原生支持仍需独立规格与实现。
+- MCP服务及语义工具的运行平台为Linux/WSL。`yan_graph`的JSON入口也仅在Linux/WSL构建；Windows原生只验证图核心，不提供该命令。Windows原生构建不提供 `yan_mcp`，不运行 `mcp_note`、`mcp_note_tool`、`mcp_stdio`、`mcp_sdk`；它运行的 `mcp_write_docs` 是纯Python检查器自测，不构成MCP服务运行验收。此边界沿用[0035](specs/0035-agent-writable-knowledge.md)，对应[Issue #57](https://github.com/YanBo-maker/YanOS/issues/57)的“明确Linux覆盖”选项；Windows原生支持仍需独立规格与实现。
 
 - Python可用时，默认 CTest 的 `docs_structure` 与控制用例检查[0042](specs/0042-continuous-doc-invariants.md)两项文档结构不变量；只测字节和数据行数，不代替链接、状态或语义审核。
 - CI 矩阵与失败条件见 `.github/workflows/build.yml`：ubuntu-22.04 Debug+ASan、ubuntu-22.04 Release 安装 `gcc-riscv64-linux-gnu` 并打开 `YAN_BUILD_TOOLS`；工具链缺失、Guest 测试未注册、或 CTest 汇总列出 `(Skipped)` 测试时 Linux 任务失败。windows-2022 Debug 不装该工具链，也不跑 Guest 测试。

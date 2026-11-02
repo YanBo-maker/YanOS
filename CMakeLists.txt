@@ -176,6 +176,16 @@ target_compile_options(yan_semantic_text PRIVATE ${YAN_WARNINGS})
 add_library(yan_semantic_corpus STATIC host/semantic_corpus.c)
 target_link_libraries(yan_semantic_corpus PUBLIC yan_semantic_text yan_note_format)
 target_compile_options(yan_semantic_corpus PRIVATE ${YAN_WARNINGS})
+# 0044 R1: the portable knowledge-graph core. It borrows the 0029/0033 read
+# source and reuses the pure 0032 block/text and 0027 header primitives, so the
+# library needs no YanFS, POSIX, JSON, model or console dependency and builds on
+# both Linux and Windows.
+add_library(yan_knowledge_graph STATIC host/knowledge_graph.c)
+target_include_directories(yan_knowledge_graph PUBLIC host)
+target_link_libraries(yan_knowledge_graph PUBLIC yan_blocks_format
+                          yan_semantic_text)
+target_compile_options(yan_knowledge_graph PRIVATE ${YAN_WARNINGS})
+
 add_library(yan_semantic_core STATIC host/semantic.c)
 target_link_libraries(yan_semantic_core PUBLIC yan_semantic_corpus)
 if(UNIX)
@@ -211,6 +221,13 @@ if(YAN_BUILD_TOOLS)
         add_executable(yan_migrate tools/yan_migrate.c)
         target_link_libraries(yan_migrate PRIVATE yan_image_migrate)
         target_compile_options(yan_migrate PRIVATE ${YAN_WARNINGS})
+        # 0044 R2: the read-only knowledge-graph command. It borrows the
+        # existing image-only adapter and source digest, so it needs no semantic
+        # model, runner, yyjson or CURL dependency.
+        add_executable(yan_graph tools/yan_graph.c)
+        target_link_libraries(yan_graph PRIVATE yan_knowledge_graph
+                              yan_semantic_posix)
+        target_compile_options(yan_graph PRIVATE ${YAN_WARNINGS})
     endif()
     add_executable(yan_run tools/yan_run.c tools/host_file.c tools/host_terminal.c
                             tools/host_block.c tools/host_disk.c)
@@ -375,6 +392,15 @@ if(BUILD_TESTING)
     add_test(NAME semantic_digest_alloc COMMAND test_semantic_digest_alloc)
     set_tests_properties(semantic_digest_alloc PROPERTIES TIMEOUT 30
                         LABELS "0036-R4-AC4;0036-R6-AC1")
+
+    # 0044 R1: portable core suite over an injected in-memory source. It runs on
+    # every platform because the graph core has no POSIX or YanFS dependency.
+    add_executable(test_knowledge_graph tests/test_knowledge_graph.c)
+    target_link_libraries(test_knowledge_graph PRIVATE yan_knowledge_graph
+                          unity::framework)
+    target_compile_options(test_knowledge_graph PRIVATE ${YAN_WARNINGS})
+    add_test(NAME knowledge_graph COMMAND test_knowledge_graph)
+    set_tests_properties(knowledge_graph PROPERTIES TIMEOUT 120)
 
     add_executable(test_semantic tests/test_semantic.c)
     target_link_libraries(test_semantic PRIVATE yan_semantic_core unity::framework)
@@ -621,12 +647,60 @@ if(BUILD_TESTING)
                 SKIP_RETURN_CODE 77 LABELS "0035-R5-AC3")
         endif()
 
+        # 0044 R1 allocation-failure proof. It links the real graph core and
+        # fails one allocation per rebuild through --wrap, so the production
+        # binary keeps no fault switch. Linux-only because it uses the linker's
+        # --wrap; the portable core suite stays platform-independent.
+        if(TARGET yan_knowledge_graph)
+            add_executable(test_knowledge_graph_alloc
+                           tests/test_knowledge_graph_alloc.c)
+            target_link_libraries(test_knowledge_graph_alloc
+                                  PRIVATE yan_knowledge_graph unity::framework)
+            target_compile_options(test_knowledge_graph_alloc
+                                   PRIVATE ${YAN_WARNINGS})
+            target_link_options(test_knowledge_graph_alloc PRIVATE
+                                -Wl,--wrap=malloc -Wl,--wrap=calloc)
+            add_test(NAME knowledge_graph_alloc
+                     COMMAND test_knowledge_graph_alloc)
+            set_tests_properties(knowledge_graph_alloc PROPERTIES
+                                 TIMEOUT 120 LABELS "0044-R1-AC1")
+        endif()
+
         # 0033 Task B: focused native query/paging suite and independent oracle.
         add_executable(test_block_query tests/test_block_query.c)
         target_link_libraries(test_block_query PRIVATE yan_block_query unity::framework)
         target_compile_options(test_block_query PRIVATE ${YAN_WARNINGS})
         add_test(NAME block_query COMMAND test_block_query)
         set_tests_properties(block_query PROPERTIES TIMEOUT 60)
+
+        # 0044 R2 test-only fault probe. It compiles tests/yan_graph_fault.c and
+        # wraps the REAL tools/yan_graph.c, so it lives here rather than in the
+        # production tool block: BUILD_TESTING=OFF must not build a test source.
+        # The production binary keeps no fault switch.
+        if(TARGET yan_graph)
+            add_executable(yan_graph_fault_probe tools/yan_graph.c
+                           tests/yan_graph_fault.c)
+            target_link_libraries(yan_graph_fault_probe PRIVATE
+                                  yan_knowledge_graph yan_semantic_posix)
+            target_link_options(yan_graph_fault_probe PRIVATE
+                                -Wl,--wrap=yan_semantic_source_digest
+                                -Wl,--wrap=yan_semantic_posix_cleanup)
+            target_compile_options(yan_graph_fault_probe PRIVATE ${YAN_WARNINGS})
+        endif()
+
+        # 0044 R2: the real command over independently built YanFS images. The
+        # expected graph, provenance ranges and source digest are computed by
+        # the Python file itself, so this is not a comparison with the tool's own
+        # output.
+        if(TARGET yan_graph AND TARGET yan_graph_fault_probe)
+            add_test(NAME knowledge_graph_cli COMMAND "${Python3_EXECUTABLE}" -B
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/yan_graph_checks.py"
+                --tool $<TARGET_FILE:yan_graph>
+                --fault $<TARGET_FILE:yan_graph_fault_probe>
+                --source "${CMAKE_CURRENT_SOURCE_DIR}")
+            set_tests_properties(knowledge_graph_cli PROPERTIES TIMEOUT 300
+                LABELS "0044-R1;0044-R2")
+        endif()
 
         add_executable(block_query_probe tests/block_query_probe.c)
         target_link_libraries(block_query_probe PRIVATE yan_block_query)

@@ -44,3 +44,4 @@
 | [0041](0041-note-meta-mcp-tool.md) | 笔记元数据的 MCP 只读工具 | Approved | 无整份替代；扩展 0033/0035 的工具集合与启动开关面 | 无 |
 | [0042](0042-continuous-doc-invariants.md) | 持续文档结构检查 | Implemented | 承接0034的两项文档不变量；历史阶段边界保留 | 无 |
 | [0043](0043-performance-validation-dedup.md) | 归并性能验收执行 | Implemented | 承接0036-R8和0040-R4/R5的默认执行方式 | 无 |
+| [0044](0044-evidence-knowledge-graph.md) | 有原文依据的概念与命题图 | Approved | 无；扩展0032正文解释 | 无 |
